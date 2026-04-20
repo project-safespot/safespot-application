@@ -271,8 +271,7 @@ Redis 갱신은 async+worker 영역(SQS + Lambda)이 담당한다. Normalizer Po
 | 이벤트 유형 | SQS 큐 이름 (잠정) |
 | --- | --- |
 | 재난 알림 / 상세 | `safespot-dev-async-worker-sqs-disaster-cache` |
-| 날씨 예보 | `safespot-dev-async-worker-sqs-weather-cache` |
-| 대기질 | `safespot-dev-async-worker-sqs-air-cache` |
+| 기상 (날씨 + 대기질) | `safespot-dev-async-worker-sqs-environment-cache` |
 
 ### 6.3 이벤트 페이로드
 
@@ -288,7 +287,7 @@ REST API 명세서의 이벤트 envelope 형식을 동일하게 적용한다.
   "version": 1,
   "producer": "external-ingestion",
   "traceId": "uuid-v4",
-  "idempotencyKey": "alert:{alertId}:CACHE_REFRESH:v1",
+  "idempotencyKey": "alert:{alertId}:CACHE_REFRESH",
   "payload": {
     "alertId": 55,
     "region": "서울특별시",
@@ -307,8 +306,9 @@ REST API 명세서의 이벤트 envelope 형식을 동일하게 적용한다.
   "version": 1,
   "producer": "external-ingestion",
   "traceId": "uuid-v4",
-  "idempotencyKey": "weather:{nx}:{ny}:CACHE_REFRESH:v1",
+  "idempotencyKey": "env:weather:{nx}:{ny}:CACHE_REFRESH",
   "payload": {
+    "type": "WEATHER",
     "nx": 60,
     "ny": 127
   }
@@ -325,8 +325,9 @@ REST API 명세서의 이벤트 envelope 형식을 동일하게 적용한다.
   "version": 1,
   "producer": "external-ingestion",
   "traceId": "uuid-v4",
-  "idempotencyKey": "air:{stationName}:CACHE_REFRESH:v1",
+  "idempotencyKey": "env:air:{stationName}:CACHE_REFRESH",
   "payload": {
+    "type": "AIR_QUALITY",
     "stationName": "종로구"
   }
 }
