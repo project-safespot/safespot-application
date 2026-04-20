@@ -1,13 +1,5 @@
 spring:
   application:
     name: external-ingestion
-  datasource:
-    url: jdbc:h2:mem:externalingestiondb
-    driver-class-name: org.h2.Driver
-  jpa:
-    hibernate:
-      ddl-auto: create-drop
-    show-sql: false
-
-server:
-  port: 8082
+  profiles:
+    active: local
