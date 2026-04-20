@@ -1096,7 +1096,7 @@ Authorization: Bearer {accessToken}
   "version": 1,
   "producer": "api-core",
   "traceId": "uuid-v4",
-  "idempotencyKey": "entry:301:ENTERED:v1",
+  "idempotencyKey": "entry:301:ENTERED",
   "payload": {}
 }
 ```
@@ -1126,7 +1126,7 @@ Authorization: Bearer {accessToken}
   "version": 1,
   "producer": "api-core",
   "traceId": "uuid-v4",
-  "idempotencyKey": "entry:301:ENTERED:v1",
+  "idempotencyKey": "entry:301:ENTERED",
   "payload": {
     "entryId": 301,
     "shelterId": 101,
@@ -1149,7 +1149,7 @@ Authorization: Bearer {accessToken}
   "version": 1,
   "producer": "api-core",
   "traceId": "uuid-v4",
-  "idempotencyKey": "entry:301:EXITED:v1",
+  "idempotencyKey": "entry:301:EXITED",
   "payload": {
     "entryId": 301,
     "shelterId": 101,
