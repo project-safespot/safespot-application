@@ -1,14 +1,14 @@
 * @project-safespot/team-reviewers
 
-/services/api-core/ @project-safespot/team-app
-/services/api-public-read/ @project-safespot/team-app
-/services/external-ingestion/ @project-safespot/team-app @project-safespot/team-async-worker
-/services/async-worker/ @project-safespot/team-async-worker
+/services/api-core/ @project-safespot/application
+/services/api-public-read/ @project-safespot/application
+/services/external-ingestion/ @project-safespot/application
+/services/async-worker/ @project-safespot/application
 
-/packages/event-schema/ @project-safespot/team-app @project-safespot/team-async-worker
-/packages/common-redis-keys/ @project-safespot/team-app @project-safespot/team-async-worker
+/packages/event-schema/ @project-safespot/application 
+/packages/common-redis-keys/ @project-safespot/application
 
-/deploy/k8s/ @project-safespot/team-app @project-safespot/team-reviewers
-/deploy/local/ @project-safespot/team-app
+/deploy/k8s/ @project-safespot/application @project-safespot/team-reviewers
+/deploy/local/ @project-safespot/application
 
 /docs/ @project-safespot/team-reviewers
