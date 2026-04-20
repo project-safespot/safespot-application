@@ -1,0 +1,7 @@
+rootProject.name = 'safespot-application'
+
+include 'common'
+
+include 'services:api-core'
+include 'services:api-public-read'
+include 'services:external-ingestion'
