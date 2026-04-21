@@ -85,8 +85,6 @@ class DisasterAlertReadServiceTest {
 
     @Test
     void findLatest_notFound_throwsApiException() {
-        when(redisReadCache.get(any(), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
         when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시"))
@@ -94,25 +92,59 @@ class DisasterAlertReadServiceTest {
     }
 
     @Test
-    void findLatest_found_returnsDto() {
-        when(redisReadCache.get(any(), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
-
-        DisasterAlert alert = mock(DisasterAlert.class);
-        when(alert.getAlertId()).thenReturn(55L);
-        when(alert.getDisasterType()).thenReturn("EARTHQUAKE");
-        when(alert.getRegion()).thenReturn("서울특별시");
-        when(alert.getLevel()).thenReturn("주의");
-        when(alert.getMessage()).thenReturn("지진 감지");
-        when(alert.getIssuedAt()).thenReturn(OffsetDateTime.now());
-        when(alert.getExpiredAt()).thenReturn(null);
-        when(alert.getDetail()).thenReturn(null);
+    void findLatest_cacheHit_returnsFromCache() {
+        DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
         when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.of(alert));
-        when(suppressWindowService.tryPublish(any())).thenReturn(false);
+
+        DisasterLatestDto cached = new DisasterLatestDto(55L, "EARTHQUAKE", "서울특별시", "주의",
+                "지진 감지", "2026-04-14T08:55:00+09:00", null, null);
+        when(redisReadCache.get(eq("disaster:detail:55"), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(cached, null));
 
         DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");
 
         assertThat(result.alertId()).isEqualTo(55L);
-        assertThat(result.disasterType()).isEqualTo("EARTHQUAKE");
+        verify(suppressWindowService, never()).tryPublish(any());
+    }
+
+    @Test
+    void findLatest_cacheMiss_fallsBackToRdsAndEmitsEvent() {
+        DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
+        when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.of(alert));
+        when(redisReadCache.get(eq("disaster:detail:55"), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+        when(suppressWindowService.tryPublish("disaster:detail:55")).thenReturn(true);
+
+        DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");
+
+        assertThat(result.alertId()).isEqualTo(55L);
+        verify(redisReadCache).recordFallback(eq("/disasters/{disasterType}/latest"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
+        verify(cacheRegenerationPublisher).publish("disaster:detail:55");
+    }
+
+    @Test
+    void findLatest_suppressWindowPreventsDoublePublish() {
+        DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
+        when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.of(alert));
+        when(redisReadCache.get(eq("disaster:detail:55"), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+        when(suppressWindowService.tryPublish("disaster:detail:55")).thenReturn(false);
+
+        disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");
+
+        verify(cacheRegenerationPublisher, never()).publish(any());
+    }
+
+    private DisasterAlert stubAlert(long alertId, String disasterType) {
+        DisasterAlert alert = mock(DisasterAlert.class);
+        when(alert.getAlertId()).thenReturn(alertId);
+        lenient().when(alert.getDisasterType()).thenReturn(disasterType);
+        lenient().when(alert.getRegion()).thenReturn("서울특별시");
+        lenient().when(alert.getLevel()).thenReturn("주의");
+        lenient().when(alert.getMessage()).thenReturn("지진 감지");
+        lenient().when(alert.getIssuedAt()).thenReturn(OffsetDateTime.now());
+        lenient().when(alert.getExpiredAt()).thenReturn(null);
+        lenient().when(alert.getDetail()).thenReturn(null);
+        return alert;
     }
 }

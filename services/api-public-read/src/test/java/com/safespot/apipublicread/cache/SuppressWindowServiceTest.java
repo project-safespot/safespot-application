@@ -42,4 +42,26 @@ class SuppressWindowServiceTest {
         suppressWindowService.tryPublish("shelter:status:1");
         assertThat(suppressWindowService.tryPublish("shelter:status:1")).isFalse();
     }
+
+    @Test
+    void tryPublish_concurrent_onlyOneSucceeds() throws InterruptedException {
+        int threads = 20;
+        java.util.concurrent.atomic.AtomicInteger successCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(threads);
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
+
+        for (int i = 0; i < threads; i++) {
+            executor.submit(() -> {
+                if (suppressWindowService.tryPublish("shelter:status:concurrent")) {
+                    successCount.incrementAndGet();
+                }
+                latch.countDown();
+            });
+        }
+
+        latch.await();
+        executor.shutdown();
+
+        assertThat(successCount.get()).isEqualTo(1);
+    }
 }

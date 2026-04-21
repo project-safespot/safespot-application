@@ -36,7 +36,7 @@ public class EnvironmentReadService {
             return findWeatherByGrid(region, nx, ny);
         }
         if (region != null) {
-            return null;
+            return findWeatherByRegion(region);
         }
         throw new ApiException(ErrorCode.MISSING_REQUIRED_FIELD, "region, nx, ny 중 최소 1개는 필요합니다.");
     }
@@ -51,6 +51,31 @@ public class EnvironmentReadService {
         redisReadCache.recordDbFallbackQuery(ENDPOINT_WEATHER);
 
         WeatherLog log = weatherLogRepository.findLatestByNxAndNy(nx, ny).orElse(null);
+        if (log == null) return null;
+
+        WeatherAlertDto dto = new WeatherAlertDto(
+                region,
+                log.getNx(),
+                log.getNy(),
+                log.getTmp() != null ? log.getTmp().doubleValue() : null,
+                buildWeatherCondition(log),
+                log.getForecastDt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+        );
+
+        redisReadCache.set(key, dto, WEATHER_TTL);
+        return dto;
+    }
+
+    private WeatherAlertDto findWeatherByRegion(String region) {
+        String key = "env:weather:region:" + region;
+        RedisReadCache.CacheResult<WeatherAlertDto> cached = redisReadCache.get(key, new TypeReference<>() {});
+
+        if (cached.isHit()) return cached.value();
+
+        redisReadCache.recordFallback(ENDPOINT_WEATHER, cached.fallbackReason());
+        redisReadCache.recordDbFallbackQuery(ENDPOINT_WEATHER);
+
+        WeatherLog log = weatherLogRepository.findLatest().orElse(null);
         if (log == null) return null;
 
         WeatherAlertDto dto = new WeatherAlertDto(

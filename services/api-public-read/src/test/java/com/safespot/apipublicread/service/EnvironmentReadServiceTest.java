@@ -78,6 +78,52 @@ class EnvironmentReadServiceTest {
     }
 
     @Test
+    void findWeather_regionOnly_cacheHit_returnsFromCache() {
+        WeatherAlertDto cached = new WeatherAlertDto("서울특별시", 60, 127, 18.5, "맑음", "2026-04-15T15:00:00+09:00");
+        when(redisReadCache.get(eq("env:weather:region:서울특별시"), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(cached, null));
+
+        WeatherAlertDto result = environmentReadService.findWeather("서울특별시", null, null);
+
+        assertThat(result.region()).isEqualTo("서울특별시");
+        assertThat(result.temperature()).isEqualTo(18.5);
+        verify(weatherLogRepository, never()).findLatest();
+    }
+
+    @Test
+    void findWeather_regionOnly_cacheMiss_fallsBackAndWritesCache() {
+        when(redisReadCache.get(eq("env:weather:region:서울특별시"), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+
+        WeatherLog log = mock(WeatherLog.class);
+        when(log.getNx()).thenReturn(60);
+        when(log.getNy()).thenReturn(127);
+        when(log.getTmp()).thenReturn(BigDecimal.valueOf(20.0));
+        when(log.getSky()).thenReturn("구름조금");
+        when(log.getForecastDt()).thenReturn(OffsetDateTime.now());
+        when(weatherLogRepository.findLatest()).thenReturn(Optional.of(log));
+
+        WeatherAlertDto result = environmentReadService.findWeather("서울특별시", null, null);
+
+        assertThat(result).isNotNull();
+        assertThat(result.region()).isEqualTo("서울특별시");
+        assertThat(result.temperature()).isEqualTo(20.0);
+        verify(redisReadCache).recordFallback(eq("/weather-alerts"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
+        verify(redisReadCache).set(eq("env:weather:region:서울특별시"), any(), any());
+    }
+
+    @Test
+    void findWeather_regionOnly_noData_returnsNull() {
+        when(redisReadCache.get(eq("env:weather:region:서울특별시"), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+        when(weatherLogRepository.findLatest()).thenReturn(Optional.empty());
+
+        WeatherAlertDto result = environmentReadService.findWeather("서울특별시", null, null);
+
+        assertThat(result).isNull();
+    }
+
+    @Test
     void findWeather_allNull_throwsMissingField() {
         assertThatThrownBy(() -> environmentReadService.findWeather(null, null, null))
                 .isInstanceOf(ApiException.class);

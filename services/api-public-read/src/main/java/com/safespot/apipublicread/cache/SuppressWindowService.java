@@ -22,8 +22,15 @@ public class SuppressWindowService {
     }
 
     public boolean tryPublish(String key) {
-        if (!shouldPublish(key)) return false;
-        markEmitted(key);
-        return true;
+        long now = System.currentTimeMillis();
+        boolean[] emitted = {false};
+        lastEmitTime.compute(key, (k, last) -> {
+            if (last == null || (now - last) >= SUPPRESS_WINDOW_MS) {
+                emitted[0] = true;
+                return now;
+            }
+            return last;
+        });
+        return emitted[0];
     }
 }

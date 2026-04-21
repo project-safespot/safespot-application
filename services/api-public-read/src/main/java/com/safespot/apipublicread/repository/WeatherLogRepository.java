@@ -16,4 +16,7 @@ public interface WeatherLogRepository extends JpaRepository<WeatherLog, Long> {
             LIMIT 1
             """)
     Optional<WeatherLog> findLatestByNxAndNy(@Param("nx") int nx, @Param("ny") int ny);
+
+    @Query("SELECT w FROM WeatherLog w ORDER BY w.forecastDt DESC LIMIT 1")
+    Optional<WeatherLog> findLatest();
 }
