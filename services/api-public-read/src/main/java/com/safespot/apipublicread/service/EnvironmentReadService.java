@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.format.DateTimeFormatter;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -26,6 +27,34 @@ public class EnvironmentReadService {
     private static final String ENDPOINT_AIR = "/air-quality";
     private static final Duration WEATHER_TTL = Duration.ofMinutes(60);
     private static final Duration AIR_TTL = Duration.ofMinutes(60);
+
+    private static final Map<String, int[]> REGION_TO_GRID = Map.ofEntries(
+            Map.entry("서울특별시", new int[]{60, 127}),
+            Map.entry("서울", new int[]{60, 127}),
+            Map.entry("부산광역시", new int[]{98, 76}),
+            Map.entry("부산", new int[]{98, 76}),
+            Map.entry("인천광역시", new int[]{55, 124}),
+            Map.entry("인천", new int[]{55, 124}),
+            Map.entry("대구광역시", new int[]{89, 90}),
+            Map.entry("대구", new int[]{89, 90}),
+            Map.entry("광주광역시", new int[]{58, 74}),
+            Map.entry("광주", new int[]{58, 74}),
+            Map.entry("대전광역시", new int[]{67, 100}),
+            Map.entry("대전", new int[]{67, 100}),
+            Map.entry("울산광역시", new int[]{102, 84}),
+            Map.entry("울산", new int[]{102, 84}),
+            Map.entry("세종특별자치시", new int[]{66, 103}),
+            Map.entry("경기도", new int[]{60, 120}),
+            Map.entry("강원도", new int[]{73, 134}),
+            Map.entry("충청북도", new int[]{69, 107}),
+            Map.entry("충청남도", new int[]{68, 100}),
+            Map.entry("전라북도", new int[]{63, 89}),
+            Map.entry("전라남도", new int[]{51, 67}),
+            Map.entry("경상북도", new int[]{91, 106}),
+            Map.entry("경상남도", new int[]{91, 77}),
+            Map.entry("제주특별자치도", new int[]{52, 38}),
+            Map.entry("제주", new int[]{52, 38})
+    );
 
     private final WeatherLogRepository weatherLogRepository;
     private final AirQualityLogRepository airQualityLogRepository;
@@ -67,6 +96,9 @@ public class EnvironmentReadService {
     }
 
     private WeatherAlertDto findWeatherByRegion(String region) {
+        int[] grid = REGION_TO_GRID.get(region);
+        if (grid == null) return null;
+
         String key = "env:weather:region:" + region;
         RedisReadCache.CacheResult<WeatherAlertDto> cached = redisReadCache.get(key, new TypeReference<>() {});
 
@@ -75,7 +107,7 @@ public class EnvironmentReadService {
         redisReadCache.recordFallback(ENDPOINT_WEATHER, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_WEATHER);
 
-        WeatherLog log = weatherLogRepository.findLatest().orElse(null);
+        WeatherLog log = weatherLogRepository.findLatestByNxAndNy(grid[0], grid[1]).orElse(null);
         if (log == null) return null;
 
         WeatherAlertDto dto = new WeatherAlertDto(

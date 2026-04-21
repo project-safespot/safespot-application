@@ -45,7 +45,6 @@ logs/
 *.p12
 *.pfx
 
-<<<<<<< HEAD
 ############################
 # Local Spring config only
 ############################
@@ -67,9 +66,9 @@ temp/
 ############################
 coverage/
 jacoco.exec
-=======
-# JARs created by build
-*.jar
 
+############################
+# Build artifacts
+############################
+*.jar
 **/bin/
->>>>>>> 2d08c45 (wip: api-public-read draft (claude interrupted))

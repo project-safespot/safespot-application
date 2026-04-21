@@ -52,22 +52,22 @@ public class DisasterAlertReadService {
     }
 
     public DisasterLatestDto findLatest(String disasterType, String region) {
-        DisasterAlert alert = disasterAlertRepository.findLatest(disasterType, region)
-                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
-
-        String detailKey = "disaster:detail:" + alert.getAlertId();
+        String latestKey = "disaster:latest:" + disasterType + ":" + region;
         RedisReadCache.CacheResult<DisasterLatestDto> cached =
-                redisReadCache.get(detailKey, new TypeReference<>() {});
+                redisReadCache.get(latestKey, new TypeReference<>() {});
 
         if (cached.isHit()) return cached.value();
 
         redisReadCache.recordFallback(ENDPOINT_LATEST, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
 
+        DisasterAlert alert = disasterAlertRepository.findLatest(disasterType, region)
+                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
+
         DisasterLatestDto result = toLatestDto(alert);
 
-        if (suppressWindowService.tryPublish(detailKey)) {
-            cacheRegenerationPublisher.publish(detailKey);
+        if (suppressWindowService.tryPublish(latestKey)) {
+            cacheRegenerationPublisher.publish(latestKey);
         }
 
         return result;

@@ -101,7 +101,7 @@ class EnvironmentReadServiceTest {
         when(log.getTmp()).thenReturn(BigDecimal.valueOf(20.0));
         when(log.getSky()).thenReturn("구름조금");
         when(log.getForecastDt()).thenReturn(OffsetDateTime.now());
-        when(weatherLogRepository.findLatest()).thenReturn(Optional.of(log));
+        when(weatherLogRepository.findLatestByNxAndNy(60, 127)).thenReturn(Optional.of(log));
 
         WeatherAlertDto result = environmentReadService.findWeather("서울특별시", null, null);
 
@@ -116,11 +116,19 @@ class EnvironmentReadServiceTest {
     void findWeather_regionOnly_noData_returnsNull() {
         when(redisReadCache.get(eq("env:weather:region:서울특별시"), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
-        when(weatherLogRepository.findLatest()).thenReturn(Optional.empty());
+        when(weatherLogRepository.findLatestByNxAndNy(60, 127)).thenReturn(Optional.empty());
 
         WeatherAlertDto result = environmentReadService.findWeather("서울특별시", null, null);
 
         assertThat(result).isNull();
+    }
+
+    @Test
+    void findWeather_regionOnly_unknownRegion_returnsNull() {
+        WeatherAlertDto result = environmentReadService.findWeather("알수없는지역", null, null);
+
+        assertThat(result).isNull();
+        verify(weatherLogRepository, never()).findLatestByNxAndNy(anyInt(), anyInt());
     }
 
     @Test
