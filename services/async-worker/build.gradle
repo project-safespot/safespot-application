@@ -1,0 +1,15 @@
+plugins {
+    id 'org.springframework.boot'
+    id 'io.spring.dependency-management'
+}
+
+dependencies {
+    implementation project(':packages:event-schema')
+    implementation project(':packages:common-redis-keys')
+
+    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'io.awspring.cloud:spring-cloud-aws-starter-sqs'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
