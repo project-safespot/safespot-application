@@ -1,254 +1,159 @@
-# async-worker Service Guide
+# SafeSpot Application Repository Guide
 
 ## 1. 목적
 
-이 저장소는 SafeSpot 재난 대피 서비스 애플리케이션 monorepo이다. 본 문서는 **루트 정책 문서 (Global Policy)** 이며: - 저장소 구조 - 서비스 경계 - 공통 규칙 - Git / Worktree 운영 방식 - 문서 Source of Truth 를 정의한다. > 구현 상세 / 도메인 로직 / 코드 규칙은 > 각 서비스 디렉터리의 CLAUDE.md가 우선한다. ---
+이 저장소는 SafeSpot 재난 대피 서비스 애플리케이션 monorepo이다.
 
-- 저장소 내부 구조
-- 워커 책임 범위
-- Redis 캐시 갱신 규칙
-- 이벤트 소비 정책
-- 장애 처리 방식
+본 문서는 **루트 정책 문서 (Global Policy)** 이며:
 
-을 정의한다.
+- 저장소 구조
+- 서비스 경계
+- 공통 규칙
+- Git / Worktree 운영 방식
+- 문서 Source of Truth
 
-> 루트 저장소 정책은 루트 CLAUDE.md가 우선한다.
-> 충돌 발생 시 루트 정책을 따른다.
+를 정의한다.
+
+> 구현 상세 / 도메인 로직 / 코드 규칙은  
+> 각 서비스 디렉터리의 `CLAUDE.md`가 우선한다.
 
 ---
 
 ## 2. 저장소 구조
 
-```
+```text
 safespot-application/
 ├── services/
 │   ├── api-core/
 │   ├── api-public-read/
 │   ├── external-ingestion/
-│   └── async-worker/          # ← 이 서비스의 담당 디렉터리
+│   └── async-worker/
 ├── packages/
 │   ├── event-schema/
 │   ├── common-redis-keys/
 │   └── observability-contract/
 ├── docs/
 ├── deploy/
-└── CLAUDE.md                  # ← 이 문서
+└── CLAUDE.md
 ```
 
 ### 구조 원칙
 
-- `services/async-worker/` → 이 worktree에서 수정 가능한 유일한 서비스 디렉터리
-- `docs/` → Source of Truth. 코드보다 문서가 우선
-- `packages/` → 서비스 간 공유 계약. 단일 서비스 단독 수정 금지
-- `services/` 하위 다른 서비스 → **직접 수정 금지**
+- `services/` → 실행 단위 (deployable workload)
+- `packages/` → 서비스 간 공유 계약 (단일 서비스 종속 금지)
+- `docs/` → Source of Truth
+- `deploy/` → 실행/환경/스크립트
 
 ---
 
-## 3. 워커 책임 범위 (Critical)
+## 3. 서비스 경계 (Critical)
 
-### 3.1 cache-worker
+### 3.1 api-core
 
-소비 이벤트:
-- `EvacuationEntryCreated`
-- `EvacuationEntryExited`
-- `EvacuationEntryUpdated`
-- `ShelterUpdated`
-- `EnvironmentDataCollected`
-
-담당 Redis 키 (SET only):
-
-| Redis 키 | TTL | 설명 |
-|---|---|---|
-| `shelter:status:{shelterId}` | 30초 | 대피소 현재인원·잔여인원·혼잡도 |
-| `env:weather:{nx}:{ny}` | 120분 | 날씨 데이터 |
-| `env:air:{station_name}` | 120분 | 대기질 데이터 |
-| `disaster:active:{region}:{disasterType}` | 3분 | 지역별 활성 재난 목록 |
-| `disaster:detail:{alert_id}` | 10분 | 개별 재난 알림 상세 |
-
-현재인원 계산: RDS의 `ENTERED` 상태 레코드 `COUNT()` 결과를 Redis에 캐싱
+- 인증
+- 관리자 API
+- write 트랜잭션
+- 이벤트 발행
+- Redis 캐시 무효화
 
 ---
 
-### 3.2 readmodel-worker
+### 3.2 api-public-read
 
-소비 이벤트:
-- `DisasterDataCollected`
+- 공개 조회 API
+- Redis 우선 조회
+- RDS fallback 처리
 
-담당 Redis 키 (SET / 조건부 DEL 후 재생성):
+---
 
-| Redis 키 | TTL | 설명 |
-|---|---|---|
-| `disaster:active:{region}` | 2분 | 지역별 활성 재난 목록 |
-| `disaster:alert:list:{region}:{disasterType}` | 5분 | 지역+유형별 전체 알림 목록 |
-| `disaster:detail:{alertId}` | 10분 | 개별 재난 알림 상세 |
+### 3.3 external-ingestion
 
-재구성 방식: 이벤트 수신 시 해당 키 DEL 후 RDS 기반 전체 재조회 → SET
+- 외부 API 수집
+- 데이터 정규화
+- RDS 적재
+- 캐시 갱신 이벤트 발행
+
+---
+
+### 3.4 async-worker
+
+- SQS 기반 이벤트 소비
+- Redis 캐시 갱신
+- 비동기 후처리
 
 ---
 
 ## 4. 데이터 원칙 (중요)
 
-### 4.1 Cache-Aside 패턴 엄수
+### 4.1 Source of Truth
 
-- async-worker는 Redis **SET만** 담당
-- Redis **DEL은 api-core**가 담당 (write 트랜잭션 완료 시점)
-- **Read path는 api-public-read**가 담당
-
-> DEL과 SET을 동일 컴포넌트에 두면 경쟁 조건 발생 → 분리 필수
+- RDS = 공식 데이터
+- Redis = 파생 데이터 (재생성 가능)
 
 ---
 
-### 4.2 Redis 접근 제한
+### 4.2 Read Path
 
-```
-cache-worker    → Redis SET  (허용)
-readmodel-worker → Redis SET / 조건부 DEL (허용)
-external-ingestion Normalizer → Redis 직접 접근 (절대 금지)
+```text
+Client
+→ api-public-read
+→ Redis (HIT)
+→ RDS fallback (MISS or 장애)
 ```
 
-external-ingestion은 SQS 이벤트 발행만 수행. Redis 접근 없음.
+- Redis 장애는 코드 레벨 fallback으로 해결
+- SQS는 read path에 사용하지 않는다
 
 ---
 
-### 4.3 Read Path 개입 금지
+### 4.3 Write Path
 
-```
-Read path: Client → api-public-read → Redis → RDS fallback
-```
-
-- async-worker는 Read path에 **절대 개입하지 않는다**
-- SQS를 Read path에 삽입하는 구조 금지
-- Redis DOWN 시 RDS 동기 fallback은 **api-public-read**가 처리
-
----
-
-## 5. SQS 큐 구조
-
-| 큐 이름 | 발행 주체 | 소비 워커 |
-|---|---|---|
-| `evacuation-events` | api-core | cache-worker |
-| `disaster-events` | external-ingestion Normalizer | readmodel-worker |
-| `environment-events` | external-ingestion Normalizer | cache-worker |
-| `dlq-evacuation-events` | SQS (재시도 초과) | — (ops 모니터링) |
-| `dlq-disaster-events` | SQS (재시도 초과) | — (ops 모니터링) |
-| `dlq-environment-events` | SQS (재시도 초과) | — (ops 모니터링) |
-
-DLQ maxReceiveCount: **3회**
-
----
-
-## 6. 이벤트 소비 정책
-
-### 6.1 멱등성
-
-- SQS at-least-once 특성상 중복 수신 가능
-- 캐시 키 overwrite는 안전 → **no-op 없이 매번 SET**
-- 이벤트별 중복 소비 기준: `entryId + eventType` 복합키
-
-### 6.2 재시도 정책
-
-- SQS 기반 워커: **DLQ 적용** (maxReceiveCount=3)
-- Scheduler 기반 워커: **내부 재시도 3회 고정** + CloudWatch 로깅
-  - 3회 연속 실패 시 CloudWatch 알람 트리거
-
-### 6.3 실패 처리 경계
-
-- 이벤트 소비 실패 → 재시도 → DLQ 이동 : **async-worker 책임**
-- DLQ 이후 분석 및 복구 : **ops 영역 협력**
-- Redis 캐시 재생성 실패 → DLQ 이동까지만 담당
-- Read path 캐시 복구 (Cache-Aside fallback) : **api-public-read 책임**
-
----
-
-## 7. 문서 Source of Truth
-
-다음 문서가 구현 기준이다. **코드가 문서와 충돌 시 코드를 수정한다.**
-
-| 문서 경로 | 내용 |
-|---|---|
-| `docs/event/event-envelope.md` | 공통 이벤트 Envelope 스키마 |
-| `docs/event/ingestion-refresh-event.md` | 수집 완료 이벤트 계약 |
-| `docs/redis-key/redis-key.md` | Redis 키 명세 |
-| `docs/redis-key/cache-ttl.md` | TTL 정책 |
-| `docs/monitoring/monitoring.md` | CloudWatch 알람 및 메트릭 기준 |
-
----
-
-## 8. Terraform 모듈 규칙
-
-### 8.1 모듈 경계
-
-- `modules/messaging/sqs/` : SQS 큐 + DLQ + event source mapping 정의
-- `modules/application/lambda-worker/` : Lambda 함수 + IAM role + CloudWatch 로그 그룹 정의
-- `versions.tf` : **루트에만 위치** (모듈 내 중복 선언 금지)
-
-### 8.2 태깅 규칙
-
-```hcl
-tags = {
-  domain = "application"
-  service = "async-worker"
-}
+```text
+api-core
+→ RDS commit (sync)
+→ 이벤트 발행
+→ async-worker
+→ Redis 갱신
 ```
 
-### 8.3 cross-module 참조
+---
 
-- VPC ID / private_subnet_ids / lambda_sg_id → `modules/network/vpc` output 수령
-- rds_endpoint / redis_endpoint / db_secret_arn → `modules/data` output 수령
-- 직접 생성 금지
+## 5. Worktree 전략 (필수)
+
+### 5.1 구조
+
+| 경로 | Branch | 담당 |
+|------|--------|------|
+| safespot-worktrees/api-core | worktree/api-core | api-core |
+| safespot-worktrees/api-public-read | worktree/api-public-read | api-public-read |
+| safespot-worktrees/external-ingestion | worktree/external-ingestion | external-ingestion |
+| safespot-worktrees/async-worker | worktree/async-worker | async-worker |
+| safespot-worktrees/review-m | review/codex-cross-review-m | 리뷰 |
+| safespot-worktrees/review-s | review/codex-cross-review-s | 리뷰 |
 
 ---
 
-## 9. 포트 매핑
+### 5.2 원칙
 
-| 출발지 | 목적지 | 포트 | 프로토콜 |
-|---|---|---|---|
-| cache-worker Lambda | RDS | 5432 | TCP |
-| cache-worker Lambda | Redis | 6379 | TCP |
-| readmodel-worker Lambda | Redis | 6379 | TCP |
-| Lambda (공통) | Secrets Manager | 443 | TCP |
-| Lambda (공통) | SQS | 443 | TCP |
-| Lambda (공통) | CloudWatch Logs | 443 | TCP |
+- 모든 worktree branch는 origin/main 기준
+- 서비스 경계 외 수정 금지
+- cross-service 수정은 PR로만 수행
 
 ---
 
-## 10. 금지사항 (강제)
+## 6. Git Workflow (강제 규칙)
 
-### 10.1 Redis 접근 제한 위반
+### 6.1 main 브랜치
 
-- async-worker가 Redis DEL 수행 금지 (readmodel-worker의 조건부 DEL 제외)
-- external-ingestion Normalizer의 Redis 직접 접근 허용 금지
-
-### 10.2 Read Path 개입
-
-- SQS를 Read path에 삽입하는 구조 금지
-- async-worker에서 조회 응답 직접 처리 금지
-
-### 10.3 원본 데이터 저장
-
-- Redis에 원본 데이터 (RDS Source of Truth) 저장 금지
-- RDS bypass 금지
-- 캐시 갱신 없이 RDS 반복 조회 금지
-
-### 10.4 서비스 경계 위반
-
-- api-core / api-public-read / external-ingestion 디렉터리 직접 수정 금지
-- 공통 이벤트 스키마 변경은 `packages/event-schema` 통해 반영
+- 직접 push 금지
+- PR + 리뷰 + CI 통과 후 merge
 
 ---
 
-## 11. 변경 프로세스
+### 6.2 개발 흐름
 
-이벤트 스키마 또는 Redis 키 계약 변경 시:
-
-1. `packages/event-schema` 또는 `packages/common-redis-keys` 수정
-2. 팀 합의 (재영 리뷰)
-3. 영역 확정 계약서 및 모듈 인터페이스 정의서 반영
-4. 코드 반영
-
-Lambda 코드 변경 시:
-```
-worktree/async-worker branch
+```text
+worktree branch
 → 구현
 → PR 생성
 → review worktree 검토
@@ -257,10 +162,96 @@ worktree/async-worker branch
 
 ---
 
-## 12. 핵심 설계 철학
+### 6.3 리뷰 역할
 
-- **Lambda Stateless** : 상태는 Redis(캐시)와 RDS(원본)에만 위치
-- **Cache-Aside 역할 분리** : SET(async-worker) / DEL(api-core) / Read(api-public-read)
-- **SQS at-least-once 대응** : 캐시 overwrite 기반 멱등성
-- **DLQ 격리** : 재시도 한도 초과 메시지를 격리하여 정상 처리 흐름 보호
-- **문서 기반 개발** : spec과 다른 구현 금지, 암묵적 변경 금지
+- review worktree는 코드 수정 금지
+- diff 검토 + 피드백만 수행
+
+---
+
+## 7. packages 사용 규칙
+
+### 7.1 event-schema
+
+- 이벤트 계약 정의
+- 모든 서비스 동일 스키마 사용
+
+---
+
+### 7.2 common-redis-keys
+
+- Redis key naming 표준화
+- 하드코딩 금지
+
+---
+
+### 7.3 observability-contract
+
+- metrics / logging / tracing 규약 정의
+
+---
+
+## 8. 문서 Source of Truth (절대 규칙)
+
+다음 문서가 구현 기준이다:
+
+- API spec → /docs/api/
+- RDS schema → /docs/data/
+- ingestion spec → /docs/ingestion/
+- async_worker spec → /docs/async-worker/
+
+충돌 발생 시:
+
+> 코드 수정 금지 → 문서 먼저 수정
+
+---
+
+## 9. 금지사항 (강제)
+
+### 9.1 서비스 경계 위반
+
+- 다른 서비스 디렉터리 직접 수정 금지
+- 공통 변경은 packages 또는 docs 통해 반영
+
+---
+
+### 9.2 데이터 원칙 위반
+
+- Redis에 원본 데이터 저장 금지
+- RDS bypass 금지
+- 캐시 없이 DB 반복 조회 금지
+
+---
+
+### 9.3 비동기 오용
+
+- Read path에 SQS 사용 금지
+- 동기 응답을 async로 대체 금지
+
+---
+
+### 9.4 문서 무시
+
+- spec과 다른 구현 금지
+- 암묵적 변경 금지
+
+---
+
+## 10. 변경 프로세스
+
+구조 또는 정책 변경 시:
+
+1. docs 수정
+2. 팀 합의
+3. CLAUDE.md 반영
+4. 코드 반영
+
+---
+
+## 11. 핵심 설계 철학
+
+- 서비스 경계 분리
+- RDS 중심 데이터 일관성
+- Redis 기반 조회 최적화
+- 비동기 처리 분리
+- 문서 기반 개발
