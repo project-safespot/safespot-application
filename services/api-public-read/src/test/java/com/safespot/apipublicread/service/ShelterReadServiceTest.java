@@ -42,9 +42,6 @@ class ShelterReadServiceTest {
     @BeforeEach
     void setUp() {
         shelter = mock(Shelter.class);
-    }
-
-    private void stubShelter() {
         lenient().when(shelter.getShelterId()).thenReturn(101L);
         lenient().when(shelter.getName()).thenReturn("서울시민체육관");
         lenient().when(shelter.getShelterType()).thenReturn("민방위대피소");
@@ -53,7 +50,6 @@ class ShelterReadServiceTest {
         lenient().when(shelter.getLatitude()).thenReturn(BigDecimal.valueOf(37.5687));
         lenient().when(shelter.getLongitude()).thenReturn(BigDecimal.valueOf(126.9081));
         lenient().when(shelter.getCapacity()).thenReturn(120);
-        lenient().when(shelter.getShelterStatus()).thenReturn("운영중");
         lenient().when(shelter.getUpdatedAt()).thenReturn(OffsetDateTime.now());
     }
 
@@ -118,7 +114,7 @@ class ShelterReadServiceTest {
     @Test
     void findById_notFound_throwsApiException() {
         when(shelterRepository.findById(999L)).thenReturn(Optional.empty());
-
+        // shelter BeforeEach stubs are lenient for this test case
         assertThatThrownBy(() -> shelterReadService.findById(999L))
                 .isInstanceOf(ApiException.class);
     }
