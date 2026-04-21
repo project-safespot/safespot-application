@@ -8,6 +8,7 @@ import com.safespot.externalingestion.metrics.IngestionMetrics;
 import com.safespot.externalingestion.publisher.CacheEventPublisher;
 import com.safespot.externalingestion.publisher.event.WeatherCacheRefreshEvent;
 import com.safespot.externalingestion.repository.WeatherLogRepository;
+import com.safespot.externalingestion.util.AfterCommit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -91,7 +92,9 @@ public class KmaWeatherNormalizer implements Normalizer {
 
                     String publishKey = nx + ":" + ny;
                     if (!publishedKeys.contains(publishKey)) {
-                        publishCacheEvent(nx, ny, raw.getExecutionLog().getTraceId());
+                        int capturedNx = nx, capturedNy = ny;
+                        String traceId = raw.getExecutionLog().getTraceId();
+                        AfterCommit.run(() -> publishCacheEvent(capturedNx, capturedNy, traceId));
                         publishedKeys.add(publishKey);
                     }
                 } catch (Exception e) {

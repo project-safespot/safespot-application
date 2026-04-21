@@ -16,6 +16,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.Map;
 import java.util.Optional;
@@ -34,12 +37,14 @@ class AbstractIngestionHandlerTest {
     @Mock private ExternalApiRawPayloadRepository rawPayloadRepo;
     @Mock private NormalizationQueue normalizationQueue;
     @Mock private ExternalApiClient externalApiClient;
+    @Mock private PlatformTransactionManager txManager;
 
     private TestHandler handler;
 
     @BeforeEach
     void setUp() {
         IngestionMetrics metrics = new IngestionMetrics(new SimpleMeterRegistry());
+        TransactionTemplate txTemplate = new TransactionTemplate(txManager);
         handler = new TestHandler();
         ReflectionTestUtils.setField(handler, "sourceRepo", sourceRepo);
         ReflectionTestUtils.setField(handler, "executionLogRepo", executionLogRepo);
@@ -48,6 +53,7 @@ class AbstractIngestionHandlerTest {
         ReflectionTestUtils.setField(handler, "externalApiClient", externalApiClient);
         ReflectionTestUtils.setField(handler, "metrics", metrics);
         ReflectionTestUtils.setField(handler, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(handler, "transactionTemplate", txTemplate);
     }
 
     @Test
@@ -87,6 +93,7 @@ class AbstractIngestionHandlerTest {
         ReflectionTestUtils.setField(handler, "externalApiClient", externalApiClient);
         ReflectionTestUtils.setField(handler, "metrics", new IngestionMetrics(new SimpleMeterRegistry()));
         ReflectionTestUtils.setField(handler, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(handler, "transactionTemplate", new TransactionTemplate(txManager));
 
         IngestionResult result = handler.execute();
 

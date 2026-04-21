@@ -8,6 +8,7 @@ import com.safespot.externalingestion.metrics.IngestionMetrics;
 import com.safespot.externalingestion.publisher.CacheEventPublisher;
 import com.safespot.externalingestion.publisher.event.DisasterAlertCacheRefreshEvent;
 import com.safespot.externalingestion.repository.DisasterAlertRepository;
+import com.safespot.externalingestion.util.AfterCommit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -75,12 +76,20 @@ public class ForestryLandslideNormalizer implements Normalizer {
 
                     DisasterAlert saved = disasterAlertRepo.save(alert);
                     metrics.incrementNormalizationSuccess(getSourceCode());
-                    cacheEventPublisher.publish(
-                        new DisasterAlertCacheRefreshEvent(raw.getExecutionLog().getTraceId(),
-                            saved.getAlertId(), saved.getRegion(), saved.getDisasterType()),
-                        disasterQueueUrl
-                    );
-                    metrics.incrementSqsPublish(getSourceCode());
+                    String traceId = raw.getExecutionLog().getTraceId();
+                    AfterCommit.run(() -> {
+                        try {
+                            cacheEventPublisher.publish(
+                                new DisasterAlertCacheRefreshEvent(traceId,
+                                    saved.getAlertId(), saved.getRegion(), saved.getDisasterType()),
+                                disasterQueueUrl
+                            );
+                            metrics.incrementSqsPublish(getSourceCode());
+                        } catch (Exception e) {
+                            metrics.incrementSqsPublishFailure(getSourceCode());
+                            log.error("[FORESTRY_LANDSLIDE] cache event publish failed alertId={}", saved.getAlertId(), e);
+                        }
+                    });
                     succeeded++;
                 } catch (Exception e) {
                     errors.add(e.getMessage());

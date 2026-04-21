@@ -7,6 +7,9 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestClient;
 
 import java.time.Duration;
@@ -22,8 +25,17 @@ public class AppConfig {
 
     @Bean
     public RestClient restClient() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(Duration.ofSeconds(connectTimeoutSeconds));
+        factory.setReadTimeout(Duration.ofSeconds(readTimeoutSeconds));
         return RestClient.builder()
+            .requestFactory(factory)
             .build();
+    }
+
+    @Bean
+    public TransactionTemplate transactionTemplate(PlatformTransactionManager txManager) {
+        return new TransactionTemplate(txManager);
     }
 
     @Bean

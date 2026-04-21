@@ -8,6 +8,7 @@ import com.safespot.externalingestion.metrics.IngestionMetrics;
 import com.safespot.externalingestion.publisher.CacheEventPublisher;
 import com.safespot.externalingestion.publisher.event.AirQualityCacheRefreshEvent;
 import com.safespot.externalingestion.repository.AirQualityLogRepository;
+import com.safespot.externalingestion.util.AfterCommit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -91,7 +92,8 @@ public class AirKoreaNormalizer implements Normalizer {
                     airQualityLogRepo.save(aql);
                     metrics.incrementNormalizationSuccess(getSourceCode());
 
-                    publishCacheEvent(stationName, raw.getExecutionLog().getTraceId());
+                    String traceId = raw.getExecutionLog().getTraceId();
+                    AfterCommit.run(() -> publishCacheEvent(stationName, traceId));
                     succeeded++;
                 } catch (Exception e) {
                     errors.add(e.getMessage());

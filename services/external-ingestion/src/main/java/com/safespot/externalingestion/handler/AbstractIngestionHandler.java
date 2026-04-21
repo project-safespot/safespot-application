@@ -16,13 +16,15 @@ import com.safespot.externalingestion.repository.ExternalApiRawPayloadRepository
 import com.safespot.externalingestion.repository.ExternalApiSourceRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.OffsetDateTime;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -36,6 +38,11 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
     @Autowired protected ExternalApiClient externalApiClient;
     @Autowired protected IngestionMetrics metrics;
     @Autowired protected ObjectMapper objectMapper;
+    @Autowired protected TransactionTemplate transactionTemplate;
+
+    private static final Set<String> SENSITIVE_PARAM_KEYS = Set.of(
+        "servicekey", "key", "apikey", "authorization", "token"
+    );
 
     private final AtomicInteger dailyCallCount = new AtomicInteger(0);
     private volatile java.time.LocalDate countDate = java.time.LocalDate.now();
@@ -50,7 +57,6 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
     }
 
     @Override
-    @Transactional
     public IngestionResult execute() {
         if (!isEnabled()) {
             metrics.incrementSkipped(getSourceCode(), "disabled");
@@ -70,13 +76,17 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
             .orElseThrow(() -> new IllegalStateException("source not found: " + getSourceCode()));
 
         String traceId = UUID.randomUUID().toString();
-        ExternalApiExecutionLog execLog = createExecutionLog(source, traceId);
+
+        // TX 1: create execution log
+        ExternalApiExecutionLog execLog = transactionTemplate.execute(
+            tx -> createExecutionLog(source, traceId));
 
         long fetchStart = System.currentTimeMillis();
         try {
             metrics.incrementApiCall(getSourceCode());
 
             Map<String, String> params = buildRequestParams();
+            // Network call and retry sleep are intentionally outside any DB transaction.
             String responseBody = callWithRetry(source.getBaseUrl(), params, traceId);
             dailyCallCount.incrementAndGet();
 
@@ -84,32 +94,44 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
             metrics.recordApiLatency(getSourceCode(), latency);
 
             String payloadHash = sha256(responseBody);
-            if (rawPayloadRepo.existsByPayloadHash(payloadHash)) {
-                log.debug("[{}] duplicate payload hash={} — skip raw save", getSourceCode(), payloadHash);
-                finishExecutionLog(execLog, ExecutionStatus.SUCCESS, 0, null, null, null);
+
+            // TX 2: duplicate check + raw payload persist + normalization enqueue (atomic)
+            Integer itemCount = transactionTemplate.execute(tx -> {
+                if (rawPayloadRepo.existsByPayloadHash(payloadHash)) {
+                    log.debug("[{}] duplicate payload hash={} — skip raw save", getSourceCode(), payloadHash);
+                    return -1; // sentinel: duplicate
+                }
+                ExternalApiRawPayload raw = saveRawPayload(source, execLog, source.getBaseUrl(), params, responseBody, payloadHash);
+                int count = countItems(responseBody);
+                normalizationQueue.publish(NormalizationMessage.of(
+                    raw.getRawId(), source.getSourceId(), execLog.getExecutionId(), traceId));
+                return count;
+            });
+
+            if (itemCount == null || itemCount == -1) {
+                transactionTemplate.executeWithoutResult(
+                    tx -> finishExecutionLog(execLog, ExecutionStatus.SUCCESS, 0, null, null, null));
                 metrics.recordFetchDuration(getSourceCode(), System.currentTimeMillis() - fetchStart);
                 return IngestionResult.duplicate();
             }
 
-            ExternalApiRawPayload raw = saveRawPayload(source, execLog, source.getBaseUrl(), params, responseBody, payloadHash);
-            int itemCount = countItems(responseBody);
-
-            normalizationQueue.publish(NormalizationMessage.of(
-                raw.getRawId(), source.getSourceId(), execLog.getExecutionId(), traceId));
-
-            finishExecutionLog(execLog, ExecutionStatus.SUCCESS, itemCount, null, null, null);
+            // TX 3: finalize execution log
+            transactionTemplate.executeWithoutResult(
+                tx -> finishExecutionLog(execLog, ExecutionStatus.SUCCESS, itemCount, null, null, null));
             metrics.recordFetchDuration(getSourceCode(), System.currentTimeMillis() - fetchStart);
             log.info("[{}] traceId={} fetched={}", getSourceCode(), traceId, itemCount);
             return IngestionResult.success(itemCount);
 
         } catch (ExternalApiException e) {
             metrics.incrementApiFailure(getSourceCode(), e.getErrorType().name().toLowerCase());
-            finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, e.getErrorType().name(), e.getMessage(), e.getHttpStatus());
+            transactionTemplate.executeWithoutResult(
+                tx -> finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, e.getErrorType().name(), e.getMessage(), e.getHttpStatus()));
             log.error("[{}] traceId={} api error type={} msg={}", getSourceCode(), traceId, e.getErrorType(), e.getMessage());
             return IngestionResult.failed(e.getMessage());
         } catch (Exception e) {
             metrics.incrementSkipped(getSourceCode(), "error");
-            finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, "INTERNAL_ERROR", e.getMessage(), null);
+            transactionTemplate.executeWithoutResult(
+                tx -> finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, "INTERNAL_ERROR", e.getMessage(), null));
             log.error("[{}] traceId={} internal error", getSourceCode(), traceId, e);
             return IngestionResult.failed(e.getMessage());
         }
@@ -145,12 +167,12 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
     protected abstract int countItems(String responseBody);
 
     private ExternalApiExecutionLog createExecutionLog(ExternalApiSource source, String traceId) {
-        ExternalApiExecutionLog log = new ExternalApiExecutionLog();
-        log.setSource(source);
-        log.setExecutionStatus(ExecutionStatus.RUNNING);
-        log.setStartedAt(OffsetDateTime.now());
-        log.setTraceId(traceId);
-        return executionLogRepo.save(log);
+        ExternalApiExecutionLog execLog = new ExternalApiExecutionLog();
+        execLog.setSource(source);
+        execLog.setExecutionStatus(ExecutionStatus.RUNNING);
+        execLog.setStartedAt(OffsetDateTime.now());
+        execLog.setTraceId(traceId);
+        return executionLogRepo.save(execLog);
     }
 
     private void finishExecutionLog(ExternalApiExecutionLog execLog, ExecutionStatus status,
@@ -176,9 +198,16 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
         raw.setCollectedAt(OffsetDateTime.now());
         raw.setRetentionExpiresAt(OffsetDateTime.now().plusDays(90));
         try {
-            raw.setRequestParamsJson(objectMapper.writeValueAsString(params));
+            raw.setRequestParamsJson(objectMapper.writeValueAsString(maskSensitiveParams(params)));
         } catch (Exception ignored) {}
         return rawPayloadRepo.save(raw);
+    }
+
+    private Map<String, String> maskSensitiveParams(Map<String, String> params) {
+        if (params == null) return null;
+        Map<String, String> masked = new HashMap<>(params);
+        masked.replaceAll((k, v) -> SENSITIVE_PARAM_KEYS.contains(k.toLowerCase()) ? "***" : v);
+        return masked;
     }
 
     protected int countItemsInArray(String responseBody, String... path) {
