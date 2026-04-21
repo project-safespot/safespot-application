@@ -3,3 +3,33 @@ spring:
     name: external-ingestion
   profiles:
     active: local
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, prometheus
+  endpoint:
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      service: external-ingestion
+      env: ${SPRING_ENV:dev}
+
+ingestion:
+  sqs:
+    enabled: false
+    normalization-queue-url: ""
+    disaster-cache-queue-url: ""
+    environment-cache-queue-url: ""
+  rate-limit:
+    safety-data-alert: 1000
+    kma-earthquake: 10000
+    kma-weather: 10000
+    air-korea: 500
+    forestry-landslide: 10000
+  http:
+    connect-timeout-seconds: 5
+    read-timeout-seconds: 10
+    max-retries: 3
