@@ -15,8 +15,14 @@ allprojects {
 
 subprojects {
     apply plugin: 'java'
+    apply plugin: 'io.spring.dependency-management'
 
     sourceCompatibility = '21'
     targetCompatibility = '21'
 
+    dependencyManagement {
+        imports {
+            mavenBom "io.awspring.cloud:spring-cloud-aws-dependencies:3.1.1"
+        }
+    }
 }
