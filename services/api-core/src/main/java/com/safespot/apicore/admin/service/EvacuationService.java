@@ -314,7 +314,8 @@ public class EvacuationService {
         try {
             return HealthStatus.valueOf(value);
         } catch (IllegalArgumentException e) {
-            return HealthStatus.기타;
+            throw ApiException.badRequest("VALIDATION_ERROR",
+                    "healthStatus 값이 올바르지 않습니다. 허용값: 정상, 부상, 응급, 기타");
         }
     }
 

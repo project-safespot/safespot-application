@@ -208,4 +208,35 @@ class AdminEvacuationControllerIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"));
     }
+
+    @Test
+    void createEntry_invalidHealthStatus_returns400() throws Exception {
+        Map<String, Object> body = Map.of(
+                "shelterId", shelterId,
+                "name", "홍길동",
+                "healthStatus", "당뇨");
+
+        mockMvc.perform(post("/admin/evacuation-entries")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void createEntry_validHealthStatus_returns201() throws Exception {
+        Map<String, Object> body = Map.of(
+                "shelterId", shelterId,
+                "name", "홍길동",
+                "healthStatus", "응급");
+
+        mockMvc.perform(post("/admin/evacuation-entries")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.entryStatus").value("ENTERED"));
+    }
 }

@@ -160,6 +160,65 @@ class EvacuationServiceTest {
                 .satisfies(e -> assertThat(((ApiException) e).getCode()).isEqualTo("NOT_FOUND"));
     }
 
+    @Test
+    void createEntry_invalidHealthStatus_throws400() {
+        Shelter shelter = shelterWithCapacity(10);
+        when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
+        when(entryRepository.countByShelterIdAndEntryStatus(101L, EntryStatus.ENTERED)).thenReturn(0L);
+
+        CreateEntryRequest req = buildCreateRequest(101L);
+        setField(req, "healthStatus", "당뇨");
+
+        assertThatThrownBy(() -> evacuationService.createEntry(req, 7L, "127.0.0.1"))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> assertThat(((ApiException) e).getCode()).isEqualTo("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void createEntry_validHealthStatus_succeeds() {
+        Shelter shelter = shelterWithCapacity(10);
+        when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
+        when(entryRepository.countByShelterIdAndEntryStatus(101L, EntryStatus.ENTERED)).thenReturn(0L);
+
+        EvacuationEntry savedEntry = EvacuationEntry.builder()
+                .entryId(302L).shelterId(101L).entryStatus(EntryStatus.ENTERED)
+                .enteredAt(java.time.OffsetDateTime.now()).build();
+        when(entryRepository.save(any())).thenReturn(savedEntry);
+        when(entryDetailRepository.save(any())).thenReturn(mock(EntryDetail.class));
+        when(historyRepository.save(any())).thenReturn(mock(EvacuationEventHistory.class));
+        when(auditLogRepository.save(any())).thenReturn(mock(AdminAuditLog.class));
+
+        CreateEntryRequest req = buildCreateRequest(101L);
+        setField(req, "healthStatus", "부상");
+
+        var response = evacuationService.createEntry(req, 7L, "127.0.0.1");
+        assertThat(response.getEntryStatus()).isEqualTo("ENTERED");
+    }
+
+    @Test
+    void updateEntry_invalidHealthStatus_throws400() {
+        EvacuationEntry entry = EvacuationEntry.builder()
+                .entryId(301L).shelterId(101L).entryStatus(EntryStatus.ENTERED)
+                .enteredAt(java.time.OffsetDateTime.now()).build();
+        when(entryRepository.findById(301L)).thenReturn(Optional.of(entry));
+        when(entryDetailRepository.findByEntryId(301L)).thenReturn(Optional.of(
+                com.safespot.apicore.domain.entity.EntryDetail.builder()
+                        .detailId(1L).entryId(301L)
+                        .healthStatus(com.safespot.apicore.domain.enums.HealthStatus.정상)
+                        .specialProtectionFlag(false)
+                        .createdAt(java.time.OffsetDateTime.now())
+                        .updatedAt(java.time.OffsetDateTime.now())
+                        .build()));
+
+        com.safespot.apicore.admin.dto.UpdateEntryRequest req =
+                new com.safespot.apicore.admin.dto.UpdateEntryRequest();
+        setField(req, "healthStatus", "invalid_value");
+
+        assertThatThrownBy(() -> evacuationService.updateEntry(301L, req, 7L, "127.0.0.1"))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> assertThat(((ApiException) e).getCode()).isEqualTo("VALIDATION_ERROR"));
+    }
+
     private void setField(Object obj, String fieldName, Object value) {
         try {
             var field = obj.getClass().getDeclaredField(fieldName);
