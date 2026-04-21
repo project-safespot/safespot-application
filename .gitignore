@@ -1,16 +1,22 @@
 # Gradle
 .gradle/
 build/
+**/build/
 
-# Java
-*.class
-*.jar
-*.war
-
-# IDE
+# IntelliJ / VSCode
 .idea/
-*.iml
+.vscode/
 
-# logs
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
 *.log
-logs/
+
+# Binary / lock / temp
+*.lock
+*.bin
+
+# JARs created by build
+*.jar
