@@ -10,7 +10,10 @@ import org.springframework.data.redis.core.ValueOperations;
 
 import java.time.Duration;
 
+import com.safespot.asyncworker.exception.RedisCacheException;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -42,15 +45,20 @@ class RedisIdempotencyServiceTest {
     }
 
     @Test
-    void SETNX_null_반환시_true_반환() {
+    void SETNX_null_반환시_RedisCacheException_전파() {
         when(valueOps.setIfAbsent(any(), eq("1"), any(Duration.class))).thenReturn(null);
-        assertThat(service.tryAcquire("test-key", Duration.ofMinutes(5))).isTrue();
+
+        assertThatThrownBy(() -> service.tryAcquire("test-key", Duration.ofMinutes(5)))
+            .isInstanceOf(RedisCacheException.class)
+            .hasMessageContaining("null response");
     }
 
     @Test
-    void Redis_장애시_true_반환_처리계속() {
+    void Redis_장애시_RedisCacheException_전파() {
         when(valueOps.setIfAbsent(any(), any(), any(Duration.class)))
             .thenThrow(new RuntimeException("Redis connection refused"));
-        assertThat(service.tryAcquire("test-key", Duration.ofMinutes(5))).isTrue();
+
+        assertThatThrownBy(() -> service.tryAcquire("test-key", Duration.ofMinutes(5)))
+            .isInstanceOf(RedisCacheException.class);
     }
 }

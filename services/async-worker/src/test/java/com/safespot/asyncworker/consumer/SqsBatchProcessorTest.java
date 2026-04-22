@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safespot.asyncworker.dispatcher.EventDispatcher;
 import com.safespot.asyncworker.envelope.EnvelopeParser;
 import com.safespot.asyncworker.exception.EventProcessingException;
+import com.safespot.asyncworker.exception.RedisCacheException;
 import com.safespot.asyncworker.idempotency.IdempotencyService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -86,6 +87,32 @@ class SqsBatchProcessorTest {
 
         assertThat(response.getBatchItemFailures()).hasSize(1);
         verifyNoInteractions(eventDispatcher);
+    }
+
+    @Test
+    void idempotency_Redis_실패시_BatchItemFailure() {
+        when(idempotencyService.tryAcquire(any(), any()))
+            .thenThrow(new RedisCacheException("Idempotency SETNX failed", new RuntimeException()));
+
+        SQSEvent event = buildEvent("msg-001", validEnvelopeBody("EvacuationEntryCreated"), 1);
+        SQSBatchResponse response = processor.process(event);
+
+        assertThat(response.getBatchItemFailures()).hasSize(1);
+        assertThat(response.getBatchItemFailures().get(0).getItemIdentifier()).isEqualTo("msg-001");
+        verifyNoInteractions(eventDispatcher);
+    }
+
+    @Test
+    void Redis_캐시_실패시_BatchItemFailure() {
+        when(idempotencyService.tryAcquire(any(), any())).thenReturn(true);
+        doThrow(new RedisCacheException("Redis SET failed", new RuntimeException()))
+            .when(eventDispatcher).dispatch(any());
+
+        SQSEvent event = buildEvent("msg-001", validEnvelopeBody("EvacuationEntryCreated"), 1);
+        SQSBatchResponse response = processor.process(event);
+
+        assertThat(response.getBatchItemFailures()).hasSize(1);
+        assertThat(response.getBatchItemFailures().get(0).getItemIdentifier()).isEqualTo("msg-001");
     }
 
     @Test

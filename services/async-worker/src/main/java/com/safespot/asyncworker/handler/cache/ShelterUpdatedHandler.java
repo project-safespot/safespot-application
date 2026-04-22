@@ -9,10 +9,12 @@ import com.safespot.asyncworker.payload.ShelterUpdatedPayload;
 import com.safespot.asyncworker.service.shelter.ShelterStatusService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
+@Profile("cache-worker")
 @Slf4j
 @Component
 @RequiredArgsConstructor

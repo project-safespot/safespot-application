@@ -1,5 +1,6 @@
 package com.safespot.asyncworker.service.disaster;
 
+import com.safespot.asyncworker.exception.EventProcessingException;
 import com.safespot.asyncworker.payload.DisasterDataCollectedPayload;
 import com.safespot.asyncworker.redis.DisasterActiveItem;
 import com.safespot.asyncworker.redis.DisasterAlertListItem;
@@ -9,10 +10,12 @@ import com.safespot.asyncworker.repository.DisasterAlertRecord;
 import com.safespot.asyncworker.repository.DisasterAlertRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 
+@Profile("readmodel-worker")
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -22,6 +25,7 @@ public class DisasterReadModelService {
     private final RedisCacheWriter cacheWriter;
 
     public void rebuild(DisasterDataCollectedPayload payload) {
+        validate(payload);
         String region = payload.region();
         String disasterType = payload.collectionType();
 
@@ -35,6 +39,18 @@ public class DisasterReadModelService {
         rebuildDetails(payload.affectedAlertIds());
 
         log.info("Disaster read model rebuilt: region={}, disasterType={}", region, disasterType);
+    }
+
+    private void validate(DisasterDataCollectedPayload payload) {
+        if (payload.region() == null || payload.region().isBlank()) {
+            throw new EventProcessingException("DisasterDataCollected payload missing region");
+        }
+        if (payload.collectionType() == null || payload.collectionType().isBlank()) {
+            throw new EventProcessingException("DisasterDataCollected payload missing collectionType");
+        }
+        if (payload.affectedAlertIds() == null) {
+            throw new EventProcessingException("DisasterDataCollected payload missing affectedAlertIds");
+        }
     }
 
     private void rebuildActiveList(String region) {

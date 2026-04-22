@@ -2,6 +2,8 @@ package com.safespot.asyncworker.redis;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.safespot.asyncworker.exception.EventProcessingException;
+import com.safespot.asyncworker.exception.RedisCacheException;
 import com.safespot.asyncworker.service.shelter.ShelterStatusValue;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -59,9 +61,12 @@ public class RedisCacheWriter {
             String json = objectMapper.writeValueAsString(value);
             redisTemplate.opsForValue().set(key, json, ttl);
         } catch (JsonProcessingException e) {
-            log.warn("Redis SET serialization failed: key={}", key, e);
+            // 직렬화 실패는 재시도해도 해결되지 않으므로 non-retriable로 분류
+            log.error("Redis SET serialization failed: key={}", key, e);
+            throw new EventProcessingException("Redis SET serialization failed: key=" + key, e);
         } catch (Exception e) {
-            log.warn("Redis SET failed: key={}", key, e);
+            log.error("Redis SET failed: key={}", key, e);
+            throw new RedisCacheException("Redis SET failed: key=" + key, e);
         }
     }
 
@@ -69,7 +74,8 @@ public class RedisCacheWriter {
         try {
             redisTemplate.delete(key);
         } catch (Exception e) {
-            log.warn("Redis DEL failed: key={}", key, e);
+            log.error("Redis DEL failed: key={}", key, e);
+            throw new RedisCacheException("Redis DEL failed: key=" + key, e);
         }
     }
 }

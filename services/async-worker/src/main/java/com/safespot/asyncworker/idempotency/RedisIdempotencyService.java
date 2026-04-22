@@ -1,5 +1,6 @@
 package com.safespot.asyncworker.idempotency;
 
+import com.safespot.asyncworker.exception.RedisCacheException;
 import com.safespot.asyncworker.redis.RedisKeyConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,12 +21,18 @@ public class RedisIdempotencyService implements IdempotencyService {
         String redisKey = RedisKeyConstants.idempotency(idempotencyKey);
         try {
             Boolean acquired = redisTemplate.opsForValue().setIfAbsent(redisKey, "1", ttl);
-            // null은 Redis 비정상 응답이므로 처리 계속 진행(중복 처리 허용)
-            return acquired == null || acquired;
+            if (acquired == null) {
+                // null = Redis 비정상 응답 — 멱등성 보장 불가 → 실패 처리
+                log.error("Idempotency SETNX returned null (abnormal Redis response): key={}", redisKey);
+                throw new RedisCacheException("Idempotency SETNX null response: key=" + redisKey);
+            }
+            return acquired;
+        } catch (RedisCacheException e) {
+            throw e;
         } catch (Exception e) {
-            // Redis 장애 시 중복 처리 허용 — 모든 SET은 overwrite-safe
-            log.warn("Idempotency SETNX failed, proceeding anyway: key={}", redisKey, e);
-            return true;
+            // SETNX I/O 실패 시 상위로 전파 → BatchItemFailure → SQS 재시도
+            log.error("Idempotency SETNX failed: key={}", redisKey, e);
+            throw new RedisCacheException("Idempotency SETNX failed: key=" + redisKey, e);
         }
     }
 }

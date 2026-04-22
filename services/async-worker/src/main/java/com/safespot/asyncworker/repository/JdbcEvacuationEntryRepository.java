@@ -1,11 +1,13 @@
 package com.safespot.asyncworker.repository;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.util.Map;
 
+@Profile("cache-worker")
 @Repository
 @RequiredArgsConstructor
 public class JdbcEvacuationEntryRepository implements EvacuationEntryRepository {

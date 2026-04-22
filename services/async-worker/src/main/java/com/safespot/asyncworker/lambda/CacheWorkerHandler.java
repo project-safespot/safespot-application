@@ -4,16 +4,18 @@ import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.RequestHandler;
 import com.amazonaws.services.lambda.runtime.events.SQSBatchResponse;
 import com.amazonaws.services.lambda.runtime.events.SQSEvent;
-import com.safespot.asyncworker.AsyncWorkerApplication;
+import com.safespot.asyncworker.CacheWorkerApplication;
 import com.safespot.asyncworker.consumer.SqsBatchProcessor;
+import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.boot.SpringApplication;
 
 public class CacheWorkerHandler implements RequestHandler<SQSEvent, SQSBatchResponse> {
 
     // SnapStart: static 초기화로 컨텍스트 스냅샷에 포함
     private static final ConfigurableApplicationContext APPLICATION_CONTEXT =
-        SpringApplication.run(AsyncWorkerApplication.class);
+        new SpringApplicationBuilder(CacheWorkerApplication.class)
+            .profiles("cache-worker")
+            .run();
 
     private final SqsBatchProcessor processor;
 

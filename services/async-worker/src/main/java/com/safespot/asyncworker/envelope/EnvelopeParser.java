@@ -45,7 +45,11 @@ public class EnvelopeParser {
         if (envelope.getPayload() == null || envelope.getPayload().isNull()) {
             throw new EnvelopeParseException("Missing required field: payload");
         }
-        // eventType 값이 유효한지 사전 검증
-        EventType.from(envelope.getEventType());
+        // eventType 값이 유효한지 사전 검증 — 미지원 타입은 즉시 DLQ 대상
+        try {
+            EventType.from(envelope.getEventType());
+        } catch (IllegalArgumentException e) {
+            throw new EnvelopeParseException("Unknown eventType: " + envelope.getEventType(), e);
+        }
     }
 }

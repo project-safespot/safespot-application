@@ -9,14 +9,14 @@ import com.safespot.asyncworker.handler.cache.EvacuationEntryUpdatedHandler;
 import com.safespot.asyncworker.handler.cache.ShelterUpdatedHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Profile;
 
 import java.util.List;
 
+@Profile("cache-worker")
 @Configuration
 public class CacheWorkerConfig {
 
-    @Primary
     @Bean
     public EventDispatcher cacheWorkerDispatcher(
         EvacuationEntryCreatedHandler createdHandler,

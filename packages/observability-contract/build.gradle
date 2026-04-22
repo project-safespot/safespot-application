@@ -1,0 +1,2 @@
+// Placeholder module — observability standards not yet defined
+// Promote to shared module when cross-service metrics/logging/tracing contract is needed

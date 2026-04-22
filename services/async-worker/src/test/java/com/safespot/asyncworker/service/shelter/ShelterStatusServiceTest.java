@@ -14,6 +14,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Optional;
 
+import com.safespot.asyncworker.exception.RedisCacheException;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
@@ -69,14 +71,14 @@ class ShelterStatusServiceTest {
     }
 
     @Test
-    void Redis_실패시_예외_미전파() {
+    void Redis_실패시_예외_전파() {
         when(shelterRepository.findById(101L))
             .thenReturn(Optional.of(new ShelterInfo(101L, 100, "운영중")));
         when(entryRepository.countEntered(101L)).thenReturn(30);
-        doThrow(new RuntimeException("Redis down"))
+        doThrow(new RedisCacheException("Redis SET failed", new RuntimeException()))
             .when(cacheWriter).setShelterStatus(any(), any());
 
-        // RedisCacheWriter 내부에서 예외를 삼키므로 여기까지 전파되지 않음
-        // 실제 동작은 RedisCacheWriter 단위 테스트에서 검증
+        assertThatThrownBy(() -> service.recalculate(101L))
+            .isInstanceOf(RedisCacheException.class);
     }
 }

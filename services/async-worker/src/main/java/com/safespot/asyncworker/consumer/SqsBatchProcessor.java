@@ -50,7 +50,7 @@ public class SqsBatchProcessor {
         try {
             envelope = envelopeParser.parse(message.getBody());
         } catch (EnvelopeParseException e) {
-            log.error("Envelope parse failed, sending to DLQ immediately: messageId={}, reason={}",
+            log.error("Envelope parse failed, marking as BatchItemFailure for SQS retry then DLQ: messageId={}, reason={}",
                 messageId, e.getMessage());
             return MessageProcessingResult.failure(messageId, "EnvelopeParseFailure: " + e.getMessage());
         }

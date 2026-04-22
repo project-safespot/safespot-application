@@ -1,6 +1,7 @@
 package com.safespot.asyncworker.repository;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -9,6 +10,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 
+@Profile("cache-worker")
 @Repository
 @RequiredArgsConstructor
 public class JdbcEnvironmentLogRepository implements EnvironmentLogRepository {
