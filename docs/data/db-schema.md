@@ -566,8 +566,8 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | `disaster:active:{region}` | 지역별 현재 활성 재난 목록 | 2분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | expired_at 갱신 / 신규 alert 수신 |
 | `disaster:alert:list:{region}:{disasterType}` | 지역+유형별 전체 재난 알림 목록 | 5분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 재난 수집 완료 이벤트 수신 시 / TTL 만료 |
 | `disaster:detail:{alertId}` | 개별 재난 알림 상세 | 10분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 해당 alert 만료 / TTL 만료 |
-| `env:weather:{nx}:{ny}` | 격자 좌표 기반 날씨 예보 | 60분 | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
-| `env:air:{station_name}` | 측정소 기반 대기질(AQI) | 60분 | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
+| `env:weather:{nx}:{ny}` | 격자 좌표 기반 날씨 예보 | 120분 | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
+| `env:air:{station_name}` | 측정소 기반 대기질(AQI) | 120분 | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
 
 #### 🔧 관리자 운영용 (Admin-facing)
 
@@ -709,8 +709,8 @@ Normalizer Pod
   → 캐시 갱신 이벤트 발행 (SQS)
 
 cache-worker
-  → Redis env:weather:{nx}:{ny} SET (TTL 60분)
-  → Redis env:air:{station_name} SET (TTL 60분)
+  → Redis env:weather:{nx}:{ny} SET (TTL 120분)
+  → Redis env:air:{station_name} SET (TTL 120분)
 
 캐시 miss 발생 시
   → api-public-read → RDS 최근 레코드 fallback 조회 → Redis SET → 응답
