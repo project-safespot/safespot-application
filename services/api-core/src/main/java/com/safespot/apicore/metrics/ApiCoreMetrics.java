@@ -64,14 +64,6 @@ public class ApiCoreMetrics {
                 .increment();
     }
 
-    public void incCheckinFailed(String reason) {
-        Counter.builder("api_core_shelter_checkin_failed_total")
-                .tag("service", "api-core")
-                .tag("reason", reason)
-                .register(registry)
-                .increment();
-    }
-
     public void updateShelterFullCount(long count) {
         shelterFullCount.set(count);
     }
