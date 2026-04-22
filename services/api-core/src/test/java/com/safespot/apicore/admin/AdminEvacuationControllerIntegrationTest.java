@@ -107,29 +107,31 @@ class AdminEvacuationControllerIntegrationTest {
     }
 
     @Test
-    void createEntry_shelterFull_returns409() throws Exception {
-        Shelter fullShelter = Shelter.builder()
-                .name("꽉찬대피소").shelterType("민방위대피소")
+    void createEntry_overCapacity_allowsEntry() throws Exception {
+        // 재난 상황에서는 정원 초과 시에도 입소 허용
+        Shelter smallShelter = Shelter.builder()
+                .name("소규모대피소").shelterType("민방위대피소")
                 .disasterType(com.safespot.apicore.domain.enums.DisasterType.FLOOD)
                 .address("서울").latitude(BigDecimal.valueOf(37.5))
                 .longitude(BigDecimal.valueOf(126.9)).capacity(1).build();
-        Long fullShelterId = shelterRepository.save(fullShelter).getShelterId();
+        Long smallShelterId = shelterRepository.save(smallShelter).getShelterId();
 
         // 첫 번째 입소
-        Map<String, Object> body = Map.of("shelterId", fullShelterId, "name", "첫번째");
+        Map<String, Object> body1 = Map.of("shelterId", smallShelterId, "name", "첫번째");
         mockMvc.perform(post("/admin/evacuation-entries")
                 .header("Authorization", "Bearer " + adminToken)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(body)));
+                .content(objectMapper.writeValueAsString(body1)))
+                .andExpect(status().isCreated());
 
-        // 두 번째 입소 → SHELTER_FULL
-        Map<String, Object> body2 = Map.of("shelterId", fullShelterId, "name", "두번째");
+        // 두 번째 입소 → 정원 초과여도 허용
+        Map<String, Object> body2 = Map.of("shelterId", smallShelterId, "name", "두번째");
         mockMvc.perform(post("/admin/evacuation-entries")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body2)))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.error.code").value("SHELTER_FULL"));
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.entryStatus").value("ENTERED"));
     }
 
     @Test

@@ -40,3 +40,6 @@ safespot:
   jwt:
     secret: "bG9jYWwtZGV2LXNlY3JldC1rZXktZm9yLXRlc3Rpbmctb25seS1tdXN0LWJlLWxvbmctZW5vdWdo"
     expiration: 1800
+  sqs:
+    # queue-url: http://localhost:4566/000000000000/evacuation-events  # LocalStack
+    region: ap-northeast-2

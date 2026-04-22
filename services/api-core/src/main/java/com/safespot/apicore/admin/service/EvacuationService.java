@@ -65,13 +65,6 @@ public class EvacuationService {
                     .orElseThrow(() -> ApiException.notFound("재난 알림을 찾을 수 없습니다."));
         }
 
-        long current = entryRepository.countByShelterIdAndEntryStatus(
-                shelter.getShelterId(), EntryStatus.ENTERED);
-        if (current >= shelter.getCapacity()) {
-            metrics.incCheckinFailed("SHELTER_FULL");
-            throw ApiException.conflict("SHELTER_FULL", "대피소 수용 인원이 초과되었습니다.");
-        }
-
         EvacuationEntry entry = EvacuationEntry.builder()
                 .shelterId(request.getShelterId())
                 .alertId(request.getAlertId())
@@ -225,7 +218,9 @@ public class EvacuationService {
         entryRepository.save(entry);
 
         if (detail != null) {
-            HealthStatus hs = parseHealthStatus(request.getHealthStatus());
+            HealthStatus hs = request.getHealthStatus() != null
+                    ? parseHealthStatus(request.getHealthStatus())
+                    : detail.getHealthStatus();
             if (request.getFamilyInfo() != null) changedFields.add("familyInfo");
             if (request.getHealthStatus() != null) changedFields.add("healthStatus");
             if (request.getSpecialProtectionFlag() != null) changedFields.add("specialProtectionFlag");

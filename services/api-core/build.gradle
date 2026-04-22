@@ -22,6 +22,7 @@ dependencies {
     annotationProcessor 'org.projectlombok:lombok'
 
     runtimeOnly 'com.h2database:h2'
+    implementation 'software.amazon.awssdk:sqs:2.25.16'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.security:spring-security-test'
