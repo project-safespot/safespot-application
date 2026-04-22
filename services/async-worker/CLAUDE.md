@@ -1,140 +1,310 @@
-# async+worker Service Guide
+# async-worker Service Guide
 
 ## 1. 책임
 
-이 서비스는 SQS 이벤트 소비와 Redis 캐시 갱신·Read Model 재구성을 담당한다.
+`async-worker`는 SQS/Lambda 기반 이벤트 소비와 Redis 캐시 갱신, Read Model 재구성을 담당한다.
 
 포함:
-- SQS consumer (evacuation-events, disaster-events, environment-events)
+
+- SQS message consumption
+- Lambda worker execution
 - 공통 Envelope 기반 event parsing
-- eventType별 handler 분기 (cache-worker / readmodel-worker 분리)
-- idempotent 처리 (이벤트별 no-op / overwrite 기준 적용)
-- Redis key SET 및 readmodel-worker의 disaster:active:{region} 재생성 처리 (필요 시 DEL 후 SET 방식으로 일관성 유지)
-- changedFields 기반 조건부 Redis 갱신 (EvacuationEntryUpdated, ShelterUpdated)
-- RDS COUNT() 기반 현재인원 계산 (cache-worker 전담)
-- retry / DLQ 대응 (SQS maxReceiveCount + ReportBatchItemFailures)
-- 소비자 관점 observability (traceId / eventId / idempotencyKey 중심 로깅)
+- eventType별 handler dispatch
+- idempotency 검증 및 중복 처리
+- Redis SET/DEL 기반 cache refresh 및 read model rebuild
+- changedFields 기반 조건부 Redis 갱신
+- RDS COUNT() 기반 shelter 현재인원 계산
+- retry / DLQ 처리
+- `ReportBatchItemFailures` 기반 partial batch failure 처리
+- worker-level metric/log
+- SQS/Lambda 운영 metric 확인
 
 제외:
-- 공개 조회 API (api-public-read 담당)
-- 관리자 write API (api-core 담당)
-- 외부 공공 API 직접 호출 (external-ingestion Normalizer 담당)
-- shelter:status:{id}, shelter:list:{type}:{disasterType} DEL (api-core 담당)
-- RDS INSERT / UPDATE / 트랜잭션 처리 (api-core 담당)
-- SQS 이벤트 발행 (api-core, external-ingestion Normalizer 담당)
-- Redis 인프라 생성 및 보안 그룹 (data 영역 담당)
-- Scheduler 기반 워크로드 (compute 영역 담당)
-- CloudWatch 대시보드·모니터링 인프라 구성 (ops 담당)
-- Read path(조회 경로) 개입 (절대 금지)
+
+- 공개 조회 API
+- 관리자 write API
+- API 응답 경로 개입
+- 외부 공공 API 직접 호출
+- RDS INSERT / UPDATE 트랜잭션 처리
+- api-core 또는 external-ingestion의 이벤트 발행
+- Redis 인프라 생성
+- CloudWatch/Grafana 인프라 구성
 
 ---
 
 ## 2. 절대 규칙
 
-- API controller를 만들지 않는다. async+worker는 인바운드 HTTP 요청을 처리하지 않는다.
-- 외부 공공 API를 직접 호출하지 않는다. worker는 RDS에 이미 저장된 결과만 읽는다.
-- shelter:status:{id} DEL을 worker에서 수행하지 않는다. DEL은 api-core 전담이다.
-- Read path(조회 경로)에 SQS 등 비동기 큐를 삽입하지 않는다. 절대 금지.
-- async+worker는 Scheduler / polling 없이 SQS event consumer로만 동작한다.
-- idempotency를 무시하지 않는다. at-least-once 전제 하에 중복 수신 가능성을 항상 고려한다.
-- payload 계약(공통 Envelope, eventType별 스펙)을 임의로 변경하지 않는다.
-- readmodel-worker는 disaster:active:{region}를 필요 시 재생성하며, DEL 후 SET 방식으로 일관성을 유지한다.
+- API controller를 만들지 않는다.
+- async-worker는 인바운드 HTTP 요청을 처리하지 않는다.
+- 외부 공공 API를 직접 호출하지 않는다.
+- worker는 RDS에 이미 저장된 결과만 읽는다.
+- read path에 SQS 등 비동기 큐를 삽입하지 않는다.
+- SQS는 at-least-once delivery임을 전제로 한다.
+- idempotency를 무시하지 않는다.
+- payload 계약을 임의로 변경하지 않는다.
+- invalid payload는 성공 처리하지 않는다.
+- 로그에 payload 전체를 덤프하지 않는다.
 
 ---
 
-## 3. 구현 방향
+## 3. 우선 확인 문서
 
-### 컴포넌트 분리
+동작을 변경하기 전 관련 문서를 먼저 확인한다.
 
-- **cache-worker**: `evacuation-events`, `environment-events` 큐 소비
-  - `EvacuationEntryCreated`, `EvacuationEntryExited`, `EvacuationEntryUpdated`, `ShelterUpdated` → RDS COUNT() 후 `shelter:status:{shelterId}` SET
-  - `EnvironmentDataCollected` → `env:weather:{nx}:{ny}` 또는 `env:air:{station_name}` SET
-- **readmodel-worker**: `disaster-events` 큐 소비
-  - `DisasterDataCollected` → `disaster:active:{region}`, `disaster:alert:list:{region}:{disasterType}`, `disaster:detail:{alertId}` SET
-
-### 이벤트 소비
-
-- 공통 Envelope 스키마 사용 (`eventId`, `eventType`, `occurredAt`, `producer`, `traceId`, `idempotencyKey`, `payload`)
-- eventType별 handler 분리
-- invalid payload는 처리 실패로 간주되며, SQS 재시도 정책 이후 DLQ로 이동한다
-- `SQSBatchResponse.BatchItemFailures` 사용 — 배치 내 개별 메시지 실패만 재시도
-
-### Redis 갱신
-
-- key naming은 shared contract 기준 준수
-  - `shelter:status:{shelterId}` / `env:weather:{nx}:{ny}` / `env:air:{station_name}`
-  - `disaster:active:{region}` / `disaster:alert:list:{region}:{disasterType}` / `disaster:detail:{alertId}`
-- TTL 정책 준수: shelter 30초 / disaster:active 2분 / disaster:alert:list 5분 / disaster:detail 10분 / env 120분
-- `EvacuationEntryUpdated`: `changedFields`가 현재인원에 영향 없으면 Redis 갱신 없이 no-op
-- `ShelterUpdated`: `changedFields`에 `capacityTotal` 또는 `shelterStatus` 포함 시에만 재계산
-- Redis 실패 시 재시도 후 DLQ 이동. 다음 조회 요청에서 Cache-Aside로 자연 복구
-
-### idempotency
-
-- 중복 소비 가능성을 전제로 구현 (SQS at-least-once)
-- 이벤트별 멱등 처리 기준:
-  - `EvacuationEntryCreated`: `entryId + nextStatus` 동일 시 no-op
-  - `EvacuationEntryExited`: `entryId`가 이미 EXITED면 no-op
-  - `EvacuationEntryUpdated`: 동일 변경 반복 시 no-op
-  - `ShelterUpdated`: 이전 상태와 동일하면 no-op, 다른 상태면 최종값 overwrite
-  - `DisasterDataCollected`: `source + region + issuedAt` 기준 dedupe
-  - `EnvironmentDataCollected`: `region + collectionType + timeWindow` 기준 overwrite
+- 이벤트 envelope / payload / idempotencyKey: `docs/event/event-envelope.md`
+- async-worker 처리 흐름 / retry / DLQ: `docs/async/async-worker.md`
+- monitoring metric/log: `docs/monitoring/monitoring.md`
+- Redis key / TTL: `docs/redis-key/redis-key.md`, `docs/redis-key/cache-ttl.md`
+- api-public-read cache regeneration 기준: `docs/api/api-public-read.md`
+- RDS schema: `docs/data/db-schema.md`
 
 ---
 
-## 4. 수정 가능 범위
+## 4. Worker 처리 흐름
 
-주 수정 대상 (Terraform):
-- `modules/messaging/sqs/**`              ← SQS / DLQ 3종
-- `modules/application/lambda-worker/**`  ← Lambda 함수, IAM role, event source mapping
+기본 흐름:
 
-이벤트 계약 (이 서비스가 단일 Source of Truth):
-- `src/main/java/.../envelope`       ← 공통 Envelope DTO (EventEnvelope, EventType)
-- `src/main/java/.../payload`        ← eventType별 payload DTO
-- `src/main/java/.../redis/RedisKeyConstants.java` ← Redis key 명명 규칙
-- `src/main/java/.../redis/RedisTtlConstants.java` ← Redis TTL 정책
+```text
+SQS
+-> Lambda
+-> SqsBatchProcessor
+-> EventEnvelope parser
+-> idempotency check
+-> EventDispatcher
+-> Handler
+-> Service
+-> Redis SET/DEL
+-> ACK or retry/DLQ
+```
 
-주 수정 대상 (애플리케이션):
-- `src/main/java/.../consumer`       ← SQS 메시지 수신 / BatchItemFailures 처리
-- `src/main/java/.../handler`        ← eventType별 분기 처리
-- `src/main/java/.../service`        ← RDS COUNT() 로직, Redis SET/DEL 로직
-- `src/main/java/.../idempotency`    ← 멱등키 검증 로직
-- `src/main/resources`               ← application.yml (Redis/RDS 연결, 환경변수)
+처리 단계:
+
+1. SQS 메시지를 수신한다.
+2. envelope를 역직렬화한다.
+3. schema와 eventType을 검증한다.
+4. idempotencyKey로 중복 여부를 확인한다.
+5. eventType별 handler로 dispatch한다.
+6. `changedFields` 등 조건부 skip 규칙을 적용한다.
+7. 필요한 RDS 조회를 수행한다.
+8. Redis SET/DEL을 수행한다.
+9. metric/log를 남긴다.
+10. 성공 시 ACK, 실패 시 partial batch failure로 재시도/DLQ 흐름을 따른다.
+
+---
+
+## 5. 컴포넌트 분리
+
+### cache-worker
+
+담당 이벤트:
+
+- `EvacuationEntryCreated`
+- `EvacuationEntryExited`
+- `EvacuationEntryUpdated`
+- `ShelterUpdated`
+- `EnvironmentDataCollected`
+- `CacheRegenerationRequested` 중 shelter/environment 계열
+
+담당 작업:
+
+- `shelter:status:{shelterId}` 재계산 후 SET
+- `env:weather:{nx}:{ny}` SET
+- `env:air:{station_name}` SET
+- shelter 계열 cache regeneration 처리
+
+### readmodel-worker
+
+담당 이벤트:
+
+- `DisasterDataCollected`
+- `CacheRegenerationRequested` 중 disaster 계열
+
+담당 작업:
+
+- `disaster:active:{region}` SET/DEL
+- `disaster:alert:list:{region}:{disasterType}` SET
+- `disaster:detail:{alertId}` SET
+- `disaster:latest:{disasterType}:{region}` SET
+
+---
+
+## 6. Event Envelope 규칙
+
+공통 envelope 필드:
+
+- `eventId`
+- `eventType`
+- `occurredAt`
+- `producer`
+- `traceId`
+- `idempotencyKey`
+- `payload`
+
+eventType과 payload는 `docs/event/event-envelope.md`를 기준으로 한다.
+
+---
+
+## 7. Idempotency 규칙
+
+- SQS 메시지는 중복 수신될 수 있다.
+- idempotencyKey는 중복 소비 방지를 위한 기준이다.
+- idempotencyKey 검증이 정상적인 후속 이벤트를 막으면 안 된다.
+- 처리 완료한 idempotencyKey만 dedup 저장한다.
+- 실패한 메시지는 재시도될 수 있어야 한다.
+
+idempotencyKey 기준:
+
+- `EvacuationEntryCreated`: `entry:{entryId}:ENTERED:v{version}`
+- `EvacuationEntryExited`: `entry:{entryId}:EXITED:v{version}`
+- `EvacuationEntryUpdated`: `entry:{entryId}:UPDATED:{eventId}`
+- `ShelterUpdated`: `shelter:{shelterId}:UPDATED:{eventId}`
+- `CacheRegenerationRequested`: `cache-regen:{cacheKey}:{windowStart}`
+
+주의:
+
+- `EvacuationEntryUpdated`와 `ShelterUpdated`는 같은 대상에 대해 단시간 내 복수 이벤트가 정상적으로 발생할 수 있으므로 eventId 포함 key를 사용한다.
+- Cache regeneration 이벤트는 suppress window 단위로 dedupe한다.
+- Cache refresh 작업은 overwrite-safe하게 설계한다.
+
+---
+
+## 8. Redis 규칙
+
+- Redis는 read-optimized derived data만 저장한다.
+- 원본 데이터는 RDS에 있다.
+- `evacuation_entry`, `evacuation_event_history`, `admin_audit_log`를 Redis source of truth로 저장하지 않는다.
+- Redis key와 TTL은 문서 기준을 따른다.
+- Redis key는 코드에서 하드코딩하지 말고 상수/helper를 사용한다.
+- Redis write는 overwrite-safe하게 설계한다.
+- Redis 실패 시 재시도 후 DLQ로 이동한다.
+- 다음 조회 요청에서 Cache-Aside로 자연 복구될 수 있어야 한다.
+
+TTL 기준:
+
+- `shelter:status:{shelterId}`: 30초
+- `disaster:active:{region}`: 2분
+- `disaster:alert:list:{region}:{disasterType}`: 5분
+- `disaster:detail:{alertId}`: 10분
+- `env:weather:{nx}:{ny}`: 120분
+- `env:air:{station_name}`: 120분
+
+---
+
+## 9. Retry / DLQ 규칙
+
+- invalid schema는 재시도해도 성공하기 어려우므로 DLQ 이동 대상이다.
+- 일시적 Redis/RDS 오류는 재시도 대상이다.
+- maxReceiveCount 초과 시 DLQ로 이동한다.
+- Lambda는 partial batch failure를 사용해 실패 메시지만 재시도한다.
+- DLQ 메시지는 `eventId`, `eventType`, `traceId`, `idempotencyKey`, `errorMessage`, `retryCount`를 확인할 수 있어야 한다.
+
+---
+
+## 10. Monitoring 규칙
+
+Worker custom metric:
+
+- `worker_processed_total`
+- `worker_success_total`
+- `worker_failures_total`
+- `worker_processing_duration_seconds`
+- `worker_idempotency_skipped_total`
+- `worker_redis_write_total`
+- `worker_batch_size`
+- `worker_partial_batch_failure_total`
+- `worker_dlq_publish_total`
+
+SQS/Lambda metric은 CloudWatch 기준으로 확인한다.
+
+- SQS visible messages
+- SQS not visible messages
+- SQS oldest message age
+- DLQ visible messages
+- Lambda invocations
+- Lambda errors
+- Lambda throttles
+- Lambda duration
+- Lambda concurrent executions
+
+metric label은 `event_type`, `queue_name`, `result`, `reason` 중심으로 둔다. `messageId`, `eventId`, `shelterId` 같은 high-cardinality 값은 metric label에 넣지 않는다.
+
+---
+
+## 11. Structured Log 규칙
+
+성공/실패 로그에는 다음 필드를 포함한다.
+
+- `service`
+- `event`
+- `traceId`
+- `awsRequestId`
+- `messageId`
+- `queueName`
+- `eventId`
+- `eventType`
+- `idempotencyKey`
+- `result`
+- `reason`
+- `durationMs`
+
+Redis 작업 로그에는 필요한 경우 다음 필드를 포함한다.
+
+- `operation`
+- `key`
+- `ttlSeconds`
+- `result`
+
+단, 개인정보가 포함될 수 있는 payload 전체를 로그로 남기지 않는다.
+
+---
+
+## 12. 수정 가능 범위
+
+주 수정 대상:
+
+- `src/main/java/.../consumer`
+- `src/main/java/.../handler`
+- `src/main/java/.../service`
+- `src/main/java/.../idempotency`
+- `src/main/java/.../envelope`
+- `src/main/java/.../payload`
+- `src/main/java/.../redis`
+- `src/main/java/.../metrics`
+- `src/main/resources`
+
+관련 변경 시 함께 확인:
+
+- `docs/event/event-envelope.md`
+- `docs/async/async-worker.md`
+- `docs/monitoring/monitoring.md`
+- `docs/redis-key/redis-key.md`
+- `docs/redis-key/cache-ttl.md`
 
 수정 금지:
+
 - `services/api-core/**`
 - `services/api-public-read/**`
 - `services/external-ingestion/**`
 
 ---
 
-## 5. 코드 작성 원칙
+## 13. 코드 작성 원칙
 
-- event parsing(Envelope 역직렬화)과 business handling(handler 분기)을 분리한다
-- RDS COUNT() 로직과 Redis SET 로직을 같은 메서드에 묶지 않는다
-- handler는 eventType 중심으로 나누되, cache-worker / readmodel-worker 간 코드를 공유하지 않는다
-- Redis key 형식은 `RedisKeyConstants.java`를 단일 출처로 사용한다. 하드코딩 금지
-- 로그에 payload 전체를 덤프하지 않는다. 개인정보가 포함될 수 있음
-- 추적 필드는 `traceId`, `eventId`, `idempotencyKey` 중심으로 남긴다
-- Lambda Java는 SnapStart(Java 21) 활성화로 Cold Start를 보완한다
-
----
-
-## 6. 우선 확인 문서
-
-- 비동기 처리 정책 정의서 — 이벤트 envelope 명세, 이벤트별 payload 스펙, TTL 정책, 재시도·DLQ 정책
-- asyncworker 영역 확정 계약서 — 포함/제외 책임 범위, 핵심 설계 결정 근거
-- asyncworker 모듈 인터페이스 정의서 — INPUT/OUTPUT 변수, RESOURCE 목록, 포트 매핑
-- Terraform 협업 규칙 — 모듈 apply 순서 (network → data → async+worker 순서 준수)
+- envelope parsing과 business handling을 분리한다.
+- handler는 eventType 중심으로 나눈다.
+- RDS COUNT() 로직과 Redis SET 로직을 과도하게 결합하지 않는다.
+- Redis key 형식은 상수/helper를 통해 생성한다.
+- Lambda Java는 필요 시 SnapStart(Java 21) 활성화를 고려한다.
+- 실패는 숨기지 말고 metric/log와 retry/DLQ 흐름으로 드러낸다.
 
 ---
 
-## 7. 금지 패턴
+## 14. 금지 패턴
 
 - REST endpoint 생성
-- 관리자 감사 로그(`admin_audit_log`) 직접 생성
+- 관리자 감사 로그 직접 생성
 - 외부 공공 API 수집 로직 추가
-- `shelter:status:{id}` DEL을 worker에서 수행
-- Read path에 SQS 큐 삽입
-- cache-worker / readmodel-worker 구현을 외부 모듈에 공유
-- payload 계약 검증 없이 처리 계속 (잘못된 이벤트는 반드시 EPE/DLQ로)
+- read path에 SQS 삽입
+- payload 계약 검증 없이 처리 계속
+- cache-worker/readmodel-worker 로직을 다른 서비스에 공유
+- 개인정보 포함 payload 전체 로그 출력
