@@ -84,8 +84,18 @@ public class KmaEarthquakeNormalizer implements Normalizer {
                     DisasterAlert alert = buildAlert(item, issuedAt);
                     DisasterAlert saved = disasterAlertRepo.save(alert);
 
-                    DisasterAlertDetail detail = buildDetail(item, saved);
-                    detailRepo.save(detail);
+                    // detail must be saved atomically with the alert.
+                    // If detail fails after alert is persisted, compensate by deleting the alert so
+                    // dedup (existsBySourceAndIssuedAt) does not block recovery on the next collection run.
+                    try {
+                        DisasterAlertDetail detail = buildDetail(item, saved);
+                        detailRepo.save(detail);
+                    } catch (Exception detailEx) {
+                        log.warn("[KMA_EARTHQUAKE] detail save failed alertId={} issuedAt={} — compensating alert delete, will retry on next collection",
+                            saved.getAlertId(), issuedAt, detailEx);
+                        disasterAlertRepo.delete(saved);
+                        throw detailEx;
+                    }
 
                     metrics.incrementNormalizationSuccess(getSourceCode());
                     String traceId = raw.getExecutionLog().getTraceId();

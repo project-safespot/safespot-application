@@ -20,6 +20,7 @@ import java.time.OffsetDateTime;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -83,6 +84,34 @@ class KmaEarthquakeNormalizerTest {
         NormalizationResult result = normalizer.normalize(raw);
 
         assertThat(result.getSucceeded()).isEqualTo(0);
+    }
+
+    @Test
+    void normalize_detailFails_compensatesAlertDelete() {
+        ExternalApiRawPayload raw = buildRaw("""
+            {"response":{"body":{"items":{"item":[
+              {"TM_FC":"202604221100","EQ_REG":"서울특별시",
+               "EQ_MAG":"4.1","EQ_DPT":"15","EQ_LOC":"서울 남부 5km",
+               "JDG_INTS":"진도3","WARN_VAL":"경계"}
+            ]}}}}
+            """);
+
+        given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any(OffsetDateTime.class))).willReturn(false);
+        DisasterAlert saved = new DisasterAlert();
+        saved.setAlertId(99L);
+        saved.setRegion("서울특별시");
+        saved.setDisasterType("EARTHQUAKE");
+        given(disasterAlertRepo.save(any(DisasterAlert.class))).willReturn(saved);
+        given(detailRepo.save(any())).willThrow(new RuntimeException("db constraint violation"));
+
+        NormalizationResult result = normalizer.normalize(raw);
+
+        assertThat(result.getSucceeded()).isEqualTo(0);
+        assertThat(result.getFailed()).isEqualTo(1);
+        // alert must be compensated (deleted) so dedup does not block retry
+        verify(disasterAlertRepo).delete(saved);
+        // cache event must NOT fire
+        verify(cacheEventPublisher, never()).publish(any(), any());
     }
 
     private ExternalApiRawPayload buildRaw(String body) {
