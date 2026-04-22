@@ -56,6 +56,8 @@ public class DisasterAlertReadService {
 
         RedisReadCache.CacheResult<Long> pointerResult = redisReadCache.get(pointerKey, new TypeReference<>() {});
 
+        boolean detailMissed = false;
+
         if (pointerResult.isHit()) {
             String detailKey = buildDetailKey(pointerResult.value());
             RedisReadCache.CacheResult<DisasterLatestDto> detailResult =
@@ -64,6 +66,7 @@ public class DisasterAlertReadService {
 
             redisReadCache.recordFallback(ENDPOINT_LATEST, detailResult.fallbackReason());
             redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
+            detailMissed = true;
         } else {
             redisReadCache.recordFallback(ENDPOINT_LATEST, pointerResult.fallbackReason());
             redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
@@ -74,8 +77,11 @@ public class DisasterAlertReadService {
 
         DisasterLatestDto result = toLatestDto(alert);
 
-        if (suppressWindowService.tryPublish(pointerKey)) {
-            cacheRegenerationPublisher.publish(pointerKey);
+        // pointer miss → worker must rebuild the pointer (publish pointer key)
+        // detail miss  → worker must rebuild the detail entry (publish detail key for the actual latest alertId)
+        String publishKey = detailMissed ? buildDetailKey(alert.getAlertId()) : pointerKey;
+        if (suppressWindowService.tryPublish(publishKey)) {
+            cacheRegenerationPublisher.publish(publishKey);
         }
 
         return result;

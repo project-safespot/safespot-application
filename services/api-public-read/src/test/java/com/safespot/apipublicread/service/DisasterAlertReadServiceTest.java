@@ -149,7 +149,7 @@ class DisasterAlertReadServiceTest {
     // ── findLatest: pointer hit + detail miss ─────────────────────────────
 
     @Test
-    void findLatest_pointerHit_detailMiss_fallsBackToRdsAndEmitsEvent() {
+    void findLatest_pointerHit_detailMiss_fallsBackToRdsAndEmitsDetailKey() {
         when(redisReadCache.get(eq(POINTER_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(55L, null));
         when(redisReadCache.get(eq(DETAIL_KEY_55), any(TypeReference.class)))
@@ -157,14 +157,16 @@ class DisasterAlertReadServiceTest {
 
         DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
         when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.of(alert));
-        when(suppressWindowService.tryPublish(POINTER_KEY)).thenReturn(true);
+        when(suppressWindowService.tryPublish(DETAIL_KEY_55)).thenReturn(true);
 
         DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");
 
         assertThat(result.alertId()).isEqualTo(55L);
         verify(redisReadCache).recordFallback(eq("/disasters/{disasterType}/latest"),
                 eq(RedisReadCache.FallbackReason.REDIS_MISS));
-        verify(cacheRegenerationPublisher).publish(POINTER_KEY);
+        // detail miss → publish detail key, not pointer key
+        verify(cacheRegenerationPublisher).publish(DETAIL_KEY_55);
+        verify(cacheRegenerationPublisher, never()).publish(POINTER_KEY);
     }
 
     private DisasterAlert stubAlert(long alertId, String disasterType) {
