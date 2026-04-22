@@ -2,6 +2,7 @@ package com.safespot.apipublicread.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.safespot.apipublicread.cache.RedisReadCache;
+import com.safespot.apipublicread.cache.RegionToGridResolver;
 import com.safespot.apipublicread.domain.AirQualityLog;
 import com.safespot.apipublicread.domain.WeatherLog;
 import com.safespot.apipublicread.dto.AirQualityDto;
@@ -30,8 +31,11 @@ class EnvironmentReadServiceTest {
     @Mock WeatherLogRepository weatherLogRepository;
     @Mock AirQualityLogRepository airQualityLogRepository;
     @Mock RedisReadCache redisReadCache;
+    @Mock RegionToGridResolver regionToGridResolver;
 
     @InjectMocks EnvironmentReadService environmentReadService;
+
+    private static final int[] SEOUL_GRID = {60, 127};
 
     @Test
     void findWeather_cacheHit_returnsFromCache() {
@@ -79,6 +83,7 @@ class EnvironmentReadServiceTest {
 
     @Test
     void findWeather_regionOnly_cacheHit_returnsFromCache() {
+        when(regionToGridResolver.resolve("서울특별시")).thenReturn(Optional.of(SEOUL_GRID));
         WeatherAlertDto cached = new WeatherAlertDto("서울특별시", 60, 127, 18.5, "맑음", "2026-04-15T15:00:00+09:00");
         when(redisReadCache.get(eq("env:weather:region:서울특별시"), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(cached, null));
@@ -87,11 +92,12 @@ class EnvironmentReadServiceTest {
 
         assertThat(result.region()).isEqualTo("서울특별시");
         assertThat(result.temperature()).isEqualTo(18.5);
-        verify(weatherLogRepository, never()).findLatest();
+        verify(weatherLogRepository, never()).findLatestByNxAndNy(anyInt(), anyInt());
     }
 
     @Test
     void findWeather_regionOnly_cacheMiss_fallsBackAndWritesCache() {
+        when(regionToGridResolver.resolve("서울특별시")).thenReturn(Optional.of(SEOUL_GRID));
         when(redisReadCache.get(eq("env:weather:region:서울특별시"), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
 
@@ -114,6 +120,7 @@ class EnvironmentReadServiceTest {
 
     @Test
     void findWeather_regionOnly_noData_returnsNull() {
+        when(regionToGridResolver.resolve("서울특별시")).thenReturn(Optional.of(SEOUL_GRID));
         when(redisReadCache.get(eq("env:weather:region:서울특별시"), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
         when(weatherLogRepository.findLatestByNxAndNy(60, 127)).thenReturn(Optional.empty());
@@ -124,10 +131,13 @@ class EnvironmentReadServiceTest {
     }
 
     @Test
-    void findWeather_regionOnly_unknownRegion_returnsNull() {
-        WeatherAlertDto result = environmentReadService.findWeather("알수없는지역", null, null);
+    void findWeather_regionOnly_unsupportedRegion_throwsUnsupportedRegion() {
+        when(regionToGridResolver.resolve("부산광역시")).thenReturn(Optional.empty());
 
-        assertThat(result).isNull();
+        assertThatThrownBy(() -> environmentReadService.findWeather("부산광역시", null, null))
+                .isInstanceOf(ApiException.class)
+                .extracting("errorCode")
+                .hasToString("UNSUPPORTED_REGION");
         verify(weatherLogRepository, never()).findLatestByNxAndNy(anyInt(), anyInt());
     }
 

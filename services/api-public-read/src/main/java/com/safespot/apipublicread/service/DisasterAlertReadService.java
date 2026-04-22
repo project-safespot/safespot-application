@@ -52,25 +52,41 @@ public class DisasterAlertReadService {
     }
 
     public DisasterLatestDto findLatest(String disasterType, String region) {
-        String latestKey = "disaster:latest:" + disasterType + ":" + region;
-        RedisReadCache.CacheResult<DisasterLatestDto> cached =
-                redisReadCache.get(latestKey, new TypeReference<>() {});
+        String pointerKey = buildLatestPointerKey(disasterType, region);
 
-        if (cached.isHit()) return cached.value();
+        RedisReadCache.CacheResult<Long> pointerResult = redisReadCache.get(pointerKey, new TypeReference<>() {});
 
-        redisReadCache.recordFallback(ENDPOINT_LATEST, cached.fallbackReason());
-        redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
+        if (pointerResult.isHit()) {
+            String detailKey = buildDetailKey(pointerResult.value());
+            RedisReadCache.CacheResult<DisasterLatestDto> detailResult =
+                    redisReadCache.get(detailKey, new TypeReference<>() {});
+            if (detailResult.isHit()) return detailResult.value();
+
+            redisReadCache.recordFallback(ENDPOINT_LATEST, detailResult.fallbackReason());
+            redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
+        } else {
+            redisReadCache.recordFallback(ENDPOINT_LATEST, pointerResult.fallbackReason());
+            redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
+        }
 
         DisasterAlert alert = disasterAlertRepository.findLatest(disasterType, region)
                 .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
 
         DisasterLatestDto result = toLatestDto(alert);
 
-        if (suppressWindowService.tryPublish(latestKey)) {
-            cacheRegenerationPublisher.publish(latestKey);
+        if (suppressWindowService.tryPublish(pointerKey)) {
+            cacheRegenerationPublisher.publish(pointerKey);
         }
 
         return result;
+    }
+
+    private static String buildLatestPointerKey(String disasterType, String region) {
+        return "disaster:latest:" + disasterType + ":" + region;
+    }
+
+    private static String buildDetailKey(long alertId) {
+        return "disaster:detail:" + alertId;
     }
 
     private String buildListKey(String region, String disasterType) {

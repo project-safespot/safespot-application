@@ -80,6 +80,16 @@ class ShelterControllerTest {
     }
 
     @Test
+    void getNearby_outsideSeoulBounds_returns400() throws Exception {
+        mockMvc.perform(get("/shelters/nearby")
+                        .param("lat", "35.1796")
+                        .param("lng", "129.0756")
+                        .param("radius", "1000"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("UNSUPPORTED_REGION"));
+    }
+
+    @Test
     void getById_success() throws Exception {
         ShelterDetailDto dto = new ShelterDetailDto(
                 101L, "서울시민체육관", "민방위대피소", "EARTHQUAKE",

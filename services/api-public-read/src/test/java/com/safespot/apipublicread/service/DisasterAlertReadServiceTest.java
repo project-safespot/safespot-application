@@ -34,6 +34,9 @@ class DisasterAlertReadServiceTest {
 
     @InjectMocks DisasterAlertReadService disasterAlertReadService;
 
+    private static final String POINTER_KEY = "disaster:latest:EARTHQUAKE:서울특별시";
+    private static final String DETAIL_KEY_55 = "disaster:detail:55";
+
     @Test
     void findAlerts_cacheHit_returnsFromCache() {
         List<DisasterAlertItem> cached = List.of(
@@ -83,9 +86,11 @@ class DisasterAlertReadServiceTest {
         assertThat(result).isEmpty();
     }
 
+    // ── findLatest: pointer miss ───────────────────────────────────────────
+
     @Test
-    void findLatest_notFound_throwsApiException() {
-        when(redisReadCache.get(eq("disaster:latest:EARTHQUAKE:서울특별시"), any(TypeReference.class)))
+    void findLatest_pointerMiss_notFound_throwsApiException() {
+        when(redisReadCache.get(eq(POINTER_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
         when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.empty());
 
@@ -94,10 +99,44 @@ class DisasterAlertReadServiceTest {
     }
 
     @Test
-    void findLatest_cacheHit_returnsFromCache() {
+    void findLatest_pointerMiss_fallsBackToRdsAndEmitsEvent() {
+        when(redisReadCache.get(eq(POINTER_KEY), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+        DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
+        when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.of(alert));
+        when(suppressWindowService.tryPublish(POINTER_KEY)).thenReturn(true);
+
+        DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");
+
+        assertThat(result.alertId()).isEqualTo(55L);
+        verify(redisReadCache).recordFallback(eq("/disasters/{disasterType}/latest"),
+                eq(RedisReadCache.FallbackReason.REDIS_MISS));
+        verify(cacheRegenerationPublisher).publish(POINTER_KEY);
+    }
+
+    @Test
+    void findLatest_pointerMiss_suppressWindowPreventsDoublePublish() {
+        when(redisReadCache.get(eq(POINTER_KEY), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+        DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
+        when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.of(alert));
+        when(suppressWindowService.tryPublish(POINTER_KEY)).thenReturn(false);
+
+        disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");
+
+        verify(cacheRegenerationPublisher, never()).publish(any());
+    }
+
+    // ── findLatest: pointer hit + detail hit (full cache) ─────────────────
+
+    @Test
+    void findLatest_pointerHit_detailHit_returnsFromCacheWithoutRds() {
         DisasterLatestDto cached = new DisasterLatestDto(55L, "EARTHQUAKE", "서울특별시", "주의",
                 "지진 감지", "2026-04-14T08:55:00+09:00", null, null);
-        when(redisReadCache.get(eq("disaster:latest:EARTHQUAKE:서울특별시"), any(TypeReference.class)))
+
+        when(redisReadCache.get(eq(POINTER_KEY), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(55L, null));
+        when(redisReadCache.get(eq(DETAIL_KEY_55), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(cached, null));
 
         DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");
@@ -107,32 +146,25 @@ class DisasterAlertReadServiceTest {
         verify(suppressWindowService, never()).tryPublish(any());
     }
 
+    // ── findLatest: pointer hit + detail miss ─────────────────────────────
+
     @Test
-    void findLatest_cacheMiss_fallsBackToRdsAndEmitsEvent() {
-        when(redisReadCache.get(eq("disaster:latest:EARTHQUAKE:서울특별시"), any(TypeReference.class)))
+    void findLatest_pointerHit_detailMiss_fallsBackToRdsAndEmitsEvent() {
+        when(redisReadCache.get(eq(POINTER_KEY), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(55L, null));
+        when(redisReadCache.get(eq(DETAIL_KEY_55), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+
         DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
         when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.of(alert));
-        when(suppressWindowService.tryPublish("disaster:latest:EARTHQUAKE:서울특별시")).thenReturn(true);
+        when(suppressWindowService.tryPublish(POINTER_KEY)).thenReturn(true);
 
         DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");
 
         assertThat(result.alertId()).isEqualTo(55L);
-        verify(redisReadCache).recordFallback(eq("/disasters/{disasterType}/latest"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
-        verify(cacheRegenerationPublisher).publish("disaster:latest:EARTHQUAKE:서울특별시");
-    }
-
-    @Test
-    void findLatest_suppressWindowPreventsDoublePublish() {
-        when(redisReadCache.get(eq("disaster:latest:EARTHQUAKE:서울특별시"), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
-        DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
-        when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.of(alert));
-        when(suppressWindowService.tryPublish("disaster:latest:EARTHQUAKE:서울특별시")).thenReturn(false);
-
-        disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");
-
-        verify(cacheRegenerationPublisher, never()).publish(any());
+        verify(redisReadCache).recordFallback(eq("/disasters/{disasterType}/latest"),
+                eq(RedisReadCache.FallbackReason.REDIS_MISS));
+        verify(cacheRegenerationPublisher).publish(POINTER_KEY);
     }
 
     private DisasterAlert stubAlert(long alertId, String disasterType) {

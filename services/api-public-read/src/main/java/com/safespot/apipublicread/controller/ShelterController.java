@@ -36,6 +36,9 @@ public class ShelterController {
         if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "lat/lng 범위를 초과했습니다.");
         }
+        if (lat < 37.41 || lat > 37.71 || lng < 126.73 || lng > 127.19) {
+            throw new ApiException(ErrorCode.UNSUPPORTED_REGION, "현재 서울 지역만 지원합니다.");
+        }
         if (radius < 100 || radius > 5000) {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "radius는 100~5000 사이여야 합니다.");
         }
