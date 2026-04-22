@@ -566,8 +566,8 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | `disaster:active:{region}` | 지역별 현재 활성 재난 목록 | 2분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | expired_at 갱신 / 신규 alert 수신 |
 | `disaster:alert:list:{region}:{disasterType}` | 지역+유형별 전체 재난 알림 목록 | 5분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 재난 수집 완료 이벤트 수신 시 / TTL 만료 |
 | `disaster:detail:{alertId}` | 개별 재난 알림 상세 | 10분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 해당 alert 만료 / TTL 만료 |
-| `env:weather:{nx}:{ny}` | 격자 좌표 기반 날씨 예보 | 120분 | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
-| `env:air:{station_name}` | 측정소 기반 대기질(AQI) | 120분 | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
+| `env:weather:{nx}:{ny}` | 격자 좌표 기반 날씨 예보 | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
+| `env:air:{station_name}` | 측정소 기반 대기질(AQI) | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
 
 #### 🔧 관리자 운영용 (Admin-facing)
 
@@ -578,6 +578,9 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 
 > - `env:weather`, `env:air` 캐시 miss 시 → `weather_log`, `air_quality_log`에서 가장 최근 레코드로 fallback
 > - Redis 갱신은 external-ingestion이 직접 하지 않고 SQS 이벤트 → async+worker가 담당
+> - **TTL 철학**: env 키의 TTL(120분)은 데이터 신선도(freshness)가 아니라 fallback 안정성을 위한 값이다.
+>   외부 API 수집 주기와 무관하게, Redis 장애나 수집 지연 시 기존 캐시 데이터를 유지하기 위한 안전망이다.
+>   캐시 갱신은 수집 완료 이벤트(EnvironmentDataCollected) 수신 즉시 overwrite 방식으로 이루어진다.
 
 ---
 
@@ -725,3 +728,4 @@ cache-worker
 | 2026-04-16 | v6.0 | 최초 작성 |
 | 2026-04-19 | v7.0 | disaster_alert_detail 추가 / 재난 상세 캐시 키 통일 / 데이터 흐름 최신화 / health_status 정책 명시 / API↔DB 매핑 확장 / UNIQUE 제약 명시 / shelter 외부 upsert 범위 명시 / external_api_* 테이블 5개 추가 / admin_audit_log reason 저장 정책 추가 |
 | 2026-04-20 | v7.1 | 서현 async+worker 문서 기준 Redis 키 전면 수정. disaster:detail:{alertId} / disaster:alert:list 추가 / 생성 주체 cache-worker·readmodel-worker 분리 반영 |
+| 2026-04-22 | v7.2 | env:weather, env:air TTL 60분 → 120분 정정. TTL 철학 주석 추가 (fallback 안정성 목적, 데이터 신선도 아님) |

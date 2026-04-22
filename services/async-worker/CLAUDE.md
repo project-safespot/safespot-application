@@ -88,8 +88,11 @@
 - `modules/messaging/sqs/**`              ← SQS / DLQ 3종
 - `modules/application/lambda-worker/**`  ← Lambda 함수, IAM role, event source mapping
 
-공통 이벤트 계약 (수정 금지):
-- `packages/event-schema/**`         ← 공통 Envelope DTO, eventType별 payload DTO (Source of Truth)
+이벤트 계약 (이 서비스가 단일 Source of Truth):
+- `src/main/java/.../envelope`       ← 공통 Envelope DTO (EventEnvelope, EventType)
+- `src/main/java/.../payload`        ← eventType별 payload DTO
+- `src/main/java/.../redis/RedisKeyConstants.java` ← Redis key 명명 규칙
+- `src/main/java/.../redis/RedisTtlConstants.java` ← Redis TTL 정책
 
 주 수정 대상 (애플리케이션):
 - `src/main/java/.../consumer`       ← SQS 메시지 수신 / BatchItemFailures 처리
@@ -110,7 +113,7 @@
 - event parsing(Envelope 역직렬화)과 business handling(handler 분기)을 분리한다
 - RDS COUNT() 로직과 Redis SET 로직을 같은 메서드에 묶지 않는다
 - handler는 eventType 중심으로 나누되, cache-worker / readmodel-worker 간 코드를 공유하지 않는다
-- Redis key 형식은 shared contract(문서 정의)를 단일 출처로 사용한다
+- Redis key 형식은 `RedisKeyConstants.java`를 단일 출처로 사용한다. 하드코딩 금지
 - 로그에 payload 전체를 덤프하지 않는다. 개인정보가 포함될 수 있음
 - 추적 필드는 `traceId`, `eventId`, `idempotencyKey` 중심으로 남긴다
 - Lambda Java는 SnapStart(Java 21) 활성화로 Cold Start를 보완한다
@@ -133,4 +136,5 @@
 - 외부 공공 API 수집 로직 추가
 - `shelter:status:{id}` DEL을 worker에서 수행
 - Read path에 SQS 큐 삽입
-- `packages`에 cache-worker / readmodel-worker 구현 공유
+- cache-worker / readmodel-worker 구현을 외부 모듈에 공유
+- payload 계약 검증 없이 처리 계속 (잘못된 이벤트는 반드시 EPE/DLQ로)

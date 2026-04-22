@@ -1,0 +1,2 @@
+// Placeholder module — source of truth is currently services/async-worker
+// Promote to shared module when multiple services require the same event contract

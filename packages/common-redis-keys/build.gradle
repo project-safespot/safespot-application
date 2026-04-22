@@ -1,0 +1,2 @@
+// Placeholder module — source of truth is currently services/async-worker (RedisKeyConstants)
+// Promote to shared module when multiple services need to share Redis key naming

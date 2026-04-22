@@ -28,10 +28,6 @@ safespot-application/
 │   ├── api-public-read/
 │   ├── external-ingestion/
 │   └── async-worker/
-├── packages/
-│   ├── event-schema/
-│   ├── common-redis-keys/
-│   └── observability-contract/
 ├── docs/
 ├── deploy/
 └── CLAUDE.md
@@ -40,9 +36,14 @@ safespot-application/
 ### 구조 원칙
 
 - `services/` → 실행 단위 (deployable workload)
-- `packages/` → 서비스 간 공유 계약 (단일 서비스 종속 금지)
 - `docs/` → Source of Truth
 - `deploy/` → 실행/환경/스크립트
+
+> **packages 모듈 비활성화 결정 (2026-04-22)**
+> packages/* 모듈(event-schema, common-redis-keys, observability-contract)은 현재 사용하지 않는다.
+> 각 서비스가 자체 source of truth를 유지한다. async-worker의 계약(Envelope, Payload, RedisKey)은
+> `services/async-worker` 내부가 유일한 source of truth다.
+> 다른 서비스와 계약 공유가 필요해지면 packages로 promote한다.
 
 ---
 
@@ -169,25 +170,16 @@ worktree branch
 
 ---
 
-## 7. packages 사용 규칙
+## 7. 계약 소유권 (현재 상태)
 
-### 7.1 event-schema
+현재 각 서비스가 자체 계약을 내부에 유지한다.
 
-- 이벤트 계약 정의
-- 모든 서비스 동일 스키마 사용
+- **이벤트 Envelope / Payload DTO** → `services/async-worker/src/.../envelope`, `.../payload`
+- **Redis Key 명명 규칙** → `services/async-worker/src/.../redis/RedisKeyConstants.java`
+- **Redis TTL 정책** → `services/async-worker/src/.../redis/RedisTtlConstants.java`
 
----
-
-### 7.2 common-redis-keys
-
-- Redis key naming 표준화
-- 하드코딩 금지
-
----
-
-### 7.3 observability-contract
-
-- metrics / logging / tracing 규약 정의
+> 여러 서비스가 동일 계약을 공유해야 할 시점에 `packages/` 모듈로 promote한다.
+> 현재 단계에서는 조기 추상화를 피한다.
 
 ---
 
@@ -211,7 +203,7 @@ worktree branch
 ### 9.1 서비스 경계 위반
 
 - 다른 서비스 디렉터리 직접 수정 금지
-- 공통 변경은 packages 또는 docs 통해 반영
+- 공통 변경은 docs를 먼저 수정한 후 코드에 반영
 
 ---
 

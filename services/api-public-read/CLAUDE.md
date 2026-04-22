@@ -43,9 +43,9 @@
 4. 필요 시 재생성 요청 이벤트 발행
 
 ### 캐시
-- key naming은 `packages/common-redis-keys`를 사용한다
-- 키 형식을 임의로 만들지 않는다
-- TTL 정책은 문서 기준을 따른다
+- key naming은 `docs/redis-key/` 문서를 기준으로 한다
+- 키 형식을 임의로 만들지 않는다 (하드코딩 금지)
+- TTL 정책은 `docs/data/db-schema.md` 기준을 따른다
 
 ### fallback
 - fallback은 예외 상황이 아니라 정상 경로로 간주한다
@@ -102,4 +102,4 @@
 - polling loop 추가
 - 외부 공공 API 직접 호출
 - domain write 로직 포함
-- packages에 read service 구현 공유
+- 외부 모듈에 read service 구현 공유 (packages 모듈은 현재 비활성화)

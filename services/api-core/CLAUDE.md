@@ -48,7 +48,8 @@
 - reason 필드 정책은 문서 기준을 따른다
 
 ### 이벤트
-- 이벤트 envelope는 `packages/event-schema`를 사용한다
+- 이벤트 envelope 스펙은 `docs/event/event-envelope.md`를 기준으로 한다
+- 각 서비스가 자체 Envelope DTO를 내부에 유지한다 (공용 packages 모듈 없음)
 - changedFields는 필드명만 넣는다
 - 개인정보 값 자체를 payload에 넣지 않는다
 
@@ -68,7 +69,7 @@
 - `src/main/resources`
 
 수정 최소화 대상:
-- shared package 계약
+- 이벤트 계약 문서 (`docs/event/event-envelope.md`)
 - deploy manifest
 
 수정 금지:
@@ -102,7 +103,7 @@
 ## 7. 금지 패턴
 
 금지:
-- “공통화”를 이유로 domain 로직을 packages로 이동
+- “공통화”를 이유로 domain 로직을 외부 모듈로 이동 (packages 모듈은 현재 비활성화)
 - 다른 서비스 코드 직접 import
 - read 전용 fallback 로직 구현
 - ingestion 스케줄링 추가
