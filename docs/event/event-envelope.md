@@ -14,7 +14,7 @@
   "occurredAt": "2026-04-15T14:00:00+09:00",
   "producer": "api-core",
   "traceId": "uuid-v4",
-  "idempotencyKey": "entry:301:ENTERED:v1",
+  "idempotencyKey": "entry:301:ENTERED",
   "payload": {}
 }
 ```
@@ -48,8 +48,8 @@
 
 | 이벤트 | 구성 규칙 | 비고 |
 | --- | --- | --- |
-| `EvacuationEntryCreated` | `entry:{entryId}:ENTERED:v{version}` | 동일 entryId에서 같은 상태 전이는 1회만 발생 |
-| `EvacuationEntryExited` | `entry:{entryId}:EXITED:v{version}` | 동일 |
+| `EvacuationEntryCreated` | `entry:{entryId}:ENTERED` | 동일 entryId에서 같은 상태 전이는 1회만 발생 |
+| `EvacuationEntryExited` | `entry:{entryId}:EXITED` | 동일 |
 | `EvacuationEntryUpdated` | `entry:{entryId}:UPDATED:{eventId}` | 5분 내 동일 entryId 수정이 복수 발생 가능하므로 eventId 포함 |
 | `ShelterUpdated` | `shelter:{shelterId}:UPDATED:{eventId}` | 5분 내 동일 shelterId 수정이 복수 발생 가능하므로 eventId 포함 |
 | `DisasterDataCollected` | `collected:disaster:{collectionType}:{region}:{completedAt}` | |
@@ -81,7 +81,7 @@
 | 발행 주체 | `api-core` |
 | 발행 시점 | RDS 커밋 완료 직후 |
 | 소비자 | `cache-worker` |
-| `idempotencyKey` 구성 | `entry:{entryId}:ENTERED:v{version}` |
+| `idempotencyKey` 구성 | `entry:{entryId}:ENTERED` |
 
 ```json
 {
@@ -90,7 +90,7 @@
   "occurredAt": "2026-04-15T14:00:00+09:00",
   "producer": "api-core",
   "traceId": "uuid-v4",
-  "idempotencyKey": "entry:301:ENTERED:v1",
+  "idempotencyKey": "entry:301:ENTERED",
   "payload": {
     "entryId": 301,
     "shelterId": 101,
@@ -112,7 +112,7 @@
 | 발행 주체 | `api-core` |
 | 발행 시점 | RDS 커밋 완료 직후 |
 | 소비자 | `cache-worker` |
-| `idempotencyKey` 구성 | `entry:{entryId}:EXITED:v{version}` |
+| `idempotencyKey` 구성 | `entry:{entryId}:EXITED` |
 
 ```json
 {
@@ -121,7 +121,7 @@
   "occurredAt": "2026-04-15T15:10:00+09:00",
   "producer": "api-core",
   "traceId": "uuid-v4",
-  "idempotencyKey": "entry:301:EXITED:v1",
+  "idempotencyKey": "entry:301:EXITED",
   "payload": {
     "entryId": 301,
     "shelterId": 101,
