@@ -13,9 +13,13 @@ import java.time.Duration;
 import com.safespot.asyncworker.exception.RedisCacheException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -28,7 +32,7 @@ class RedisIdempotencyServiceTest {
 
     @BeforeEach
     void setUp() {
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
         service = new RedisIdempotencyService(redisTemplate);
     }
 
@@ -60,5 +64,22 @@ class RedisIdempotencyServiceTest {
 
         assertThatThrownBy(() -> service.tryAcquire("test-key", Duration.ofMinutes(5)))
             .isInstanceOf(RedisCacheException.class);
+    }
+
+    @Test
+    void release_성공시_DEL_호출() {
+        when(redisTemplate.delete(anyString())).thenReturn(true);
+
+        service.release("test-key");
+
+        verify(redisTemplate).delete("idempotency:test-key");
+    }
+
+    @Test
+    void release_Redis_실패시_예외_전파_안_함() {
+        when(redisTemplate.delete(anyString())).thenThrow(new RuntimeException("connection refused"));
+
+        // release는 실패해도 예외를 던지지 않아야 함
+        assertThatCode(() -> service.release("test-key")).doesNotThrowAnyException();
     }
 }

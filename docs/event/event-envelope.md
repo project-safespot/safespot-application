@@ -1,8 +1,9 @@
-# SafeSpot Event Envelope
+# SafeSpot 이벤트 Envelope 명세
 
-이 문서는 공통 event envelope, idempotency 규칙, event 예시를 정의한다.
+> 본 문서는 SafeSpot 시스템에서 발행되는 모든 이벤트의 envelope 구조, 이벤트 분류, 이벤트별 SQS payload를 정의한다.
+> Worker 처리 흐름, Output(Redis SET 포맷), 실패·재처리 정책은 `docs/async/async-worker.md`를 참조한다.
 
-worker behavior는 `docs/event/async-worker.md`에 둔다.
+---
 
 ## 1. 공통 Envelope
 
@@ -18,49 +19,69 @@ worker behavior는 `docs/event/async-worker.md`에 둔다.
 }
 ```
 
-| Field | Type | 의미 |
+| 필드 | 타입 | 설명 |
 | --- | --- | --- |
-| `eventId` | string | 고유 event ID |
-| `eventType` | string | 계약 event type |
-| `occurredAt` | string | event 발생 시각 |
-| `producer` | string | event를 생성한 service |
-| `traceId` | string | trace ID |
-| `idempotencyKey` | string | dedupe key |
-| `payload` | object | event payload |
+| `eventId` | string (UUID v4) | 이벤트 자체 고유 ID |
+| `eventType` | string | 이벤트 타입 식별자 |
+| `occurredAt` | ISO 8601 | 이벤트 발생 시각 |
+| `producer` | string | 발행 서비스 명 |
+| `traceId` | string (UUID v4) | 분산 추적용 |
+| `idempotencyKey` | string | 중복 소비 방지용 멱등키 |
+| `payload` | object | 실제 도메인 데이터 |
 
-## 2. Publish Durability 요구사항
+---
 
-모든 producer는 다음 규칙을 따라야 한다.
+## 2. 이벤트 분류
 
-- DB commit 후에만 publish한다.
-- publish는 durable해야 한다.
-- log-only failure handling은 허용하지 않는다.
-- 실패 시 replay 또는 recovery를 위해 full envelope를 보존해야 한다.
-- direct publish를 안전하게 완료할 수 없으면 replayable storage 또는 failure channel이 필요하다.
+| 분류 | 설명 | 발행 주체 |
+| --- | --- | --- |
+| **도메인 이벤트** | 관리자 Write 완료 후 발생하는 비즈니스 사실 | `api-core` |
+| **수집 이벤트** | external-ingestion Normalizer의 수집 완료 신호 | `external-ingestion Normalizer` |
+| **read-path 보상 이벤트** | Redis miss 발생 시 read path에서 캐시 재생성을 요청하는 이벤트. 도메인 변경이 아닌 조회 실패 보상 목적 | `api-public-read` |
+| **파생 갱신 작업** | 이벤트를 수신한 worker가 내부적으로 수행하는 캐시·Read Model 갱신 | 각 worker 내부 |
 
-## 3. Idempotency 규칙
+> 도메인 이벤트, 수집 이벤트, read-path 보상 이벤트만 SQS를 통해 흐르고, 파생 갱신은 worker 내부에서 처리된다.
 
-현재 canonical key:
+---
 
-| Event | idempotencyKey |
+## 3. idempotencyKey 구성 규칙
+
+| 이벤트 | 구성 규칙 | 비고 |
+| --- | --- | --- |
+| `EvacuationEntryCreated` | `entry:{entryId}:ENTERED` | 동일 entryId에서 같은 상태 전이는 1회만 발생 |
+| `EvacuationEntryExited` | `entry:{entryId}:EXITED` | 동일 |
+| `EvacuationEntryUpdated` | `entry:{entryId}:UPDATED:{eventId}` | 5분 내 동일 entryId 수정이 복수 발생 가능하므로 eventId 포함 |
+| `ShelterUpdated` | `shelter:{shelterId}:UPDATED:{eventId}` | 5분 내 동일 shelterId 수정이 복수 발생 가능하므로 eventId 포함 |
+| `DisasterDataCollected` | `collected:disaster:{collectionType}:{region}:{completedAt}` | |
+| `EnvironmentDataCollected` | `collected:env:{collectionType}:{region}:{timeWindow}` | |
+| `CacheRegenerationRequested` | `cache-regen:{cacheKey}:{windowStart}` | suppress window 단위로 dedup |
+
+---
+
+## 4. changedFields 사용 원칙
+
+- `changedFields`는 의미 전달용이며, **변경된 필드명만 포함**한다.
+- 개인정보 값 자체(`address`, `healthStatus`, `familyInfo` 등)는 이벤트 payload에 포함하지 않는다.
+- worker는 `changedFields`를 기준으로 Redis 갱신 필요 여부를 판단한다.
+
+---
+
+## 5. 이벤트 스펙
+
+### 도메인 이벤트
+
+---
+
+### EVENT-001 · `EvacuationEntryCreated`
+
+**입소 등록 완료 후 발행**
+
+| 항목 | 내용 |
 | --- | --- |
-| `EvacuationEntryCreated` | `entry:{entryId}:ENTERED` |
-| `EvacuationEntryExited` | `entry:{entryId}:EXITED` |
-| `EvacuationEntryUpdated` | `entry:{entryId}:UPDATED:{eventId}` |
-| `ShelterUpdated` | `shelter:{shelterId}:UPDATED:{eventId}` |
-| `DisasterDataCollected` | `collected:disaster:{collectionType}:{region}:{completedAt}` |
-| `EnvironmentDataCollected` | `collected:env:{collectionType}:{region}:{timeWindow}` |
-| `CacheRegenerationRequested` | `cache-regen:{cacheKeyHash}:{windowStart}` |
-
-`ENTERED`와 `EXITED`에는 version suffix를 사용하지 않는다.
-
-`CacheRegenerationRequested`에서 `cacheKeyHash`는 정확한 target `cacheKey`에서 파생해야 한다.
-
-`collected:env:*`는 event idempotency namespace일 뿐이다. Redis environment read-model key는 `environment:*`를 사용한다.
-
-## 4. Event Type
-
-### EVENT-001 `EvacuationEntryCreated`
+| 발행 주체 | `api-core` |
+| 발행 시점 | RDS 커밋 완료 직후 |
+| 소비자 | `cache-worker` |
+| `idempotencyKey` 구성 | `entry:{entryId}:ENTERED` |
 
 ```json
 {
@@ -80,7 +101,18 @@ worker behavior는 `docs/event/async-worker.md`에 둔다.
 }
 ```
 
-### EVENT-002 `EvacuationEntryExited`
+---
+
+### EVENT-002 · `EvacuationEntryExited`
+
+**퇴소 처리 완료 후 발행**
+
+| 항목 | 내용 |
+| --- | --- |
+| 발행 주체 | `api-core` |
+| 발행 시점 | RDS 커밋 완료 직후 |
+| 소비자 | `cache-worker` |
+| `idempotencyKey` 구성 | `entry:{entryId}:EXITED` |
 
 ```json
 {
@@ -100,7 +132,24 @@ worker behavior는 `docs/event/async-worker.md`에 둔다.
 }
 ```
 
-### EVENT-003 `EvacuationEntryUpdated`
+---
+
+### EVENT-003 · `EvacuationEntryUpdated`
+
+**입소 정보 수정 완료 후 발행**
+
+| 항목 | 내용 |
+| --- | --- |
+| 발행 주체 | `api-core` |
+| 발행 시점 | RDS 커밋 완료 직후 |
+| 소비자 | `cache-worker` |
+| `idempotencyKey` 구성 | `entry:{entryId}:UPDATED:{eventId}` ※ 5분 내 복수 수정 가능으로 eventId 포함 |
+| `idempotencyKey` 구성 | `entry:{entryId}:UPDATED:{eventId}` |
+
+> **eventId 포함 이유** 동일 엔티티에 대한 서로 다른 정상 변경이 TTL 내 dedupe로 차단되지 않도록, 변경 단위 고유 식별자(eventId)를 포함한다. 동일 이벤트 재전달 시에는 eventId가 같으므로 정상적으로 dedupe된다.
+
+**Input — SQS payload**
+
 
 ```json
 {
@@ -124,7 +173,25 @@ worker behavior는 `docs/event/async-worker.md`에 둔다.
 }
 ```
 
-### EVENT-004 `ShelterUpdated`
+---
+
+### EVENT-004 · `ShelterUpdated`
+
+**대피소 운영 정보 수정 완료 후 발행**
+
+| 항목 | 내용 |
+| --- | --- |
+| 발행 주체 | `api-core` |
+| 발행 시점 | RDS 커밋 완료 직후. `api-core`가 `shelter:status:{id}`, `shelter:list:{type}:{disasterType}` DEL 후 이벤트 발행 |
+| 소비자 | `cache-worker` |
+
+| `idempotencyKey` 구성 | `shelter:{shelterId}:UPDATED:{eventId}` ※ 5분 내 복수 수정 가능으로 eventId 포함 |
+
+| `idempotencyKey` 구성 | `shelter:{shelterId}:UPDATED:{eventId}` |
+
+> **eventId 포함 이유** 동일 대피소에 대한 서로 다른 정상 변경이 TTL 내 dedupe로 차단되지 않도록, 변경 단위 고유 식별자(eventId)를 포함한다. 동일 이벤트 재전달 시에는 eventId가 같으므로 정상적으로 dedupe된다.
+
+**Input — SQS payload**
 
 ```json
 {
@@ -147,19 +214,33 @@ worker behavior는 `docs/event/async-worker.md`에 둔다.
 }
 ```
 
-### EVENT-005 `DisasterDataCollected`
+---
+
+### 수집 이벤트
+
+---
+
+### EVENT-005 · `DisasterDataCollected`
+
+**external-ingestion Normalizer가 수집·정규화·저장 완료 후 발행**
+
+| 항목 | 내용 |
+| --- | --- |
+| 발행 주체 | `external-ingestion Normalizer` |
+| 소비자 | `readmodel-worker` |
+| `idempotencyKey` 구성 | `collected:disaster:{collectionType}:{region}:{completedAt}` |
 
 ```json
 {
   "eventId": "uuid-v4",
   "eventType": "DisasterDataCollected",
   "occurredAt": "2026-04-15T15:02:00+09:00",
-  "producer": "external-ingestion",
+  "producer": "external-ingestion Normalizer",
   "traceId": "uuid-v4",
-  "idempotencyKey": "collected:disaster:FLOOD:seoul:2026-04-15T15:02:00+09:00",
+  "idempotencyKey": "collected:disaster:FLOOD:서울특별시:2026-04-15T15:02:00+09:00",
   "payload": {
     "collectionType": "FLOOD",
-    "region": "seoul",
+    "region": "서울특별시",
     "affectedAlertIds": [55, 56],
     "hasExpiredAlerts": true,
     "completedAt": "2026-04-15T15:02:00+09:00"
@@ -167,35 +248,54 @@ worker behavior는 `docs/event/async-worker.md`에 둔다.
 }
 ```
 
-### EVENT-006 `EnvironmentDataCollected`
+> `hasExpiredAlerts: true`면 readmodel-worker가 Read Model 내부 정합성 유지를 위해 `disaster:active:{region}`을 DEL 후 재생성한다.
+
+---
+
+### EVENT-006 · `EnvironmentDataCollected`
+
+**external-ingestion Normalizer가 환경 데이터 수집 완료 후 발행**
+
+| 항목 | 내용 |
+| --- | --- |
+| 발행 주체 | `external-ingestion Normalizer` |
+| 소비자 | `cache-worker` |
+| `idempotencyKey` 구성 | `collected:env:{collectionType}:{region}:{timeWindow}` |
 
 ```json
 {
   "eventId": "uuid-v4",
   "eventType": "EnvironmentDataCollected",
   "occurredAt": "2026-04-15T15:10:00+09:00",
-  "producer": "external-ingestion",
+  "producer": "external-ingestion Normalizer",
   "traceId": "uuid-v4",
-  "idempotencyKey": "collected:env:AIR_QUALITY:seoul:2026-04-15T15:00",
+  "idempotencyKey": "collected:env:AIR_QUALITY:서울특별시:2026-04-15T15:00",
   "payload": {
     "collectionType": "AIR_QUALITY",
-    "region": "seoul",
+    "region": "서울특별시",
     "completedAt": "2026-04-15T15:10:00+09:00"
   }
 }
 ```
 
-### EVENT-007 `CacheRegenerationRequested`
+---
 
-목적: read-path cache miss, stale detection, downstream rebuild trigger 후 async Redis read model regeneration을 요청한다.
+### read-path 보상 이벤트
 
-규칙:
+---
 
-- 이 event는 Redis read model rebuild를 요청한다.
-- `api-public-read`가 Redis에 직접 write한다는 의미가 아니다.
-- rebuild execution은 `async-worker`가 소유한다.
-- `api-public-read`는 cache miss 또는 stale detection 시 request를 publish할 수 있다.
-- event flow에 따라 `external-ingestion`은 normalized DB write 후 downstream regeneration을 trigger할 수 있다.
+### EVENT-007 · `CacheRegenerationRequested`
+
+**api-public-read가 Redis miss 발생 시 캐시 재생성을 요청하기 위해 발행**
+
+> 도메인 변경 이벤트가 아니다. 조회 경로에서 Redis miss가 발생했을 때 worker에게 해당 키의 캐시 재생성을 위임하는 보상 이벤트다.
+
+| 항목 | 내용 |
+| --- | --- |
+| 발행 주체 | `api-public-read` |
+| 발행 조건 | Redis miss 또는 Redis 장애로 RDS fallback 발생 + suppress window(10초) 통과 |
+| 소비자 | `cache-worker` / `readmodel-worker` (cacheKey prefix 기준 분기) |
+| `idempotencyKey` 구성 | `cache-regen:{cacheKey}:{windowStart}` |
 
 ```json
 {
@@ -204,55 +304,62 @@ worker behavior는 `docs/event/async-worker.md`에 둔다.
   "occurredAt": "2026-04-15T15:05:00+09:00",
   "producer": "api-public-read",
   "traceId": "uuid-v4",
-  "idempotencyKey": "cache-regen:sha256(disaster:messages:list:seoul):1744980300",
+  "idempotencyKey": "cache-regen:shelter:status:101:1744980300",
   "payload": {
-    "cacheKey": "disaster:messages:list:seoul",
-    "cacheKeyFamily": "disaster_messages_list",
-    "requestedAt": "2026-04-15T15:05:00+09:00",
-    "reason": "cache_miss",
-    "schemaVersion": 1
+    "cacheKey": "shelter:status:101",
+    "requestedAt": "2026-04-15T15:05:00+09:00"
   }
 }
 ```
 
-Payload field:
+**cacheKey 허용 패턴 및 소비 주체**
 
-| Field | 의미 |
+| cacheKey 패턴 | 소비 주체 | worker 동작 |
+| --- | --- | --- |
+
+| `shelter:status:{shelterId}` | `cache-worker` | COUNT 재계산 후 재적재 |
+| `disaster:alert:list:{region}:{disasterType}` | `readmodel-worker` | RDS 조회 후 list 재적재 |
+| `disaster:latest:{disasterType}:{region}` | `readmodel-worker` | pointer 재적재 |
+| `disaster:detail:{alertId}` | `readmodel-worker` | detail 재적재 |
+
+> Worker 처리 흐름 상세 및 Output(Redis SET 포맷)은 `docs/async/async-worker.md`를 참조한다.
+
+| `EvacuationEntryCreated` | 조건부 허용 | `entryId + nextStatus` — 동일 상태 중복 수신 시 no-op |
+| `EvacuationEntryExited` | 조건부 허용 | `entryId`가 이미 EXITED면 no-op |
+| `EvacuationEntryUpdated` | 허용 | `entry:{entryId}:UPDATED:{eventId}` — 동일 eventId 재전달 시 no-op. 서로 다른 변경은 각각 처리 |
+| `ShelterUpdated` | 허용 | `shelter:{shelterId}:UPDATED:{eventId}` — 동일 eventId 재전달 시 no-op. 서로 다른 변경은 각각 처리 |
+| `DisasterDataCollected` | 허용 | `source + region + issuedAt` 기준 dedupe |
+| `EnvironmentDataCollected` | 허용 | `region + collectionType + timeWindow` 기준 overwrite |
+
+> **핵심 원칙** 캐시 계층은 overwrite 가능하게 설계한다. 원본 데이터 계층은 중복 INSERT 방지(UNIQUE 제약) 또는 상태 전이 검증으로 보호한다.
+
+---
+
+### 6-6. Redis 장애 시 Fallback
+
+| 상황 | 동작 |
 | --- | --- |
-| `cacheKey` | 정확한 Redis target key |
-| `cacheKeyFamily` | logical read-model family |
-| `requestedAt` | request 생성 시각 |
-| `reason` | regeneration이 요청된 이유 |
-| `schemaVersion` | event payload contract version |
+| 조회 시 Redis DOWN | Cache-Aside 기반으로 RDS fallback 수행 |
+| 캐시 재생성 시 Redis DOWN | worker 재시도 → DLQ 이동. 다음 조회 요청에서 Cache-Aside로 자연 복구 |
+| Read path에 비동기 큐 삽입 | ❌ 절대 금지 |
 
-권장 `cacheKeyFamily` 값:
+---
 
-- `disaster_messages_recent`
-- `disaster_message_core`
-- `disaster_messages_list`
-- `disaster_detail`
-- `shelter_status`
-- `shelter_list`
-- `environment_weather`
-- `environment_air_quality`
-- `environment_weather_alert`
+## 결론
 
-지원 disaster message cache target:
+본 서비스의 비동기 구조는 조회 요청을 지연시키기 위한 구조가 아니다. 관리자 입력 이후 발생하는 상태 캐시 갱신·Read Model 갱신을 분리하여, RDS 정합성과 조회 성능을 동시에 확보하기 위한 구조다.
 
-- `disaster:messages:recent:seoul`
-- `disaster:message:core:seoul`
-- `disaster:messages:list:seoul`
-- `disaster:detail:{alertId}`
+동기 구간에서는 공식 기록을 RDS에 확정하고, 비동기 구간에서는 Redis 조회용 데이터를 최신 상태로 유지한다. MVP에서는 단순성을 우선하여 트랜잭션 커밋 후 이벤트를 직접 발행하며, 운영 단계에서는 Outbox 패턴 도입을 검토한다.
 
-지원 environment cache target:
+관리자 대시보드는 별도 worker나 Redis 캐시 없이, `api-core`에서 RDS 조회 후 응답으로 제공한다.
 
-- `environment:weather:seoul`
-- `environment:air-quality:seoul`
-- `environment:weather-alert:seoul`
+`cache-worker`는 사용자 조회용 대피소 상태 캐시 및 환경 캐시를 담당하고, `readmodel-worker`는 재난 조회 Read Model을 유지한다.
 
-retired disaster key는 지원되는 `CacheRegenerationRequested` target이 아니다.
+---
 
-## 5. 관련 문서
+## 변경 이력
 
-- async worker behavior: `docs/event/async-worker.md`
-- Redis keys: `docs/redis-key/redis-key.md`
+| 날짜 | 항목 | 내용 |
+| --- | --- | --- |
+| 2026-04-20 | `RebuildEnvironmentCache` TTL | 60분 → 120분. stale-while-revalidate 패턴 적용, 오래된 데이터 반환 중 background refresh 트리거 |
+| 2026-04-22 | `EvacuationEntryUpdated` / `ShelterUpdated` idempotencyKey | 정적 엔티티 단위 키에서 이벤트 단위 키로 변경. `entry:{entryId}:UPDATED:{eventId}`, `shelter:{shelterId}:UPDATED:{eventId}`. TTL 내 동일 엔티티 연속 변경이 dedupe로 누락되는 문제 해소 |
