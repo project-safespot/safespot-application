@@ -8,6 +8,8 @@ import com.safespot.asyncworker.envelope.EnvelopeParser;
 import com.safespot.asyncworker.exception.EventProcessingException;
 import com.safespot.asyncworker.exception.RedisCacheException;
 import com.safespot.asyncworker.idempotency.IdempotencyService;
+import com.safespot.asyncworker.metrics.WorkerMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,7 +35,8 @@ class SqsBatchProcessorTest {
     @BeforeEach
     void setUp() {
         EnvelopeParser parser = new EnvelopeParser(new ObjectMapper());
-        processor = new SqsBatchProcessor(parser, idempotencyService, eventDispatcher);
+        WorkerMetrics workerMetrics = new WorkerMetrics(new SimpleMeterRegistry());
+        processor = new SqsBatchProcessor(parser, idempotencyService, eventDispatcher, workerMetrics);
     }
 
     // ── 정상 처리 ──────────────────────────────────────────────────────────────
@@ -159,17 +162,28 @@ class SqsBatchProcessorTest {
         verify(idempotencyService, never()).release(any());
     }
 
-    // ── 앱 재시도 한도 ────────────────────────────────────────────────────────
+    // ── 앱 재시도 한도 (5회 통일) ──────────────────────────────────────────────
 
     @Test
-    void EvacuationEntryUpdated_수신횟수_3초과시_BatchItemFailure() {
-        SQSEvent event = buildEvent("msg-001", validEnvelopeBody("EvacuationEntryUpdated"), 4);
+    void 수신횟수_5초과시_BatchItemFailure() {
+        SQSEvent event = buildEvent("msg-001", validEnvelopeBody("EvacuationEntryUpdated"), 6);
 
         SQSBatchResponse response = processor.process(event);
 
         assertThat(response.getBatchItemFailures()).hasSize(1);
         verifyNoInteractions(eventDispatcher);
         verify(idempotencyService, never()).release(any());
+    }
+
+    @Test
+    void 수신횟수_5이하시_정상_처리() {
+        when(idempotencyService.tryAcquire(any(), any())).thenReturn(true);
+        SQSEvent event = buildEvent("msg-001", validEnvelopeBody("EvacuationEntryUpdated"), 5);
+
+        SQSBatchResponse response = processor.process(event);
+
+        assertThat(response.getBatchItemFailures()).isEmpty();
+        verify(eventDispatcher).dispatch(any());
     }
 
     // ── 배치 부분 실패 ────────────────────────────────────────────────────────
@@ -247,6 +261,28 @@ class SqsBatchProcessorTest {
         assertThat(r1.getBatchItemFailures()).isEmpty();
         assertThat(r2.getBatchItemFailures()).isEmpty();
         verify(eventDispatcher, times(2)).dispatch(any());
+    }
+
+    // ── CacheRegenerationRequested 처리 ───────────────────────────────────────
+
+    @Test
+    void CacheRegenerationRequested_정상_처리() {
+        when(idempotencyService.tryAcquire(any(), any())).thenReturn(true);
+        String body = """
+            {
+              "eventId": "evt-regen-001",
+              "eventType": "CacheRegenerationRequested",
+              "traceId": "trace-regen",
+              "idempotencyKey": "cache-regen:shelter:status:101:1744980300",
+              "payload": {"cacheKey": "shelter:status:101", "requestedAt": "2026-04-15T15:05:00+09:00"}
+            }
+            """;
+        SQSEvent event = buildEvent("msg-regen", body, 1);
+
+        SQSBatchResponse response = processor.process(event);
+
+        assertThat(response.getBatchItemFailures()).isEmpty();
+        verify(eventDispatcher).dispatch(any());
     }
 
     // ── 헬퍼 ──────────────────────────────────────────────────────────────────

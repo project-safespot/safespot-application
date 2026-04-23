@@ -1,6 +1,7 @@
 spring:
   main:
     web-application-type: none
+
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}

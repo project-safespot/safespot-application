@@ -10,6 +10,7 @@ public final class RedisTtlConstants {
     public static final Duration DISASTER_ACTIVE      = Duration.ofMinutes(2);
     public static final Duration DISASTER_ALERT_LIST  = Duration.ofMinutes(5);
     public static final Duration DISASTER_DETAIL      = Duration.ofMinutes(10);
+    public static final Duration DISASTER_LATEST      = Duration.ofMinutes(5);
     public static final Duration ENV_WEATHER          = Duration.ofMinutes(120);
     public static final Duration ENV_AIR              = Duration.ofMinutes(120);
 }

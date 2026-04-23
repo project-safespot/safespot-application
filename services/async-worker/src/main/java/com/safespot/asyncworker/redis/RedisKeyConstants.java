@@ -8,6 +8,7 @@ public final class RedisKeyConstants {
     public static final String DISASTER_ACTIVE   = "disaster:active:%s";
     public static final String DISASTER_ALERT_LIST  = "disaster:alert:list:%s:%s";
     public static final String DISASTER_DETAIL   = "disaster:detail:%d";
+    public static final String DISASTER_LATEST   = "disaster:latest:%s:%s";
     public static final String ENV_WEATHER       = "env:weather:%d:%d";
     public static final String ENV_AIR           = "env:air:%s";
     public static final String IDEMPOTENCY       = "idempotency:%s";
@@ -26,6 +27,10 @@ public final class RedisKeyConstants {
 
     public static String disasterDetail(Long alertId) {
         return DISASTER_DETAIL.formatted(alertId);
+    }
+
+    public static String disasterLatest(String disasterType, String region) {
+        return DISASTER_LATEST.formatted(disasterType, region);
     }
 
     public static String envWeather(int nx, int ny) {

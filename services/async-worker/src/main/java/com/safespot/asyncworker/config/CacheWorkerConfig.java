@@ -2,6 +2,7 @@ package com.safespot.asyncworker.config;
 
 import com.safespot.asyncworker.dispatcher.EventDispatcher;
 import com.safespot.asyncworker.handler.EventHandler;
+import com.safespot.asyncworker.handler.cache.CacheRegenerationCacheWorkerHandler;
 import com.safespot.asyncworker.handler.cache.EnvironmentDataCollectedHandler;
 import com.safespot.asyncworker.handler.cache.EvacuationEntryCreatedHandler;
 import com.safespot.asyncworker.handler.cache.EvacuationEntryExitedHandler;
@@ -23,14 +24,16 @@ public class CacheWorkerConfig {
         EvacuationEntryExitedHandler exitedHandler,
         EvacuationEntryUpdatedHandler updatedHandler,
         ShelterUpdatedHandler shelterUpdatedHandler,
-        EnvironmentDataCollectedHandler environmentHandler
+        EnvironmentDataCollectedHandler environmentHandler,
+        CacheRegenerationCacheWorkerHandler cacheRegenerationHandler
     ) {
         List<EventHandler> handlers = List.of(
             createdHandler,
             exitedHandler,
             updatedHandler,
             shelterUpdatedHandler,
-            environmentHandler
+            environmentHandler,
+            cacheRegenerationHandler
         );
         return new EventDispatcher(handlers);
     }

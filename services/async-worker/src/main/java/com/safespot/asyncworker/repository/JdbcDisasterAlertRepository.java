@@ -35,6 +35,18 @@ public class JdbcDisasterAlertRepository implements DisasterAlertRepository {
         ORDER BY issued_at DESC
         """;
 
+    private static final String FIND_LATEST_ACTIVE_BY_TYPE_AND_REGION_SQL = """
+        SELECT alert_id, disaster_type, region, level, message, source,
+               issued_at::text AS issued_at,
+               expired_at::text AS expired_at
+        FROM disaster_alert
+        WHERE disaster_type = :disasterType
+          AND region = :region
+          AND expired_at IS NULL
+        ORDER BY issued_at DESC
+        LIMIT 1
+        """;
+
     private static final String FIND_BY_ID_SQL = """
         SELECT alert_id, disaster_type, region, level, message, source,
                issued_at::text AS issued_at,
@@ -61,6 +73,20 @@ public class JdbcDisasterAlertRepository implements DisasterAlertRepository {
             Map.of("region", region, "disasterType", disasterType),
             (rs, rowNum) -> mapRow(rs)
         );
+    }
+
+    @Override
+    public Optional<DisasterAlertRecord> findLatestActiveByTypeAndRegion(String disasterType, String region) {
+        try {
+            DisasterAlertRecord record = jdbcTemplate.queryForObject(
+                FIND_LATEST_ACTIVE_BY_TYPE_AND_REGION_SQL,
+                Map.of("disasterType", disasterType, "region", region),
+                (rs, rowNum) -> mapRow(rs)
+            );
+            return Optional.ofNullable(record);
+        } catch (EmptyResultDataAccessException e) {
+            return Optional.empty();
+        }
     }
 
     @Override

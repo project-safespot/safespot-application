@@ -25,6 +25,6 @@ public class CacheWorkerHandler implements RequestHandler<SQSEvent, SQSBatchResp
 
     @Override
     public SQSBatchResponse handleRequest(SQSEvent event, Context context) {
-        return processor.process(event);
+        return processor.process(event, context.getAwsRequestId());
     }
 }
