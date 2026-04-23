@@ -1,0 +1,14 @@
+package com.safespot.externalingestion.domain.enums;
+
+public enum SourceCode {
+    SAFETY_DATA_ALERT,
+    KMA_EARTHQUAKE,
+    SEOUL_EARTHQUAKE,
+    FORESTRY_LANDSLIDE,
+    SEOUL_RIVER_LEVEL,
+    KMA_WEATHER,
+    AIR_KOREA_AIR_QUALITY,
+    SEOUL_SHELTER_EARTHQUAKE,
+    SEOUL_SHELTER_LANDSLIDE,
+    SEOUL_SHELTER_FLOOD
+}
