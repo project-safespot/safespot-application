@@ -194,7 +194,7 @@ SQS publish log:
   "traceId": "uuid",
   "eventId": "uuid",
   "eventType": "EvacuationEntryCreated",
-  "idempotencyKey": "entry:301:ENTERED:v1",
+  "idempotencyKey": "entry:301:ENTERED",
   "queueName": "safespot-cache-refresh",
   "result": "success"
 }
@@ -380,7 +380,7 @@ unknown
   "queueName": "cache-refresh-queue",
   "eventId": "uuid",
   "eventType": "EvacuationEntryCreated",
-  "idempotencyKey": "entry:301:ENTERED:v1",
+  "idempotencyKey": "entry:301:ENTERED",
   "result": "success",
   "durationMs": 35,
   "redisOperations": [
@@ -407,7 +407,7 @@ unknown
   "queueName": "cache-refresh-queue",
   "eventId": "uuid",
   "eventType": "EvacuationEntryCreated",
-  "idempotencyKey": "entry:301:ENTERED:v1",
+  "idempotencyKey": "entry:301:ENTERED",
   "receiveCount": 3,
   "reason": "redis_error",
   "errorCode": "REDIS_TIMEOUT",
@@ -427,7 +427,7 @@ DLQ 관련 log:
   "queueName": "cache-refresh-dlq",
   "eventId": "uuid",
   "eventType": "ShelterUpdated",
-  "idempotencyKey": "shelter:10:UPDATED:v1",
+  "idempotencyKey": "shelter:10:UPDATED:uuid-v4",
   "reason": "max_receive_count_exceeded"
 }
 ```
