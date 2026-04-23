@@ -51,8 +51,11 @@ public class AdminDashboardService {
         long fullShelters = shelterItems.stream()
                 .filter(s -> "FULL".equals(s.getCongestionLevel()))
                 .count();
+        long crowdedShelters = shelterItems.stream()
+                .filter(s -> "CROWDED".equals(s.getCongestionLevel()))
+                .count();
 
-        metrics.updateShelterFullCount(fullShelters);
+        metrics.updateShelterCounts(fullShelters, crowdedShelters, openShelters);
 
         return DashboardResponse.builder()
                 .summary(DashboardResponse.Summary.builder()

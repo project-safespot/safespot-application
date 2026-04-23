@@ -83,8 +83,8 @@ public class ShelterAdminService {
         metrics.incAdminAction("SHELTER_UPDATE");
 
         eventPublisher.publishEvent(new ShelterUpdatedSpringEvent(this,
-                EventEnvelope.of("ShelterUpdated",
-                        "shelter:" + shelterId + ":UPDATED",
+                EventEnvelope.ofWithEventId("ShelterUpdated",
+                        "shelter:" + shelterId + ":UPDATED:",
                         ShelterUpdatedPayload.builder()
                                 .shelterId(shelterId)
                                 .shelterType(shelter.getShelterType())

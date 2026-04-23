@@ -6,6 +6,7 @@ import com.safespot.apicore.auth.service.AuthService;
 import com.safespot.apicore.common.exception.ApiException;
 import com.safespot.apicore.domain.entity.AppUser;
 import com.safespot.apicore.domain.enums.Role;
+import com.safespot.apicore.metrics.ApiCoreMetrics;
 import com.safespot.apicore.repository.AppUserRepository;
 import com.safespot.apicore.security.JwtTokenProvider;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +34,8 @@ class AuthServiceTest {
     private PasswordEncoder passwordEncoder;
     @Mock
     private JwtTokenProvider jwtTokenProvider;
+    @Mock
+    private ApiCoreMetrics metrics;
 
     @InjectMocks
     private AuthService authService;

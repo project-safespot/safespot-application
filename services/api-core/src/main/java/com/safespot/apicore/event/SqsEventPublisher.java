@@ -1,6 +1,7 @@
 package com.safespot.apicore.event;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.safespot.apicore.metrics.ApiCoreMetrics;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +25,7 @@ public class SqsEventPublisher {
 
     private final ObjectMapper objectMapper;
     private final Environment environment;
+    private final ApiCoreMetrics metrics;
 
     @Autowired(required = false)
     private SqsClient sqsClient;
@@ -42,8 +44,7 @@ public class SqsEventPublisher {
         boolean isLocalOrTest = environment.matchesProfiles("local") || environment.matchesProfiles("test");
         if (!isLocalOrTest && (sqsClient == null || queueUrl.isBlank())) {
             throw new IllegalStateException(
-                    "safespot.sqs.queue-url must be configured in non-local/test environments. " +
-                    "Set the property or add LocalStack endpoint for local development.");
+                    "safespot.sqs.queue-url must be configured in non-local/test environments.");
         }
     }
 
@@ -60,6 +61,7 @@ public class SqsEventPublisher {
         } catch (Exception e) {
             log.error("[SQS] serialization failed — event lost: type={} eventId={}",
                     envelope.getEventType(), envelope.getEventId(), e);
+            metrics.incSqsPublish(envelope.getEventType(), "failure", resolveQueueName());
             return;
         }
 
@@ -67,6 +69,7 @@ public class SqsEventPublisher {
     }
 
     private void sendWithRetry(EventEnvelope<?> envelope, String body) {
+        String queueName = resolveQueueName();
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             if (attempt > 0) {
                 try {
@@ -75,8 +78,10 @@ public class SqsEventPublisher {
                     Thread.currentThread().interrupt();
                     log.warn("[SQS] retry interrupted: type={} eventId={}",
                             envelope.getEventType(), envelope.getEventId());
+                    metrics.incSqsPublish(envelope.getEventType(), "failure", queueName);
                     return;
                 }
+                metrics.incSqsPublishRetry(envelope.getEventType(), queueName);
             }
             try {
                 sqsClient.sendMessage(SendMessageRequest.builder()
@@ -84,7 +89,9 @@ public class SqsEventPublisher {
                         .messageBody(body)
                         .build());
                 log.info("[SQS] published (attempt={}): type={} eventId={} idempotencyKey={}",
-                        attempt + 1, envelope.getEventType(), envelope.getEventId(), envelope.getIdempotencyKey());
+                        attempt + 1, envelope.getEventType(), envelope.getEventId(),
+                        envelope.getIdempotencyKey());
+                metrics.incSqsPublish(envelope.getEventType(), "success", queueName);
                 return;
             } catch (Exception e) {
                 if (attempt < MAX_RETRIES) {
@@ -96,8 +103,15 @@ public class SqsEventPublisher {
                                     "eventId={} eventType={} idempotencyKey={} producer={}",
                             MAX_RETRIES + 1, envelope.getEventId(), envelope.getEventType(),
                             envelope.getIdempotencyKey(), envelope.getProducer(), e);
+                    metrics.incSqsPublish(envelope.getEventType(), "failure", queueName);
                 }
             }
         }
+    }
+
+    private String resolveQueueName() {
+        if (queueUrl.isBlank()) return "unknown";
+        int idx = queueUrl.lastIndexOf('/');
+        return idx >= 0 ? queueUrl.substring(idx + 1) : queueUrl;
     }
 }
