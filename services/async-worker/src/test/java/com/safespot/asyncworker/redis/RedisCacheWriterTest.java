@@ -3,7 +3,9 @@ package com.safespot.asyncworker.redis;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safespot.asyncworker.exception.EventProcessingException;
 import com.safespot.asyncworker.exception.RedisCacheException;
+import com.safespot.asyncworker.metrics.WorkerMetrics;
 import com.safespot.asyncworker.service.shelter.ShelterStatusValue;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,7 +33,8 @@ class RedisCacheWriterTest {
     @BeforeEach
     void setUp() {
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        cacheWriter = new RedisCacheWriter(redisTemplate, new ObjectMapper());
+        WorkerMetrics workerMetrics = new WorkerMetrics(new SimpleMeterRegistry());
+        cacheWriter = new RedisCacheWriter(redisTemplate, new ObjectMapper(), workerMetrics);
     }
 
     @Test
@@ -65,7 +68,8 @@ class RedisCacheWriterTest {
         ObjectMapper brokenMapper = mock(ObjectMapper.class, invocation -> {
             throw new com.fasterxml.jackson.core.JsonProcessingException("serialization error") {};
         });
-        RedisCacheWriter writerWithBrokenMapper = new RedisCacheWriter(redisTemplate, brokenMapper);
+        WorkerMetrics metricsForBroken = new WorkerMetrics(new SimpleMeterRegistry());
+        RedisCacheWriter writerWithBrokenMapper = new RedisCacheWriter(redisTemplate, brokenMapper, metricsForBroken);
 
         assertThatThrownBy(() ->
             writerWithBrokenMapper.setWeather(new WeatherCacheValue(60, 127, 22.5, "CLEAR", "2026-04-22T10:00:00"))

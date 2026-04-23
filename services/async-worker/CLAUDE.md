@@ -154,8 +154,8 @@ eventType과 payload는 `docs/event/event-envelope.md`를 기준으로 한다.
 
 idempotencyKey 기준:
 
-- `EvacuationEntryCreated`: `entry:{entryId}:ENTERED:v{version}`
-- `EvacuationEntryExited`: `entry:{entryId}:EXITED:v{version}`
+- `EvacuationEntryCreated`: `entry:{entryId}:ENTERED`
+- `EvacuationEntryExited`: `entry:{entryId}:EXITED`
 - `EvacuationEntryUpdated`: `entry:{entryId}:UPDATED:{eventId}`
 - `ShelterUpdated`: `shelter:{shelterId}:UPDATED:{eventId}`
 - `CacheRegenerationRequested`: `cache-regen:{cacheKey}:{windowStart}`

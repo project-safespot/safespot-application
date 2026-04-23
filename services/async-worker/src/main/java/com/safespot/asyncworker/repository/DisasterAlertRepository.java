@@ -10,4 +10,6 @@ public interface DisasterAlertRepository {
     List<DisasterAlertRecord> findByRegionAndDisasterType(String region, String disasterType);
 
     Optional<DisasterAlertRecord> findById(Long alertId);
+
+    Optional<DisasterAlertRecord> findLatestActiveByTypeAndRegion(String disasterType, String region);
 }
