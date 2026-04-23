@@ -89,6 +89,18 @@ idempotencyKey 규칙:
 
 `EvacuationEntryUpdated`, `ShelterUpdated`는 같은 대상에 대해 단시간 내 정상적인 복수 이벤트가 발생할 수 있으므로 `eventId`를 idempotencyKey에 포함한다.
 
+#### idempotencyKey 생성 규칙 (update 이벤트)
+
+update 이벤트는 반드시 변경 단위 고유 식별자(eventId)를 포함한다.
+동일 엔티티의 연속 변경이 TTL 내 dedupe로 차단되지 않도록 하기 위함이다.
+
+| 이벤트 | idempotencyKey 형식 |
+|--------|-------------------|
+| `EvacuationEntryUpdated` | `entry:{entryId}:UPDATED:{eventId}` |
+| `ShelterUpdated` | `shelter:{shelterId}:UPDATED:{eventId}` |
+| `EvacuationEntryCreated` | `entry:{entryId}:ENTERED:v{version}` |
+| `EvacuationEntryExited` | `entry:{entryId}:EXITED:v{version}` |
+
 ### Redis
 
 - api-core는 즉시 stale 제거가 필요한 도메인 캐시 키를 DEL할 수 있다.

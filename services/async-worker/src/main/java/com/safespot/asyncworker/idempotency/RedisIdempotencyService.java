@@ -17,6 +17,19 @@ public class RedisIdempotencyService implements IdempotencyService {
     private final StringRedisTemplate redisTemplate;
 
     @Override
+    public void release(String idempotencyKey) {
+        String redisKey = RedisKeyConstants.idempotency(idempotencyKey);
+        try {
+            redisTemplate.delete(redisKey);
+            log.info("Idempotency key released: key={}", redisKey);
+        } catch (Exception e) {
+            // release 실패 시 키가 남음 → 재시도가 duplicate로 차단될 수 있음
+            // 이 경우 TTL 만료 후 자연 복구. 원래 실패 결과를 방해하지 않기 위해 예외 전파 안 함
+            log.warn("Idempotency release failed, key may persist until TTL expiry: key={}", redisKey, e);
+        }
+    }
+
+    @Override
     public boolean tryAcquire(String idempotencyKey, Duration ttl) {
         String redisKey = RedisKeyConstants.idempotency(idempotencyKey);
         try {

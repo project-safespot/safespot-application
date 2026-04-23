@@ -144,6 +144,12 @@
 | 발행 시점 | RDS 커밋 완료 직후 |
 | 소비자 | `cache-worker` |
 | `idempotencyKey` 구성 | `entry:{entryId}:UPDATED:{eventId}` ※ 5분 내 복수 수정 가능으로 eventId 포함 |
+| `idempotencyKey` 구성 | `entry:{entryId}:UPDATED:{eventId}` |
+
+> **eventId 포함 이유** 동일 엔티티에 대한 서로 다른 정상 변경이 TTL 내 dedupe로 차단되지 않도록, 변경 단위 고유 식별자(eventId)를 포함한다. 동일 이벤트 재전달 시에는 eventId가 같으므로 정상적으로 dedupe된다.
+
+**Input — SQS payload**
+
 
 ```json
 {
@@ -178,7 +184,14 @@
 | 발행 주체 | `api-core` |
 | 발행 시점 | RDS 커밋 완료 직후. `api-core`가 `shelter:status:{id}`, `shelter:list:{type}:{disasterType}` DEL 후 이벤트 발행 |
 | 소비자 | `cache-worker` |
+
 | `idempotencyKey` 구성 | `shelter:{shelterId}:UPDATED:{eventId}` ※ 5분 내 복수 수정 가능으로 eventId 포함 |
+
+| `idempotencyKey` 구성 | `shelter:{shelterId}:UPDATED:{eventId}` |
+
+> **eventId 포함 이유** 동일 대피소에 대한 서로 다른 정상 변경이 TTL 내 dedupe로 차단되지 않도록, 변경 단위 고유 식별자(eventId)를 포함한다. 동일 이벤트 재전달 시에는 eventId가 같으므로 정상적으로 dedupe된다.
+
+**Input — SQS payload**
 
 ```json
 {
@@ -303,9 +316,50 @@
 
 | cacheKey 패턴 | 소비 주체 | worker 동작 |
 | --- | --- | --- |
+
 | `shelter:status:{shelterId}` | `cache-worker` | COUNT 재계산 후 재적재 |
 | `disaster:alert:list:{region}:{disasterType}` | `readmodel-worker` | RDS 조회 후 list 재적재 |
 | `disaster:latest:{disasterType}:{region}` | `readmodel-worker` | pointer 재적재 |
 | `disaster:detail:{alertId}` | `readmodel-worker` | detail 재적재 |
 
 > Worker 처리 흐름 상세 및 Output(Redis SET 포맷)은 `docs/async/async-worker.md`를 참조한다.
+
+| `EvacuationEntryCreated` | 조건부 허용 | `entryId + nextStatus` — 동일 상태 중복 수신 시 no-op |
+| `EvacuationEntryExited` | 조건부 허용 | `entryId`가 이미 EXITED면 no-op |
+| `EvacuationEntryUpdated` | 허용 | `entry:{entryId}:UPDATED:{eventId}` — 동일 eventId 재전달 시 no-op. 서로 다른 변경은 각각 처리 |
+| `ShelterUpdated` | 허용 | `shelter:{shelterId}:UPDATED:{eventId}` — 동일 eventId 재전달 시 no-op. 서로 다른 변경은 각각 처리 |
+| `DisasterDataCollected` | 허용 | `source + region + issuedAt` 기준 dedupe |
+| `EnvironmentDataCollected` | 허용 | `region + collectionType + timeWindow` 기준 overwrite |
+
+> **핵심 원칙** 캐시 계층은 overwrite 가능하게 설계한다. 원본 데이터 계층은 중복 INSERT 방지(UNIQUE 제약) 또는 상태 전이 검증으로 보호한다.
+
+---
+
+### 6-6. Redis 장애 시 Fallback
+
+| 상황 | 동작 |
+| --- | --- |
+| 조회 시 Redis DOWN | Cache-Aside 기반으로 RDS fallback 수행 |
+| 캐시 재생성 시 Redis DOWN | worker 재시도 → DLQ 이동. 다음 조회 요청에서 Cache-Aside로 자연 복구 |
+| Read path에 비동기 큐 삽입 | ❌ 절대 금지 |
+
+---
+
+## 결론
+
+본 서비스의 비동기 구조는 조회 요청을 지연시키기 위한 구조가 아니다. 관리자 입력 이후 발생하는 상태 캐시 갱신·Read Model 갱신을 분리하여, RDS 정합성과 조회 성능을 동시에 확보하기 위한 구조다.
+
+동기 구간에서는 공식 기록을 RDS에 확정하고, 비동기 구간에서는 Redis 조회용 데이터를 최신 상태로 유지한다. MVP에서는 단순성을 우선하여 트랜잭션 커밋 후 이벤트를 직접 발행하며, 운영 단계에서는 Outbox 패턴 도입을 검토한다.
+
+관리자 대시보드는 별도 worker나 Redis 캐시 없이, `api-core`에서 RDS 조회 후 응답으로 제공한다.
+
+`cache-worker`는 사용자 조회용 대피소 상태 캐시 및 환경 캐시를 담당하고, `readmodel-worker`는 재난 조회 Read Model을 유지한다.
+
+---
+
+## 변경 이력
+
+| 날짜 | 항목 | 내용 |
+| --- | --- | --- |
+| 2026-04-20 | `RebuildEnvironmentCache` TTL | 60분 → 120분. stale-while-revalidate 패턴 적용, 오래된 데이터 반환 중 background refresh 트리거 |
+| 2026-04-22 | `EvacuationEntryUpdated` / `ShelterUpdated` idempotencyKey | 정적 엔티티 단위 키에서 이벤트 단위 키로 변경. `entry:{entryId}:UPDATED:{eventId}`, `shelter:{shelterId}:UPDATED:{eventId}`. TTL 내 동일 엔티티 연속 변경이 dedupe로 누락되는 문제 해소 |

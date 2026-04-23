@@ -10,4 +10,11 @@ public interface IdempotencyService {
      * false = 이미 처리됨   → no-op
      */
     boolean tryAcquire(String idempotencyKey, Duration ttl);
+
+    /**
+     * 처리 실패 시 획득한 키를 반환한다.
+     * 재시도에서 동일 이벤트가 duplicate로 차단되지 않도록 보장한다.
+     * 실패해도 예외를 전파하지 않는다 — 원래 실패 결과가 우선이다.
+     */
+    void release(String idempotencyKey);
 }

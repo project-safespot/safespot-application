@@ -58,6 +58,7 @@ public class SqsBatchProcessor {
         String traceId = envelope.getTraceId();
         String eventId = envelope.getEventId();
 
+        boolean acquired = false;
         try {
             EventType eventType = EventType.from(envelope.getEventType());
 
@@ -67,7 +68,7 @@ public class SqsBatchProcessor {
                 return MessageProcessingResult.failure(messageId, "AppRetryLimitExceeded");
             }
 
-            boolean acquired = idempotencyService.tryAcquire(
+            acquired = idempotencyService.tryAcquire(
                 envelope.getIdempotencyKey(),
                 IdempotencyTtl.forEventType(eventType)
             );
@@ -85,10 +86,21 @@ public class SqsBatchProcessor {
         } catch (EventProcessingException e) {
             log.error("Event processing failed: eventId={}, traceId={}, reason={}",
                 eventId, traceId, e.getMessage(), e);
+            releaseIfAcquired(acquired, envelope.getIdempotencyKey(), eventId);
             return MessageProcessingResult.failure(messageId, e.getMessage());
         } catch (Exception e) {
             log.error("Unexpected error: eventId={}, traceId={}", eventId, traceId, e);
+            releaseIfAcquired(acquired, envelope.getIdempotencyKey(), eventId);
             return MessageProcessingResult.failure(messageId, "UnexpectedError: " + e.getMessage());
+        }
+    }
+
+    private void releaseIfAcquired(boolean acquired, String idempotencyKey, String eventId) {
+        if (!acquired) return;
+        try {
+            idempotencyService.release(idempotencyKey);
+        } catch (Exception e) {
+            log.warn("Idempotency release failed after processing error: eventId={}, key={}", eventId, idempotencyKey, e);
         }
     }
 

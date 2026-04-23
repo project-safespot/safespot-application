@@ -70,7 +70,7 @@ class ShelterUpdatedHandlerTest {
         envelope.setEventId("evt-002");
         envelope.setEventType(EventType.ShelterUpdated.name());
         envelope.setTraceId("trace-002");
-        envelope.setIdempotencyKey("shelter:101:UPDATED");
+        envelope.setIdempotencyKey("shelter:101:UPDATED:evt-002");
         envelope.setPayload(objectMapper.readTree(payloadJson));
         return envelope;
     }

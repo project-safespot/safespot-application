@@ -67,7 +67,7 @@ class EvacuationEntryUpdatedHandlerTest {
         envelope.setEventId("evt-001");
         envelope.setEventType(EventType.EvacuationEntryUpdated.name());
         envelope.setTraceId("trace-001");
-        envelope.setIdempotencyKey("entry:301:UPDATED");
+        envelope.setIdempotencyKey("entry:301:UPDATED:evt-001");
         envelope.setPayload(objectMapper.readTree(payloadJson));
         return envelope;
     }
