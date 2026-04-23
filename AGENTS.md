@@ -1,47 +1,78 @@
 # AGENTS.md
 
 ## Project
+SafeSpot monorepo (api-core / api-public-read / external-ingestion).
 
-SafeSpot disaster evacuation service.
+## Primary Goal
+Maintain strict contract consistency across:
+- API docs
+- service responsibilities
+- event contracts
+- Redis key contracts
+- monitoring contracts
 
-## General rules
+---
 
-- Do not change unrelated files.
-- Prefer minimal, reviewable diffs.
-- Keep naming consistent with existing docs and Terraform module layout.
-- Ask for a plan first on ambiguous or multi-step tasks.
-- Do not apply destructive infrastructure changes without explicit confirmation in the thread.
+## Global Rules
 
-## Git rules
+1. Markdown documents are treated as source-of-truth contracts.
+2. Do NOT modify code when the task is documentation-only.
+3. Prefer minimal, surgical edits over large rewrites.
+4. When a shared policy changes, update all affected documents in the same task.
+5. Do NOT leave contradictions across documents if they are in scope.
+6. Do NOT invent new product policy.
+7. Preserve existing document structure and tone unless explicitly instructed.
 
-- Work only on the current branch/worktree.
-- Never force-push.
-- Do not rewrite history.
+---
 
-## Terraform rules
+## Current Project Policies (MUST FOLLOW)
 
-- Follow the module structure under `terraform/modules` and `terraform/environments`.
-- Keep variables, outputs, README, and examples aligned.
-- Prefer explicit inputs/outputs over hidden coupling.
-- Avoid over-broad IAM permissions.
-- Flag cost-sensitive resources explicitly: NAT Gateway, RDS Multi-AZ, Redis replicas, public LB.
+### Capacity
+- Over-capacity admission is allowed.
+- Shelter capacity is NOT a hard limit.
+- `SHELTER_FULL` is NOT part of the active contract.
 
-## Documentation rules
+### Region (MVP)
+- Current public scope is Seoul.
+- Unsupported region must use `UNSUPPORTED_REGION`.
 
-- Use `docs/README.md` as the documentation index.
-- Keep documentation changes scoped and reviewable.
-- Common API policy belongs in `docs/api/api-common.md`.
-- api-core endpoint details belong in `docs/api/api-core.md`.
-- api-public-read endpoint details belong in `docs/api/api-public-read.md`.
-- Event envelope, event type, payload, and `idempotencyKey` rules belong in `docs/event/event-envelope.md`.
-- Async worker behavior, retry/DLQ policy, Redis refresh behavior, and worker responsibility boundaries belong in `docs/async/async-worker.md`.
-- Application and async-worker metric/log requirements belong in `docs/monitoring/monitoring.md`.
-- Redis key naming and TTL policy belong in `docs/redis-key/redis-key.md` and `docs/redis-key/cache-ttl.md`.
-- If documents conflict, prefer the more specific responsibility document, except when it conflicts with common API policy. In that case, update the common policy first.
-- When changing event payloads or `idempotencyKey` formats, update both `docs/event/event-envelope.md` and the relevant worker behavior in `docs/async/async-worker.md`.
+### Events
+- Domain events must be published AFTER DB commit.
+- Log-only fallback is NOT sufficient (durability expected in contract discussion).
 
-## Review rules
+### Cache (Disaster)
+- Pointer/detail separation is used where documented:
+  - pointer: `disaster:latest:{disasterType}:{region}`
+  - detail: `disaster:detail:{alertId}`
 
-- Reviewers should not make broad refactors.
-- Reviewers should focus on correctness, safety, cost, security, and consistency.
-- When possible, comment on diffs rather than rewriting the implementation.
+---
+
+## Documentation Consistency Targets
+
+When editing any of these, check related documents:
+
+- docs/api/api-common.md
+- docs/api/api-core.md
+- docs/api/api-public-read.md
+- docs/ingestion/external-ingestion.md
+- docs/event/event-envelope.md
+- docs/redis-key/redis-key.md
+- docs/README.md
+
+---
+
+## Out of Scope (unless explicitly requested)
+
+- Code refactoring
+- New feature design
+- Architecture changes
+- Formatting-only global rewrites
+
+---
+
+## Editing Style
+
+- Keep language precise and policy-oriented
+- Prefer short declarative sentences
+- Avoid ambiguity
+- Keep Korean if the original document is Korean
