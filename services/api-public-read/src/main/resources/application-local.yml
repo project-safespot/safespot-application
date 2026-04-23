@@ -10,12 +10,32 @@ spring:
       path: /h2-console
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: create-drop
     show-sql: true
     open-in-view: false
   sql:
     init:
       mode: never
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 1000ms
+      connect-timeout: 500ms
+      lettuce:
+        pool:
+          enabled: false
 
 server:
   port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    tags:
+      service: api-public-read
+      env: dev
+      region: seoul
