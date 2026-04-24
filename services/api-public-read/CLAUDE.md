@@ -2,7 +2,7 @@
 
 ## 1. Responsibility
 
-`api-public-read` owns public read endpoints, Redis-first reads, RDS fallback, suppress-window handling, and cache regeneration request events.
+`api-public-read` owns public read endpoints, Redis-first reads, degraded-mode RDS fallback, suppress-window handling, payload-based filtering, and cache regeneration request events.
 
 It does not own admin writes, auth issuance, external ingestion, or cache rebuild execution.
 
@@ -39,12 +39,15 @@ Read rules:
 
 - disaster message filtering is payload-based, not Redis-key-based
 - do not add `{disasterType}`, `{category}`, or `{district}` key dimensions in MVP disaster message caches
+- normal public read path must not depend on RDS
+- direct RDS fallback is degraded-mode only
 
 ## 4. Cache Responsibility Split
 
-- `api-public-read` requests regeneration after fallback
+- `api-public-read` requests regeneration after miss, stale detection, or degraded-mode fallback
 - `async-worker` rebuilds cache data
 - do not rebuild Redis directly in this service
+- do not call Redis `SET` to rebuild public read models
 
 ## 5. Current vs Target Awareness
 
@@ -59,3 +62,5 @@ Read rules:
 - `docs/event/event-envelope.md`
 - `docs/event/async-worker.md`
 - `docs/redis-key/redis-key.md`
+
+Service-level guides must not override root or `docs/` contracts.

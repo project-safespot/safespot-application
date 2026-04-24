@@ -55,12 +55,26 @@ Canonical disaster message read models:
 - `disaster:messages:list:seoul`
 - `disaster:detail:{alertId}`
 
+Endpoint and screen mapping:
+
+| Consumer or screen | Redis key | Notes |
+| --- | --- | --- |
+| disaster overview recent messages | `disaster:messages:recent:seoul` | Top 5 recent in-scope messages |
+| global or menu core message | `disaster:message:core:seoul` | single core message |
+| disaster message page list | `disaster:messages:list:seoul` | Top N only, default `50` |
+| disaster message detail | `disaster:detail:{alertId}` | one detail payload |
+
 Rules:
 
 - `api-public-read` is Redis-first
 - disaster read models are rebuilt by `async-worker`, not by this service
 - `disasterType` and `messageCategory` are payload fields, not Redis key dimensions
+- district is not a Redis key dimension for MVP disaster message lists
 - filtering for disaster message list reads is payload-based
+- `disaster:messages:list:seoul` stores Top N only, default `50`
+- RDS stores full history and remains the source of truth
+- normal public read path must not depend on RDS
+- direct RDS fallback is degraded-mode only and temporary when current implementation cannot serve from Redis
 
 Miss handling:
 
@@ -215,7 +229,8 @@ Redis read model reference:
 - primary key: `disaster:messages:list:seoul`
 - filtering by `disasterType` is applied on payload items
 - `messageCategory`, `level`, and `rawType` may also be filtered from payload fields
-- this key is a Top N read model, not full history
+- this key is a Top N read model, default `50`, not full history
+- RDS stores full disaster message history
 
 ### 5.4 GET /disasters/{disasterType}/latest
 
@@ -310,6 +325,12 @@ Failures:
 | Invalid `nx` / `ny` | 400 | `VALIDATION_ERROR` |
 | Outside Seoul | 400 | `UNSUPPORTED_REGION` |
 
+Redis read model reference:
+
+- primary weather-alert key: `environment:weather-alert:seoul`
+- weather context key: `environment:weather:seoul`
+- environment keys use `environment:*`, not `env:*`
+
 ### 5.6 GET /air-quality
 
 Query parameters:
@@ -327,6 +348,11 @@ Failures:
 | --- | --- | --- |
 | Missing selector | 400 | `MISSING_REQUIRED_FIELD` |
 | Outside Seoul | 400 | `UNSUPPORTED_REGION` |
+
+Redis read model reference:
+
+- primary key: `environment:air-quality:seoul`
+- environment keys use `environment:*`, not `env:*`
 
 ## 6. Fallback And Regeneration Rules
 

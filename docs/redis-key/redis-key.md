@@ -143,14 +143,15 @@ Environment keys remain separate from disaster message keys.
 
 | Key | Purpose |
 | --- | --- |
-| `environment:weather:{nx}:{ny}` | grid-based weather forecast |
-| `environment:weather:region:{region}` | region-based weather lookup |
-| `environment:air:{stationName}` | air-quality lookup |
+| `environment:weather:seoul` | Seoul MVP weather forecast read model |
+| `environment:air-quality:seoul` | Seoul MVP air-quality read model |
+| `environment:weather-alert:seoul` | Seoul MVP weather-alert read model |
 
 Rules:
 
 - use `disaster:messages:*` only for disaster message read models
 - use `environment:*` only for weather, air quality, or weather alert style environment data
+- `env:*` is deprecated historical naming and must not be used as a current Redis contract
 - do not mix environment payloads into disaster message key families
 
 ## 5. Shelter Key Precision
@@ -172,8 +173,8 @@ Precision rule:
 ## 6. Miss Handling Rules
 
 - Redis hit -> return cached value
-- Redis miss/down/parse error -> use fallback behavior defined by the consuming service
-- after fallback, publish `CacheRegenerationRequested` subject to the suppress window contract
+- Redis miss/down/parse error -> use degraded-mode fallback behavior defined by the consuming service when needed
+- after degraded-mode fallback or stale detection, publish `CacheRegenerationRequested` subject to the suppress window contract
 
 Disaster message miss rules:
 
@@ -255,7 +256,7 @@ Mitigation:
 ## 11. Ownership Split
 
 - `api-core` = invalidate stale shelter keys by `DEL` where immediate removal is needed
-- `api-public-read` = request regeneration after fallback or stale detection
+- `api-public-read` = request regeneration after miss, stale detection, or degraded-mode fallback
 - `async-worker` = rebuild Redis read models
 - `external-ingestion` = writes normalized DB data and may trigger downstream rebuild flow, but does not write Redis directly
 

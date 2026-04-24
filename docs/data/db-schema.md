@@ -342,7 +342,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 
 > - `(nx, ny, base_date, base_time, forecast_dt)` 복합 UNIQUE 제약 적용 — 중복 적재 방지.
 > - `pcp`는 기상청 API가 "강수없음", "1mm 미만" 등 문자열로 반환하므로 VARCHAR 사용.
-> - Redis `env:weather:{nx}:{ny}` 캐시 miss 시 이 테이블에서 가장 최근 레코드로 fallback.
+> - Redis `environment:weather:seoul` 캐시 miss 시 이 테이블에서 가장 최근 레코드로 fallback.
 > - 데이터 보존 기간 정책 필요 — 30일 이상 된 레코드 주기적 삭제 권장.
 
 ---
@@ -368,7 +368,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 
 > - `(station_name, measured_at)` 복합 UNIQUE 제약 적용 — 중복 적재 방지.
 > - `khai_grade`는 사용자에게 최종 대기질 상태로 표시하는 대표 지표.
-> - Redis `env:air:{station_name}` 캐시 miss 시 이 테이블에서 가장 최근 레코드로 fallback.
+> - Redis `environment:air-quality:seoul` 캐시 miss 시 이 테이블에서 가장 최근 레코드로 fallback.
 > - 데이터 보존 기간 정책 필요 — 30일 이상 된 레코드 주기적 삭제 권장.
 
 ---
@@ -571,7 +571,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | TTL 필수 | 모든 키에 TTL 설정. TTL 없는 키 배포 금지 |
 | 무효화 명시 | 비즈니스 이벤트 발생 시 즉시 해당 키 DEL 후 재생성 (Cache-Aside 패턴) |
 | 직렬화 형식 | JSON 직렬화. 파싱 실패 시 DB fallback 처리 |
-| 조회 책임 분리 | `api-public-read`는 fallback 후 `CacheRegenerationRequested`를 발행하고 `async-worker`가 Redis를 재생성 |
+| 조회 책임 분리 | `api-public-read`는 miss/stale/degraded fallback 후 `CacheRegenerationRequested`를 발행하고 `async-worker`가 Redis를 재생성 |
 
 ### 4.2 캐시 키 운영표
 
@@ -586,8 +586,9 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | `disaster:message:core:seoul` | 서울 MVP 핵심 재난 메시지 1건 read model | 5분 | readmodel-worker (normalized DB data 기준 재생성) | 신규 in-scope alert 반영 / cache miss / TTL 만료 |
 | `disaster:messages:list:seoul` | 서울 MVP 재난 메시지 목록 Top N read model | 5분 | readmodel-worker (normalized DB data 기준 재생성) | 신규 in-scope alert 반영 / cache miss / TTL 만료 |
 | `disaster:detail:{alertId}` | 개별 재난 알림 상세 read model | 3600 seconds / 60분 | readmodel-worker (normalized DB data 기준 재생성) | 해당 alert 반영 / cache miss / TTL 만료 |
-| `env:weather:{nx}:{ny}` | 격자 좌표 기반 날씨 예보 | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
-| `env:air:{station_name}` | 측정소 기반 대기질(AQI) | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
+| `environment:weather:seoul` | 서울 MVP 날씨 예보 read model | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
+| `environment:air-quality:seoul` | 서울 MVP 대기질(AQI) read model | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
+| `environment:weather-alert:seoul` | 서울 MVP 기상 특보 read model | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
 
 #### 🔧 관리자 운영용 (Admin-facing)
 
@@ -595,9 +596,9 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 |---|---|---|---|---|
 | `admin:dashboard` | 관리자 대시보드 전체 집계 수치 | 1분 | api-core (RDS 직접 조회 후 SET) | TTL 만료 |
 
-> - `env:weather`, `env:air` 캐시 miss 시 → `weather_log`, `air_quality_log`에서 가장 최근 레코드로 fallback
-> - Redis 갱신은 external-ingestion이 직접 하지 않고 SQS 이벤트 → async+worker가 담당
-> - **TTL 철학**: env 키의 TTL(120분)은 데이터 신선도(freshness)가 아니라 fallback 안정성을 위한 값이다.
+> - `environment:weather:seoul`, `environment:air-quality:seoul`, `environment:weather-alert:seoul` 캐시 miss 시 → `weather_log`, `air_quality_log`에서 가장 최근 레코드로 fallback
+> - Redis 갱신은 external-ingestion이 직접 하지 않고 SQS 이벤트 → async-worker가 담당
+> - **TTL 철학**: environment 키의 TTL(120분)은 데이터 신선도(freshness)가 아니라 fallback 안정성을 위한 값이다.
 >   외부 API 수집 주기와 무관하게, Redis 장애나 수집 지연 시 기존 캐시 데이터를 유지하기 위한 안전망이다.
 >   캐시 갱신은 수집 완료 이벤트(EnvironmentDataCollected) 수신 즉시 overwrite 방식으로 이루어진다.
 
@@ -641,7 +642,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | 재난 상세 저장 방식 | `disaster_alert_detail` 1:1 분리 | `GET /disasters/{type}/latest` 상세 응답 수용 및 유형별 확장 JSON 처리 |
 | 환경 데이터 중복 방지 | 복합 UNIQUE 적용 | external-ingestion 반복 수집 시 중복 적재 방지 |
 | 재난 메시지 캐시 키 | 4개 canonical read model 고정 | `disaster:detail:{alertId}` → `disaster:messages:recent:seoul` → `disaster:message:core:seoul` → `disaster:messages:list:seoul` 순으로 재생성 |
-| 외부 수집 후 캐시 갱신 | direct Redis write 대신 이벤트 연계 | compute와 async+worker 책임 분리 |
+| 외부 수집 후 캐시 갱신 | direct Redis write 대신 이벤트 연계 | compute와 async-worker 책임 분리 |
 | shelter 외부 upsert 범위 | 7개 컬럼만 허용 | 내부 운영 컬럼 보호 (manager, contact, shelter_status, note) |
 
 ---
@@ -733,8 +734,9 @@ Normalizer Pod
   → 캐시 갱신 이벤트 발행 (SQS)
 
 cache-worker
-  → Redis env:weather:{nx}:{ny} SET (TTL 120분)
-  → Redis env:air:{station_name} SET (TTL 120분)
+  → Redis environment:weather:seoul SET (TTL 120분)
+  → Redis environment:air-quality:seoul SET (TTL 120분)
+  → Redis environment:weather-alert:seoul SET (TTL 120분)
 
 캐시 miss 발생 시
   → api-public-read → RDS 최근 레코드 fallback 조회 → 응답
@@ -751,5 +753,5 @@ cache-worker
 | 2026-04-16 | v6.0 | 최초 작성 |
 | 2026-04-19 | v7.0 | disaster_alert_detail 추가 / 재난 상세 캐시 키 통일 / 데이터 흐름 최신화 / health_status 정책 명시 / API↔DB 매핑 확장 / UNIQUE 제약 명시 / shelter 외부 upsert 범위 명시 / external_api_* 테이블 5개 추가 / admin_audit_log reason 저장 정책 추가 |
 | 2026-04-20 | v7.1 | 서현 async+worker 문서 기준 Redis 키 전면 수정. 당시 pointer/detail 모델 반영 이력 |
-| 2026-04-22 | v7.2 | env:weather, env:air TTL 60분 → 120분 정정. TTL 철학 주석 추가 (fallback 안정성 목적, 데이터 신선도 아님) |
+| 2026-04-22 | v7.2 | 환경 캐시 TTL 60분 → 120분 정정. TTL 철학 주석 추가 (fallback 안정성 목적, 데이터 신선도 아님) |
 | 2026-04-24 | v7.3 | shelter list 키를 지역 namespace 형식으로 정정(`shelter:list:seoul:{shelterType}:{disasterType}`, `shelter:list:{region}:{shelterType}:{disasterType}`). deprecated `disaster:alert:list` 혼선 제거 |

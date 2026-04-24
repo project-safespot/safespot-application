@@ -41,9 +41,13 @@ Maintain strict contract consistency across:
 - Log-only fallback is NOT sufficient (durability expected in contract discussion).
 
 ### Cache (Disaster)
-- Pointer/detail separation is used where documented:
-  - pointer: `disaster:latest:{disasterType}:{region}`
-  - detail: `disaster:detail:{alertId}`
+- Current disaster message Redis read models are:
+  - `disaster:messages:recent:seoul`
+  - `disaster:message:core:seoul`
+  - `disaster:messages:list:seoul`
+  - `disaster:detail:{alertId}`
+- `disasterType`, `messageCategory`, and district are payload or future-scope concepts, not MVP Redis key dimensions.
+- Retired disaster keys such as `disaster:latest:{disasterType}:{region}` are allowed only in deprecated, historical, or do-not-use warnings.
 
 ---
 
@@ -53,7 +57,7 @@ When editing any of these, check related documents:
 
 - docs/api/api-common.md
 - docs/api/api-core.md
-- docs/api/api-public-read.md
+- docs/api/api-public_read.md
 - docs/ingestion/external-ingestion.md
 - docs/event/event-envelope.md
 - docs/redis-key/redis-key.md

@@ -98,7 +98,7 @@ Fat JAR 위치: `services/async-worker/build/libs/async-worker-*.jar`
 
 ## 핵심 설계 원칙
 
-- **RDS = source of truth** — Redis는 파생 데이터. Redis 장애 시 RDS fallback으로 복구
+- **RDS = source of truth** — Redis는 파생 데이터. `api-public-read`의 direct RDS fallback은 degraded-mode 전용이며 target hot path가 아님
 - **SQS at-least-once** — 중복 수신을 전제로 설계. idempotency key로 no-op 처리
 - **실패 메시지 보존** — Redis 실패 / 파싱 실패 / 검증 실패 시 `BatchItemFailure` 반환 → SQS 재시도 → DLQ
 - **성공 ACK 조건** — 정상 처리 완료 후에만 성공 반환. 절대 silent ignore 금지
@@ -152,8 +152,9 @@ Fat JAR 위치: `services/async-worker/build/libs/async-worker-*.jar`
 | `disaster:message:core:seoul` | 5분 | core read model |
 | `disaster:messages:list:seoul` | 5분 | Top 50 list read model |
 | `disaster:detail:{alertId}` | 60분 | detail read model |
-| `environment:weather:{nx}:{ny}` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
-| `environment:air:{stationName}` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
+| `environment:weather:seoul` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
+| `environment:air-quality:seoul` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
+| `environment:weather-alert:seoul` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
 
 ## 재난 read model 재생성 규칙
 

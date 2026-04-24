@@ -36,8 +36,11 @@ Idempotency rules:
 High-level cache model to stay aligned with docs:
 
 - current shelter key: `shelter:status:{shelterId}`
-- disaster pointer: `disaster:latest:{disasterType}:{region}`
-- disaster detail: `disaster:detail:{alertId}`
+- disaster recent read model: `disaster:messages:recent:seoul`
+- disaster core read model: `disaster:message:core:seoul`
+- disaster list read model: `disaster:messages:list:seoul`
+- disaster detail read model: `disaster:detail:{alertId}`
+- `api-core` does not rebuild or write disaster read models
 
 ## 5. Current vs Target Awareness
 

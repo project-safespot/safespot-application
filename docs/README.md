@@ -13,11 +13,11 @@ Current MVP scope is Seoul only.
 2. [Common API policy](api/api-common.md)
 3. [External ingestion](ingestion/external-ingestion.md)
 4. [DB schema](data/db-schema.md)
-5. [api-core API](api/api-core.md)
-6. [Event envelope](event/event-envelope.md)
-7. [Redis keys](redis-key/redis-key.md)
-8. [Redis TTL](redis-key/cache-ttl.md)
-9. [Async worker](event/async-worker.md)
+5. [Redis keys](redis-key/redis-key.md)
+6. [Redis TTL](redis-key/cache-ttl.md)
+7. [Event envelope](event/event-envelope.md)
+8. [Async worker](event/async-worker.md)
+9. [api-public-read API](api/api-public_read.md)
 10. [Monitoring](monitoring/monitoring.md)
 
 재난 메시지 분류와 정규화 저장 계약은 다음 문서를 함께 본다:
@@ -66,10 +66,14 @@ Redis read model, event, TTL, worker regeneration 계약은 다음 문서를 함
 
 ## Source Of Truth Rules
 
-- Common API policy belongs in `docs/api/api-common.md`.
+- Common API policy and API enums belong in `docs/api/api-common.md`.
 - api-core endpoint details belong in `docs/api/api-core.md`.
 - api-public-read endpoint details belong in `docs/api/api-public_read.md`.
+- Disaster message normalization belongs in `docs/ingestion/external-ingestion.md`.
+- DB schema follows API, event, and Redis contracts. It must not redefine them differently.
+- Redis key names belong in `docs/redis-key/redis-key.md`.
+- Redis TTL values belong in `docs/redis-key/cache-ttl.md`.
 - Event envelope, event type, payload, and `idempotencyKey` rules belong in `docs/event/event-envelope.md`.
-- Async worker behavior, retry/DLQ policy, Redis refresh behavior, and worker responsibility boundaries belong in `docs/event/async-worker.md`.
-- Redis key naming and TTL policy belong in `docs/redis-key/redis-key.md` and `docs/redis-key/cache-ttl.md`.
+- Worker regeneration behavior, retry/DLQ policy, Redis refresh behavior, and worker responsibility boundaries belong in `docs/event/async-worker.md`.
+- Service-level `CLAUDE.md` and `README.md` files must not override root or `docs/` contracts.
 - If documents conflict, prefer the more specific responsibility document, except when it conflicts with common API policy. In that case, update common API policy first.
