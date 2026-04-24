@@ -41,6 +41,8 @@ Target architecture:
 Shelter:
 
 - `shelter:status:{shelterId}`
+- `shelter:list:seoul:{shelterType}:{disasterType}` (near-term planned contract, not fully implemented yet)
+- `shelter:list:{region}:{shelterType}:{disasterType}` (near-term planned contract, not fully implemented yet)
 
 Disaster pointer/detail:
 
@@ -68,6 +70,7 @@ Behavior:
 
 - read RDS state
 - rebuild `shelter:status:{shelterId}`
+- near-term planned contract: `CacheRegenerationRequested`가 오면 `shelter:list:seoul:{shelterType}:{disasterType}`와 `shelter:list:{region}:{shelterType}:{disasterType}`도 동일 책임 경계에서 재생성한다
 - `congestionLevel` is informational only
 - capacity does not reject admission
 

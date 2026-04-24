@@ -70,7 +70,7 @@
 |---|---|---|---|
 | `address` | `evacuation_entry` | `address` | 입소자 주소. 입소 기본 정보이므로 entry에 위치 |
 | `familyInfo` | `entry_detail` | `family_info` | 가족관계 자유 입력 텍스트 |
-| `healthStatus` | `entry_detail` | `health_status` | CHECK IN ('정상','부상','응급','기타') |
+| `healthStatus` | `entry_detail` | `health_status` | 자유 텍스트 상태 정보. API contract와 동일하게 취급 |
 | `specialProtectionFlag` | `entry_detail` | `special_protection_flag` | 특별관리대상 여부 boolean |
 
 추가 매핑 규칙:
@@ -96,8 +96,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 - 현재인원은 `evacuation_entry`의 `entry_status = 'ENTERED'` 레코드 수로 실시간 계산
 - 별도 컬럼에 저장하지 않음 → 중복 저장 방지 / 3NF 준수 / 정합성 보장
 - 사용자 조회: `shelter:status:{id}` (Redis TTL **30초**) — 재난 상황 즉각 대응 목적
-- 관리자 조회: `admin:shelter:status:{id}` (Redis TTL **5분**) — 운영 판단은 약간의 지연 허용
-- 입소·퇴소·이송 이벤트 발생 시 두 키 모두 즉시 DEL (Cache-Aside 패턴)
+- 입소·퇴소·이송 이벤트 발생 시 해당 키를 즉시 DEL (Cache-Aside 패턴)
 
 ---
 
@@ -141,7 +140,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | `capacity` | INT | — | NO | — | 최대 수용 인원 |
 | `manager` | VARCHAR(50) | — | YES | NULL | 담당자명 |
 | `contact` | VARCHAR(50) | — | YES | NULL | 연락처 |
-| `shelter_status` | VARCHAR(20) | CHK | NO | '운영중' | CHECK IN ('운영중','운영중단','준비중') |
+| `shelter_status` | VARCHAR(20) | CHK | NO | 'OPERATING' | CHECK IN ('OPERATING','STOPPED','PREPARING') |
 | `note` | TEXT | — | YES | NULL | 비고 / 특이사항 |
 | `created_at` | TIMESTAMPTZ | — | NO | CURRENT_TIMESTAMP | 등록 일시 |
 | `updated_at` | TIMESTAMPTZ | — | NO | CURRENT_TIMESTAMP | 최종 수정 일시 |
@@ -156,6 +155,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 
 > - 외부 대피소 마스터 수집은 `name`, `shelter_type`, `disaster_type`, `address`, `latitude`, `longitude`, `capacity` 컬럼만 갱신할 수 있다.
 > - `manager`, `contact`, `shelter_status`, `note`는 내부 관리자 운영 컬럼으로 외부 수집이 덮어쓰지 않는다.
+> - 외부 API가 한국어 상태값을 제공하더라도 저장 시 canonical 영문값(`OPERATING`,`STOPPED`,`PREPARING`)으로 정규화해야 한다.
 
 ---
 
@@ -168,7 +168,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | `alert_id` | BIGSERIAL | PK | NO | — | 재난 알림 고유 ID (자동 증가) |
 | `disaster_type` | VARCHAR(20) | CHK | NO | — | CHECK IN ('EARTHQUAKE','LANDSLIDE','FLOOD') |
 | `region` | VARCHAR(100) | IDX | NO | — | 발생 지역 (시/구 단위) |
-| `level` | VARCHAR(10) | CHK | NO | — | CHECK IN ('관심','주의','경계','심각') |
+| `level` | VARCHAR(10) | CHK | NO | — | CHECK IN ('INTEREST','CAUTION','WARNING','CRITICAL') |
 | `message` | TEXT | — | NO | — | 재난문자 원문 |
 | `source` | VARCHAR(50) | — | NO | — | 출처 API 식별자 (예: KMA_EARTHQUAKE) |
 | `issued_at` | TIMESTAMPTZ | IDX | NO | — | 재난 발령 시각 |
@@ -177,6 +177,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 
 > - `expired_at = NULL` → 현재 활성 재난. Ingestion Pod가 해제 감지 시 `expired_at` 업데이트.
 > - `source` 컬럼 운용값: `SAFETY_DATA_ALERT`, `KMA_EARTHQUAKE`, `SEOUL_EARTHQUAKE`, `FORESTRY_LANDSLIDE`, `SEOUL_RIVER_LEVEL`
+> - 외부 API의 한국어 단계값은 저장 전에 canonical 영문값(`INTEREST`,`CAUTION`,`WARNING`,`CRITICAL`)으로 정규화해야 한다.
 
 ---
 
@@ -203,7 +204,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 `detail_json` 활용 예시:
 ```json
 // FLOOD
-{ "river_level": 4.32, "danger_level": "주의", "station": "한강대교" }
+{ "river_level": 4.32, "danger_level": "CAUTION", "station": "한강대교" }
 
 // LANDSLIDE
 { "risk_grade": "3등급", "predicted_area": "관악구 신림동" }
@@ -244,15 +245,15 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | `detail_id` | BIGSERIAL | PK | NO | — | — | 상세 기록 고유 ID (자동 증가) |
 | `entry_id` | BIGINT | FK/UQ | NO | — | — | evacuation_entry.entry_id (1:1, UNIQUE) |
 | `family_info` | TEXT | — | YES | NULL | `familyInfo` | 가족 구성 자유 입력 (예: 영아 1명 동반) |
-| `health_status` | VARCHAR(20) | CHK/IDX | NO | '정상' | `healthStatus` | CHECK IN ('정상','부상','응급','기타') |
+| `health_status` | VARCHAR(200) | IDX | YES | NULL | `healthStatus` | 자유 텍스트 건강 상태 정보. API contract와 동일 |
 | `health_note` | TEXT | — | YES | NULL | — | 건강 상태 상세 메모 (예: 당뇨, 휠체어 필요, 복용 약물 등) |
 | `special_protection_flag` | BOOLEAN | IDX | NO | FALSE | `specialProtectionFlag` | 특별관리대상 여부 (노인·장애인·임산부 등) |
 | `support_note` | TEXT | — | YES | NULL | — | 특별관리 필요 사항 상세 |
 | `created_at` | TIMESTAMPTZ | — | NO | CURRENT_TIMESTAMP | — | 기록 생성 시각 |
 | `updated_at` | TIMESTAMPTZ | — | NO | CURRENT_TIMESTAMP | — | 최종 수정 시각 |
 
-> - `health_status`는 상태 분류값. 자유서술형 건강 정보는 `health_note`에 저장.
-> - API의 `healthStatus`는 구현 시 enum 분류값(`정상`,`부상`,`응급`,`기타`)으로 제한.
+> - `health_status`는 API의 `healthStatus`와 동일한 자유 텍스트 상태 정보다.
+> - 추가 설명이 필요하면 `health_note`에 보조 메모를 저장할 수 있다.
 > - `entry_id`에 UNIQUE 제약 → `evacuation_entry`와 완전한 1:1 관계 보장.
 > - ON DELETE CASCADE — `evacuation_entry` 삭제 시 함께 삭제.
 
@@ -553,7 +554,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | TTL 필수 | 모든 키에 TTL 설정. TTL 없는 키 배포 금지 |
 | 무효화 명시 | 비즈니스 이벤트 발생 시 즉시 해당 키 DEL 후 재생성 (Cache-Aside 패턴) |
 | 직렬화 형식 | JSON 직렬화. 파싱 실패 시 DB fallback 처리 |
-| 조회 주체 분리 | 사용자(TTL 30초)와 관리자(TTL 5분) 캐시 키 분리 |
+| 조회 책임 분리 | `api-public-read`는 fallback 후 `CacheRegenerationRequested`를 발행하고 `async-worker`가 Redis를 재생성 |
 
 ### 4.2 캐시 키 운영표
 
@@ -562,8 +563,8 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | Redis Key | 의미 | TTL | 생성 주체 | 무효화 조건 |
 |---|---|---|---|---|
 | `shelter:status:{shelterId}` | 사용자용 대피소 현재인원·잔여인원·혼잡도 | **30초** | cache-worker (입소·퇴소·이송·수정 이벤트 수신 후 RDS COUNT 재계산) | 입소·퇴소·이송 이벤트 즉시 DEL (api-core) |
-| `shelter:list:seoul:{shelterType}:{disasterType}` | 서울 MVP 기준 유형+재난별 대피소 목록 | 10분 | api-public-read fallback 재생성 | shelter 마스터 변경 시 DEL 또는 TTL 만료 후 재생성 |
-| `shelter:list:{region}:{shelterType}:{disasterType}` | 향후 지역 확장 기준 유형+재난별 대피소 목록 | 10분 | api-public-read fallback 재생성 | shelter 마스터 변경 시 DEL 또는 TTL 만료 후 재생성 |
+| `shelter:list:seoul:{shelterType}:{disasterType}` | 서울 MVP 기준 유형+재난별 대피소 목록. near-term planned contract이며 upcoming implementation 기준 키 | 10분 | `api-public-read`가 `CacheRegenerationRequested` 발행 후 async-worker가 재생성 | shelter 마스터 변경 후 재생성 요청 또는 TTL 만료 후 재생성 |
+| `shelter:list:{region}:{shelterType}:{disasterType}` | 향후 지역 확장 기준 유형+재난별 대피소 목록. near-term planned contract이며 upcoming implementation 기준 키 | 10분 | `api-public-read`가 `CacheRegenerationRequested` 발행 후 async-worker가 재생성 | shelter 마스터 변경 후 재생성 요청 또는 TTL 만료 후 재생성 |
 | `disaster:latest:{disasterType}:{region}` | 지역+유형별 최신 재난 alert pointer | 5분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 신규 alert 수신 / pointer miss / TTL 만료 |
 | `disaster:detail:{alertId}` | 개별 재난 알림 상세 | 10분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 해당 alert 만료 / TTL 만료 |
 | `env:weather:{nx}:{ny}` | 격자 좌표 기반 날씨 예보 | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
@@ -573,7 +574,6 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 
 | Redis Key | 의미 | TTL | 생성 주체 | 무효화 조건 |
 |---|---|---|---|---|
-| `admin:shelter:status:{shelterId}` | 관리자용 대피소 실시간 인원·혼잡도 | **5분** | cache-worker | 입소·퇴소·이송 이벤트 즉시 DEL (api-core) |
 | `admin:dashboard` | 관리자 대시보드 전체 집계 수치 | 1분 | api-core (RDS 직접 조회 후 SET) | TTL 만료 |
 
 > - `env:weather`, `env:air` 캐시 miss 시 → `weather_log`, `air_quality_log`에서 가장 최근 레코드로 fallback
@@ -611,17 +611,17 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | 결정 사항 | 선택한 방향 | 근거 |
 |---|---|---|
 | user_profile 분리 | 단일 테이블 유지 | 현재 프로필 컬럼 수 적음. 확장 시 분리 용이한 구조 |
-| shelter_status 컬럼 | is_active → shelter_status VARCHAR 교체 | 운영중/운영중단/준비중 3단계 필요. boolean으로 표현 불가 |
+| shelter_status 컬럼 | is_active → shelter_status VARCHAR 교체 | `OPERATING`/`STOPPED`/`PREPARING` 3단계 필요. boolean으로 표현 불가 |
 | 현재인원 저장 여부 | COUNT 쿼리 + 캐시 | 중복 저장 시 트랜잭션 실패로 정합성 붕괴 위험. 3NF 위반 |
 | 주소+좌표 동시 저장 | 비정규화 허용 | 지도 API 연동 시 조인 없이 바로 사용. 조회 단순화 목적 |
 | audit_log JSONB 컬럼 | JSONB 스냅샷 유지 | 변경 증거 보존 목적. 집계·조회용이 아님 |
-| 사용자·관리자 캐시 TTL | 사용자 30초 / 관리자 5분 | 재난 상황 즉각 대응은 사용자 우선. 관리자는 운영 판단으로 지연 허용 |
+| 대피소 상태 캐시 TTL | 사용자용 `shelter:status` 30초 | 재난 상황 즉각 대응을 위해 짧은 TTL 유지 |
 | entry_detail 분리 | evacuation_entry와 1:1 분리 | 가족관계·건강상태는 선택적 입력. 항상 JOIN할 필요 없어 분리가 유리 |
 | weather_log / air_quality_log | RDS 테이블 추가 | 캐시 miss 시 fallback 가능. 수집 이력 보존 |
 | air_quality_log grade 컬럼 | API 원문 보존 | value에서 유도 가능하나 기준값 변경 대응 및 API 원문 일치를 위해 저장 |
 | 재난 상세 저장 방식 | `disaster_alert_detail` 1:1 분리 | `GET /disasters/{type}/latest` 상세 응답 수용 및 유형별 확장 JSON 처리 |
 | 환경 데이터 중복 방지 | 복합 UNIQUE 적용 | external-ingestion 반복 수집 시 중복 적재 방지 |
-| 재난 상세 캐시 키 | `disasterType + region` 기준 | API 조회 조건과 캐시 갱신 이벤트 payload 일치 |
+| 재난 상세 캐시 키 | `alertId` 기준 | pointer/detail 분리 모델에서 detail key는 `disaster:detail:{alertId}` 사용 |
 | 외부 수집 후 캐시 갱신 | direct Redis write 대신 이벤트 연계 | compute와 async+worker 책임 분리 |
 | shelter 외부 upsert 범위 | 7개 컬럼만 허용 | 내부 운영 컬럼 보호 (manager, contact, shelter_status, note) |
 
@@ -676,8 +676,7 @@ POST /admin/evacuation-entries 요청
   → 1. RDS: evacuation_entry INSERT (status=ENTERED, address 포함)
   → 2. RDS: entry_detail INSERT (family_info, health_status, special_protection_flag)
   → 3. RDS: evacuation_event_history INSERT (type=CHECK_IN)
-  → 4. Redis: shelter:status:{id} DEL        ← 사용자 캐시 즉시 무효화
-  → 5. Redis: admin:shelter:status:{id} DEL  ← 관리자 캐시 즉시 무효화
+  → 4. Redis: shelter:status:{id} DEL  ← 사용자 캐시 즉시 무효화
 ```
 
 #### 현재인원 조회 흐름 — 사용자 (TTL 30초)
@@ -686,16 +685,9 @@ POST /admin/evacuation-entries 요청
 클라이언트
   → API Server → Redis shelter:status:{id} HIT → 응답
                → Redis MISS → RDS COUNT(*) WHERE entry_status='ENTERED'
-                            → Redis SET (30초) → 응답
-```
-
-#### 현재인원 조회 흐름 — 관리자 (TTL 5분)
-
-```
-관리자
-  → API Server → Redis admin:shelter:status:{id} HIT → 응답
-               → Redis MISS → RDS COUNT(*) WHERE entry_status='ENTERED'
-                            → Redis SET (5분) → 응답
+                            → 응답
+                            → `api-public-read`가 `CacheRegenerationRequested` 발행
+                            → async-worker가 Redis `shelter:status:{id}` 재생성
 ```
 
 #### 날씨·대기질 수집 흐름
@@ -715,7 +707,9 @@ cache-worker
   → Redis env:air:{station_name} SET (TTL 120분)
 
 캐시 miss 발생 시
-  → api-public-read → RDS 최근 레코드 fallback 조회 → Redis SET → 응답
+  → api-public-read → RDS 최근 레코드 fallback 조회 → 응답
+                    → `CacheRegenerationRequested` 발행
+                    → async-worker가 Redis 재생성
 ```
 
 ---

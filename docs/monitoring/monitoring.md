@@ -92,7 +92,7 @@ Redis 자체 상태는 redis-exporter가 수집한다. endpoint별 cache 사용 
 | `api_read_cache_fallback_total` | Counter | `endpoint`, `reason` | DB fallback 발생. `reason=redis_miss|redis_down|parse_error` |
 | `api_read_db_fallback_query_total` | Counter | `endpoint` | fallback 후 RDS 조회 발생 |
 | `api_read_db_fallback_latency_seconds` | Timer | `endpoint` | fallback RDS query latency |
-| `api_read_cache_write_total` | Counter | `endpoint`, `result` | Redis SET 결과. `result=success|failure` |
+| `api_read_cache_regen_publish_total` | Counter | `endpoint`, `result` | `CacheRegenerationRequested` 발행 결과. `result=success|failure` |
 | `api_read_cache_regen_requested_total` | Counter | `endpoint` | cache regeneration 요청 발생 |
 | `api_read_cache_regen_suppressed_total` | Counter | `endpoint` | suppress window로 regeneration 요청 생략 |
 
@@ -350,6 +350,7 @@ EvacuationEntryUpdated
 ShelterUpdated
 DisasterDataCollected
 EnvironmentDataCollected
+CacheRegenerationRequested
 ```
 
 권장 failure reason 값:

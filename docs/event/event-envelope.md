@@ -213,6 +213,8 @@ Target architecture:
 Supported cache families include:
 
 - `shelter:status:{shelterId}`
+- `shelter:list:seoul:{shelterType}:{disasterType}` (near-term planned contract, not fully implemented yet)
+- `shelter:list:{region}:{shelterType}:{disasterType}` (near-term planned contract, not fully implemented yet)
 - `disaster:latest:{disasterType}:{region}`
 - `disaster:detail:{alertId}`
 
