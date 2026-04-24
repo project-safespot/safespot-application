@@ -6,12 +6,11 @@ import com.safespot.externalingestion.domain.entity.ExternalApiRawPayload;
 import com.safespot.externalingestion.domain.entity.WeatherLog;
 import com.safespot.externalingestion.metrics.IngestionMetrics;
 import com.safespot.externalingestion.publisher.CacheEventPublisher;
-import com.safespot.externalingestion.publisher.event.WeatherCacheRefreshEvent;
+import com.safespot.externalingestion.publisher.event.EnvironmentDataCollectedEvent;
 import com.safespot.externalingestion.repository.WeatherLogRepository;
 import com.safespot.externalingestion.util.AfterCommit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,17 +37,19 @@ import java.util.*;
 @RequiredArgsConstructor
 public class KmaWeatherNormalizer implements Normalizer {
 
+    private static final String QUEUE = "environment-collection";
+    private static final String REGION = "seoul";
+    private static final String COLLECTION_TYPE = "WEATHER";
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
+    private static final DateTimeFormatter DATETIME_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
+    private static final DateTimeFormatter ISO_FMT = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+    private static final DateTimeFormatter WINDOW_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:00");
+
     private final WeatherLogRepository weatherLogRepo;
     private final CacheEventPublisher cacheEventPublisher;
     private final IngestionMetrics metrics;
     private final ObjectMapper objectMapper;
-
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final DateTimeFormatter DATETIME_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
-
-    @Value("${ingestion.sqs.environment-cache-queue-url:}")
-    private String envQueueUrl;
 
     @Override
     public String getSourceCode() {
@@ -60,15 +61,14 @@ public class KmaWeatherNormalizer implements Normalizer {
     public NormalizationResult normalize(ExternalApiRawPayload raw) {
         List<String> errors = new ArrayList<>();
         int succeeded = 0;
+        boolean anyStored = false;
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
             JsonNode items = root.path("response").path("body").path("items").path("item");
             if (items.isMissingNode() || items.isEmpty()) return NormalizationResult.success(0);
 
-            // (nx, ny, baseDate, baseTime, fcstDate+fcstTime) 기준으로 카테고리 값 병합
             Map<String, Map<String, String>> grouped = groupByForecastKey(items);
-            Set<String> publishedKeys = new HashSet<>();
 
             for (Map.Entry<String, Map<String, String>> entry : grouped.entrySet()) {
                 try {
@@ -85,18 +85,11 @@ public class KmaWeatherNormalizer implements Normalizer {
                         continue;
                     }
 
-                    WeatherLog log = buildWeatherLog(nx, ny, baseDate, baseTime, forecastDt, entry.getValue());
-                    weatherLogRepo.save(log);
+                    WeatherLog wl = buildWeatherLog(nx, ny, baseDate, baseTime, forecastDt, entry.getValue());
+                    weatherLogRepo.save(wl);
                     metrics.incrementNormalizationSuccess(getSourceCode());
                     succeeded++;
-
-                    String publishKey = nx + ":" + ny;
-                    if (!publishedKeys.contains(publishKey)) {
-                        int capturedNx = nx, capturedNy = ny;
-                        String traceId = raw.getExecutionLog().getTraceId();
-                        AfterCommit.run(() -> publishCacheEvent(capturedNx, capturedNy, traceId));
-                        publishedKeys.add(publishKey);
-                    }
+                    anyStored = true;
                 } catch (Exception e) {
                     errors.add(e.getMessage());
                     metrics.incrementNormalizationFailure(getSourceCode(), "validation_error");
@@ -106,6 +99,14 @@ public class KmaWeatherNormalizer implements Normalizer {
             errors.add(e.getMessage());
             metrics.incrementNormalizationFailure(getSourceCode(), "parse_error");
             log.error("[KMA_WEATHER] parse failed raw_id={}", raw.getRawId(), e);
+        }
+
+        if (anyStored) {
+            String traceId = raw.getExecutionLog().getTraceId();
+            OffsetDateTime now = OffsetDateTime.now(KST);
+            String completedAt = now.format(ISO_FMT);
+            String timeWindow = now.format(WINDOW_FMT);
+            AfterCommit.run(() -> publishEvent(traceId, timeWindow, completedAt));
         }
 
         return NormalizationResult.of(succeeded, errors.size(), errors);
@@ -143,6 +144,18 @@ public class KmaWeatherNormalizer implements Normalizer {
         return wl;
     }
 
+    private void publishEvent(String traceId, String timeWindow, String completedAt) {
+        try {
+            EnvironmentDataCollectedEvent event = new EnvironmentDataCollectedEvent(
+                traceId, COLLECTION_TYPE, REGION, timeWindow, completedAt);
+            cacheEventPublisher.publish(event, QUEUE);
+            metrics.incrementSqsPublish(getSourceCode());
+        } catch (Exception e) {
+            metrics.incrementSqsPublishFailure(getSourceCode());
+            log.error("[KMA_WEATHER] event publish failed", e);
+        }
+    }
+
     private String mapSky(String code) {
         if (code == null) return null;
         return switch (code) {
@@ -170,16 +183,6 @@ public class KmaWeatherNormalizer implements Normalizer {
             return val != null ? Integer.parseInt(val) : null;
         } catch (NumberFormatException e) {
             return null;
-        }
-    }
-
-    private void publishCacheEvent(int nx, int ny, String traceId) {
-        try {
-            cacheEventPublisher.publish(new WeatherCacheRefreshEvent(traceId, nx, ny), envQueueUrl);
-            metrics.incrementSqsPublish(getSourceCode());
-        } catch (Exception e) {
-            metrics.incrementSqsPublishFailure(getSourceCode());
-            log.error("[KMA_WEATHER] cache event publish failed nx={} ny={}", nx, ny, e);
         }
     }
 }

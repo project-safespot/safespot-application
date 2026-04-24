@@ -7,13 +7,12 @@ import com.safespot.externalingestion.domain.entity.DisasterAlertDetail;
 import com.safespot.externalingestion.domain.entity.ExternalApiRawPayload;
 import com.safespot.externalingestion.metrics.IngestionMetrics;
 import com.safespot.externalingestion.publisher.CacheEventPublisher;
-import com.safespot.externalingestion.publisher.event.DisasterAlertCacheRefreshEvent;
+import com.safespot.externalingestion.publisher.event.DisasterDataCollectedEvent;
 import com.safespot.externalingestion.repository.DisasterAlertDetailRepository;
 import com.safespot.externalingestion.repository.DisasterAlertRepository;
 import com.safespot.externalingestion.util.AfterCommit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,17 +39,17 @@ import java.util.List;
 @RequiredArgsConstructor
 public class KmaEarthquakeNormalizer implements Normalizer {
 
+    private static final String QUEUE = "disaster-collection";
+    private static final String REGION = "seoul";
+    private static final String DISASTER_TYPE = "EARTHQUAKE";
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
+
     private final DisasterAlertRepository disasterAlertRepo;
     private final DisasterAlertDetailRepository detailRepo;
     private final CacheEventPublisher cacheEventPublisher;
     private final IngestionMetrics metrics;
     private final ObjectMapper objectMapper;
-
-    private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ofPattern("yyyyMMddHHmm");
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-
-    @Value("${ingestion.sqs.disaster-cache-queue-url:}")
-    private String disasterQueueUrl;
 
     @Override
     public String getSourceCode() {
@@ -61,6 +60,7 @@ public class KmaEarthquakeNormalizer implements Normalizer {
     @Transactional
     public NormalizationResult normalize(ExternalApiRawPayload raw) {
         List<String> errors = new ArrayList<>();
+        List<Long> affectedAlertIds = new ArrayList<>();
         int succeeded = 0;
 
         try {
@@ -81,7 +81,29 @@ public class KmaEarthquakeNormalizer implements Normalizer {
                         continue;
                     }
 
-                    DisasterAlert alert = buildAlert(item, issuedAt);
+                    String rawLevelStr = item.path("WARN_VAL").asText("");
+                    String sourceRegion = item.path("EQ_REG").asText("서울특별시");
+
+                    DisasterAlert alert = new DisasterAlert();
+                    alert.setSource(getSourceCode());
+                    alert.setRawType("지진");
+                    alert.setDisasterType(DISASTER_TYPE);
+                    alert.setSourceRegion(sourceRegion);
+                    alert.setRegion(sourceRegion);
+                    alert.setRawLevel(rawLevelStr);
+                    alert.setRawLevelTokens(toJsonArray(List.of(rawLevelStr)));
+                    alert.setLevel(mapLevel(rawLevelStr));
+                    alert.setLevelRank(mapLevelRank(rawLevelStr));
+                    alert.setRawCategoryTokens(toJsonArray(List.of("발생")));
+                    alert.setMessageCategory("ALERT");
+                    alert.setMessage("지진 발생: " + item.path("EQ_LOC").asText("") +
+                        " 규모 " + item.path("EQ_MAG").asText("") +
+                        " " + item.path("JDG_INTS").asText(""));
+                    alert.setIssuedAt(issuedAt);
+                    alert.setIsInScope(true);
+                    alert.setNormalizationReason(
+                        "KMA_EARTHQUAKE: WARN_VAL=" + rawLevelStr + " → " + alert.getLevel());
+
                     DisasterAlert saved = disasterAlertRepo.save(alert);
 
                     // detail must be saved atomically with the alert.
@@ -91,15 +113,14 @@ public class KmaEarthquakeNormalizer implements Normalizer {
                         DisasterAlertDetail detail = buildDetail(item, saved);
                         detailRepo.save(detail);
                     } catch (Exception detailEx) {
-                        log.warn("[KMA_EARTHQUAKE] detail save failed alertId={} issuedAt={} — compensating alert delete, will retry on next collection",
+                        log.warn("[KMA_EARTHQUAKE] detail save failed alertId={} issuedAt={} — compensating alert delete",
                             saved.getAlertId(), issuedAt, detailEx);
                         disasterAlertRepo.delete(saved);
                         throw detailEx;
                     }
 
                     metrics.incrementNormalizationSuccess(getSourceCode());
-                    String traceId = raw.getExecutionLog().getTraceId();
-                    AfterCommit.run(() -> publishCacheEvent(saved, traceId));
+                    affectedAlertIds.add(saved.getAlertId());
                     succeeded++;
                 } catch (Exception e) {
                     errors.add(e.getMessage());
@@ -113,26 +134,20 @@ public class KmaEarthquakeNormalizer implements Normalizer {
             log.error("[KMA_EARTHQUAKE] parse failed raw_id={}", raw.getRawId(), e);
         }
 
-        return NormalizationResult.of(succeeded, errors.size(), errors);
-    }
+        if (!affectedAlertIds.isEmpty()) {
+            List<Long> capturedIds = List.copyOf(affectedAlertIds);
+            String traceId = raw.getExecutionLog().getTraceId();
+            String completedAt = OffsetDateTime.now(KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+            AfterCommit.run(() -> publishEvent(traceId, capturedIds, completedAt));
+        }
 
-    private DisasterAlert buildAlert(JsonNode item, OffsetDateTime issuedAt) {
-        DisasterAlert alert = new DisasterAlert();
-        alert.setSource(getSourceCode());
-        alert.setDisasterType("EARTHQUAKE");
-        alert.setRegion(item.path("EQ_REG").asText("서울특별시"));
-        alert.setLevel(mapLevel(item.path("WARN_VAL").asText("관심")));
-        alert.setMessage("지진 발생: " + item.path("EQ_LOC").asText("") +
-            " 규모 " + item.path("EQ_MAG").asText("") +
-            " " + item.path("JDG_INTS").asText(""));
-        alert.setIssuedAt(issuedAt);
-        return alert;
+        return NormalizationResult.of(succeeded, errors.size(), errors);
     }
 
     private DisasterAlertDetail buildDetail(JsonNode item, DisasterAlert saved) {
         DisasterAlertDetail detail = new DisasterAlertDetail();
         detail.setAlert(saved);
-        detail.setDetailType("EARTHQUAKE");
+        detail.setDetailType(DISASTER_TYPE);
         String magStr = item.path("EQ_MAG").asText("");
         if (!magStr.isBlank()) {
             detail.setMagnitude(new BigDecimal(magStr));
@@ -142,12 +157,37 @@ public class KmaEarthquakeNormalizer implements Normalizer {
         return detail;
     }
 
-    private String mapLevel(String raw) {
-        return switch (raw) {
-            case "심각" -> "심각";
-            case "경계" -> "경계";
-            case "주의" -> "주의";
-            default -> "관심";
+    private void publishEvent(String traceId, List<Long> affectedAlertIds, String completedAt) {
+        try {
+            DisasterDataCollectedEvent event = new DisasterDataCollectedEvent(
+                traceId, DISASTER_TYPE, REGION, affectedAlertIds, false, completedAt);
+            cacheEventPublisher.publish(event, QUEUE);
+            metrics.incrementSqsPublish(getSourceCode());
+        } catch (Exception e) {
+            metrics.incrementSqsPublishFailure(getSourceCode());
+            log.error("[KMA_EARTHQUAKE] event publish failed alertIds={}", affectedAlertIds, e);
+        }
+    }
+
+    private String mapLevel(String rawLevel) {
+        if (rawLevel == null) return null;
+        return switch (rawLevel) {
+            case "심각" -> "CRITICAL";
+            case "경계" -> "WARNING";
+            case "주의" -> "CAUTION";
+            case "관심" -> "INTEREST";
+            default -> null;
+        };
+    }
+
+    private Integer mapLevelRank(String rawLevel) {
+        if (rawLevel == null) return null;
+        return switch (rawLevel) {
+            case "심각" -> 4;
+            case "경계" -> 3;
+            case "주의" -> 2;
+            case "관심" -> 1;
+            default -> null;
         };
     }
 
@@ -159,16 +199,11 @@ public class KmaEarthquakeNormalizer implements Normalizer {
         }
     }
 
-    private void publishCacheEvent(DisasterAlert alert, String traceId) {
+    private String toJsonArray(List<String> tokens) {
         try {
-            cacheEventPublisher.publish(
-                new DisasterAlertCacheRefreshEvent(traceId, alert.getAlertId(), alert.getRegion(), alert.getDisasterType()),
-                disasterQueueUrl
-            );
-            metrics.incrementSqsPublish(getSourceCode());
+            return objectMapper.writeValueAsString(tokens);
         } catch (Exception e) {
-            metrics.incrementSqsPublishFailure(getSourceCode());
-            log.error("[KMA_EARTHQUAKE] cache event publish failed alertId={}", alert.getAlertId(), e);
+            return "[]";
         }
     }
 }

@@ -6,12 +6,11 @@ import com.safespot.externalingestion.domain.entity.AirQualityLog;
 import com.safespot.externalingestion.domain.entity.ExternalApiRawPayload;
 import com.safespot.externalingestion.metrics.IngestionMetrics;
 import com.safespot.externalingestion.publisher.CacheEventPublisher;
-import com.safespot.externalingestion.publisher.event.AirQualityCacheRefreshEvent;
+import com.safespot.externalingestion.publisher.event.EnvironmentDataCollectedEvent;
 import com.safespot.externalingestion.repository.AirQualityLogRepository;
 import com.safespot.externalingestion.util.AfterCommit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,16 +37,18 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AirKoreaNormalizer implements Normalizer {
 
+    private static final String QUEUE = "environment-collection";
+    private static final String REGION = "seoul";
+    private static final String COLLECTION_TYPE = "AIR_QUALITY";
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+    private static final DateTimeFormatter ISO_FMT = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+    private static final DateTimeFormatter WINDOW_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:00");
+
     private final AirQualityLogRepository airQualityLogRepo;
     private final CacheEventPublisher cacheEventPublisher;
     private final IngestionMetrics metrics;
     private final ObjectMapper objectMapper;
-
-    private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-
-    @Value("${ingestion.sqs.environment-cache-queue-url:}")
-    private String envQueueUrl;
 
     @Override
     public String getSourceCode() {
@@ -59,6 +60,7 @@ public class AirKoreaNormalizer implements Normalizer {
     public NormalizationResult normalize(ExternalApiRawPayload raw) {
         List<String> errors = new ArrayList<>();
         int succeeded = 0;
+        boolean anyStored = false;
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
@@ -91,10 +93,8 @@ public class AirKoreaNormalizer implements Normalizer {
 
                     airQualityLogRepo.save(aql);
                     metrics.incrementNormalizationSuccess(getSourceCode());
-
-                    String traceId = raw.getExecutionLog().getTraceId();
-                    AfterCommit.run(() -> publishCacheEvent(stationName, traceId));
                     succeeded++;
+                    anyStored = true;
                 } catch (Exception e) {
                     errors.add(e.getMessage());
                     metrics.incrementNormalizationFailure(getSourceCode(), "validation_error");
@@ -107,7 +107,27 @@ public class AirKoreaNormalizer implements Normalizer {
             log.error("[AIR_KOREA] parse failed raw_id={}", raw.getRawId(), e);
         }
 
+        if (anyStored) {
+            String traceId = raw.getExecutionLog().getTraceId();
+            OffsetDateTime now = OffsetDateTime.now(KST);
+            String completedAt = now.format(ISO_FMT);
+            String timeWindow = now.format(WINDOW_FMT);
+            AfterCommit.run(() -> publishEvent(traceId, timeWindow, completedAt));
+        }
+
         return NormalizationResult.of(succeeded, errors.size(), errors);
+    }
+
+    private void publishEvent(String traceId, String timeWindow, String completedAt) {
+        try {
+            EnvironmentDataCollectedEvent event = new EnvironmentDataCollectedEvent(
+                traceId, COLLECTION_TYPE, REGION, timeWindow, completedAt);
+            cacheEventPublisher.publish(event, QUEUE);
+            metrics.incrementSqsPublish(getSourceCode());
+        } catch (Exception e) {
+            metrics.incrementSqsPublishFailure(getSourceCode());
+            log.error("[AIR_KOREA] event publish failed", e);
+        }
     }
 
     private OffsetDateTime parseDateTime(String raw) {
@@ -131,16 +151,6 @@ public class AirKoreaNormalizer implements Normalizer {
             return (val == null || val.isBlank() || val.equals("-")) ? null : new BigDecimal(val.trim());
         } catch (NumberFormatException e) {
             return null;
-        }
-    }
-
-    private void publishCacheEvent(String stationName, String traceId) {
-        try {
-            cacheEventPublisher.publish(new AirQualityCacheRefreshEvent(traceId, stationName), envQueueUrl);
-            metrics.incrementSqsPublish(getSourceCode());
-        } catch (Exception e) {
-            metrics.incrementSqsPublishFailure(getSourceCode());
-            log.error("[AIR_KOREA] cache event publish failed station={}", stationName, e);
         }
     }
 }
