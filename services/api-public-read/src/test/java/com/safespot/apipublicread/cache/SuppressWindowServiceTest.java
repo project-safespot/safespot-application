@@ -2,66 +2,83 @@ package com.safespot.apipublicread.cache;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
+
+import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
+@ExtendWith(MockitoExtension.class)
 class SuppressWindowServiceTest {
+
+    @Mock StringRedisTemplate redisTemplate;
+    @Mock ValueOperations<String, String> valueOps;
 
     private SuppressWindowService suppressWindowService;
 
     @BeforeEach
     void setUp() {
-        suppressWindowService = new SuppressWindowService();
+        when(redisTemplate.opsForValue()).thenReturn(valueOps);
+        suppressWindowService = new SuppressWindowService(redisTemplate);
     }
 
     @Test
-    void firstCallShouldPublish() {
-        assertThat(suppressWindowService.shouldPublish("shelter:status:1")).isTrue();
+    void tryPublish_setNxSucceeds_returnsTrue() {
+        when(valueOps.setIfAbsent(anyString(), eq("1"), eq(Duration.ofSeconds(30)))).thenReturn(true);
+
+        assertThat(suppressWindowService.tryPublish("disaster:messages:list:seoul")).isTrue();
     }
 
     @Test
-    void tryPublishReturnsTrueAndMarks() {
-        assertThat(suppressWindowService.tryPublish("shelter:status:1")).isTrue();
+    void tryPublish_setNxFails_returnsFalse() {
+        when(valueOps.setIfAbsent(anyString(), eq("1"), eq(Duration.ofSeconds(30)))).thenReturn(false);
+
+        assertThat(suppressWindowService.tryPublish("disaster:messages:list:seoul")).isFalse();
     }
 
     @Test
-    void secondCallWithinWindowShouldNotPublish() {
-        suppressWindowService.tryPublish("shelter:status:1");
-        assertThat(suppressWindowService.shouldPublish("shelter:status:1")).isFalse();
+    void tryPublish_setNxReturnsNull_returnsFalse() {
+        when(valueOps.setIfAbsent(anyString(), eq("1"), eq(Duration.ofSeconds(30)))).thenReturn(null);
+
+        assertThat(suppressWindowService.tryPublish("disaster:messages:list:seoul")).isFalse();
     }
 
     @Test
-    void differentKeysShouldBeIndependent() {
-        suppressWindowService.tryPublish("shelter:status:1");
+    void tryPublish_redisDown_returnsFalse() {
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class)))
+                .thenThrow(new RedisConnectionFailureException("connection refused"));
 
-        assertThat(suppressWindowService.shouldPublish("shelter:status:2")).isTrue();
+        assertThat(suppressWindowService.tryPublish("disaster:messages:list:seoul")).isFalse();
     }
 
     @Test
-    void tryPublishSecondTimeWithinWindowReturnsFalse() {
-        suppressWindowService.tryPublish("shelter:status:1");
-        assertThat(suppressWindowService.tryPublish("shelter:status:1")).isFalse();
+    void tryPublish_differentKeys_useDifferentSuppressKeys() {
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
+
+        suppressWindowService.tryPublish("disaster:messages:list:seoul");
+        suppressWindowService.tryPublish("disaster:detail:55");
+
+        // Both calls must use different suppress keys (captured via ArgumentCaptor)
+        var captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(valueOps, times(2)).setIfAbsent(captor.capture(), anyString(), any(Duration.class));
+        assertThat(captor.getAllValues().get(0)).isNotEqualTo(captor.getAllValues().get(1));
     }
 
     @Test
-    void tryPublish_concurrent_onlyOneSucceeds() throws InterruptedException {
-        int threads = 20;
-        java.util.concurrent.atomic.AtomicInteger successCount = new java.util.concurrent.atomic.AtomicInteger(0);
-        java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(threads);
-        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(threads);
+    void tryPublish_suppressKeyStartsWithPrefix() {
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(Duration.class))).thenReturn(true);
 
-        for (int i = 0; i < threads; i++) {
-            executor.submit(() -> {
-                if (suppressWindowService.tryPublish("shelter:status:concurrent")) {
-                    successCount.incrementAndGet();
-                }
-                latch.countDown();
-            });
-        }
+        suppressWindowService.tryPublish("disaster:messages:list:seoul");
 
-        latch.await();
-        executor.shutdown();
-
-        assertThat(successCount.get()).isEqualTo(1);
+        var captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(valueOps).setIfAbsent(captor.capture(), anyString(), any(Duration.class));
+        assertThat(captor.getValue()).startsWith("suppress:cache-regeneration:");
     }
 }

@@ -26,79 +26,86 @@ public class DisasterAlertReadService {
     private static final String ENDPOINT_LIST = "/disaster-alerts";
     private static final String ENDPOINT_LATEST = "/disasters/{disasterType}/latest";
 
+    static final String LIST_KEY = "disaster:messages:list:seoul";
+    static final String DETAIL_KEY_PREFIX = "disaster:detail:";
+
     private final DisasterAlertRepository disasterAlertRepository;
     private final RedisReadCache redisReadCache;
     private final SuppressWindowService suppressWindowService;
     private final CacheRegenerationPublisher cacheRegenerationPublisher;
 
     public List<DisasterAlertItem> findAlerts(String region, String disasterType) {
-        String key = buildListKey(region, disasterType);
         RedisReadCache.CacheResult<List<DisasterAlertItem>> cached =
-                redisReadCache.get(key, new TypeReference<>() {});
+                redisReadCache.get(LIST_KEY, new TypeReference<>() {});
 
-        if (cached.isHit()) return cached.value();
+        if (cached.isHit()) {
+            return filterItems(cached.value(), region, disasterType);
+        }
 
         redisReadCache.recordFallback(ENDPOINT_LIST, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_LIST);
-
-        List<DisasterAlertItem> result = disasterAlertRepository.findAlerts(region, disasterType)
-                .stream().map(this::toItem).toList();
-
-        if (suppressWindowService.tryPublish(key)) {
-            cacheRegenerationPublisher.publish(key);
+        if (suppressWindowService.tryPublish(LIST_KEY)) {
+            cacheRegenerationPublisher.publish(LIST_KEY);
         }
 
-        return result;
+        return disasterAlertRepository.findAlerts(region, disasterType)
+                .stream().map(this::toItem).toList();
     }
 
     public DisasterLatestDto findLatest(String disasterType, String region) {
-        String pointerKey = buildLatestPointerKey(disasterType, region);
+        RedisReadCache.CacheResult<List<DisasterAlertItem>> listResult =
+                redisReadCache.get(LIST_KEY, new TypeReference<>() {});
 
-        RedisReadCache.CacheResult<Long> pointerResult = redisReadCache.get(pointerKey, new TypeReference<>() {});
-
-        boolean detailMissed = false;
-
-        if (pointerResult.isHit()) {
-            String detailKey = buildDetailKey(pointerResult.value());
-            RedisReadCache.CacheResult<DisasterLatestDto> detailResult =
-                    redisReadCache.get(detailKey, new TypeReference<>() {});
-            if (detailResult.isHit()) return detailResult.value();
-
-            redisReadCache.recordFallback(ENDPOINT_LATEST, detailResult.fallbackReason());
-            redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
-            detailMissed = true;
-        } else {
-            redisReadCache.recordFallback(ENDPOINT_LATEST, pointerResult.fallbackReason());
-            redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
+        if (listResult.isHit()) {
+            DisasterAlertItem match = filterByType(listResult.value(), disasterType);
+            if (match != null) {
+                return resolveDetail(match, disasterType, region);
+            }
+            throw new ApiException(ErrorCode.NOT_FOUND);
         }
 
-        DisasterAlert alert = disasterAlertRepository.findLatest(disasterType, region)
+        redisReadCache.recordFallback(ENDPOINT_LATEST, listResult.fallbackReason());
+        redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
+        if (suppressWindowService.tryPublish(LIST_KEY)) {
+            cacheRegenerationPublisher.publish(LIST_KEY);
+        }
+
+        return disasterAlertRepository.findLatest(disasterType, region)
+                .map(this::toLatestDto)
                 .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
+    }
 
-        DisasterLatestDto result = toLatestDto(alert);
+    private DisasterLatestDto resolveDetail(DisasterAlertItem item, String disasterType, String region) {
+        String detailKey = DETAIL_KEY_PREFIX + item.alertId();
+        RedisReadCache.CacheResult<DisasterLatestDto> detailResult =
+                redisReadCache.get(detailKey, new TypeReference<>() {});
 
-        // pointer miss → worker must rebuild the pointer (publish pointer key)
-        // detail miss  → worker must rebuild the detail entry (publish detail key for the actual latest alertId)
-        String publishKey = detailMissed ? buildDetailKey(alert.getAlertId()) : pointerKey;
-        if (suppressWindowService.tryPublish(publishKey)) {
-            cacheRegenerationPublisher.publish(publishKey);
+        if (detailResult.isHit()) return detailResult.value();
+
+        redisReadCache.recordFallback(ENDPOINT_LATEST, detailResult.fallbackReason());
+        redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
+        if (suppressWindowService.tryPublish(detailKey)) {
+            cacheRegenerationPublisher.publish(detailKey);
         }
 
-        return result;
+        return disasterAlertRepository.findLatest(disasterType, region)
+                .map(this::toLatestDto)
+                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
     }
 
-    private static String buildLatestPointerKey(String disasterType, String region) {
-        return "disaster:latest:" + disasterType + ":" + region;
+    private static List<DisasterAlertItem> filterItems(List<DisasterAlertItem> items,
+                                                        String region, String disasterType) {
+        return items.stream()
+                .filter(i -> region == null || region.equals(i.region()))
+                .filter(i -> disasterType == null || disasterType.equals(i.disasterType()))
+                .toList();
     }
 
-    private static String buildDetailKey(long alertId) {
-        return "disaster:detail:" + alertId;
-    }
-
-    private String buildListKey(String region, String disasterType) {
-        String r = region != null ? region : "ALL";
-        String d = disasterType != null ? disasterType : "ALL";
-        return "disaster:alert:list:" + r + ":" + d;
+    private static DisasterAlertItem filterByType(List<DisasterAlertItem> items, String disasterType) {
+        return items.stream()
+                .filter(i -> disasterType.equals(i.disasterType()))
+                .findFirst()
+                .orElse(null);
     }
 
     private DisasterAlertItem toItem(DisasterAlert a) {
