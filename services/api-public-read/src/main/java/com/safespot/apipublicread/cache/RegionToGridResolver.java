@@ -4,6 +4,8 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * MVP 서울 전용 region → KMA 격자(nx, ny) 변환기.
@@ -42,6 +44,10 @@ public class RegionToGridResolver {
             Map.entry("강동구", new int[]{62, 127})
     );
 
+    private static final Set<String> GRID_SET = GRID_MAP.values().stream()
+            .map(g -> g[0] + ":" + g[1])
+            .collect(Collectors.toUnmodifiableSet());
+
     public Optional<int[]> resolve(String region) {
         if (region == null) return Optional.empty();
         return Optional.ofNullable(GRID_MAP.get(region));
@@ -49,5 +55,9 @@ public class RegionToGridResolver {
 
     public boolean isSupported(String region) {
         return GRID_MAP.containsKey(region);
+    }
+
+    public boolean isSupportedGrid(int nx, int ny) {
+        return GRID_SET.contains(nx + ":" + ny);
     }
 }
