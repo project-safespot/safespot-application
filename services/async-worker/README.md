@@ -10,8 +10,8 @@ SQS consumer 기반 Redis cache refresh / Read Model worker.
 
 | Lambda | Spring Profile | 소비 큐 | 담당 |
 |--------|---------------|---------|------|
-| `cache-worker` | `cache-worker` | evacuation-events, environment-events | shelter:status, env:weather, env:air SET |
-| `readmodel-worker` | `readmodel-worker` | disaster-events | disaster:active, disaster:alert:list, disaster:detail SET |
+| `cache-worker` | `cache-worker` | evacuation-events, environment-events | shelter:status, environment read models SET |
+| `readmodel-worker` | `readmodel-worker` | disaster-events | `disaster:detail:{alertId}`, `disaster:messages:recent:seoul`, `disaster:message:core:seoul`, `disaster:messages:list:seoul` SET |
 
 ---
 
@@ -148,10 +148,20 @@ Fat JAR 위치: `services/async-worker/build/libs/async-worker-*.jar`
 | 키 패턴 | TTL | 비고 |
 |---------|-----|------|
 | `shelter:status:{shelterId}` | 30초 | 재난 상황 즉각 반영 |
-| `disaster:latest:{type}:{region}` | 5분 | pointer key |
-| `disaster:detail:{alertId}` | 10분 | detail key |
-| `env:weather:{nx}:{ny}` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
-| `env:air:{station_name}` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
+| `disaster:messages:recent:seoul` | 5분 | recent read model |
+| `disaster:message:core:seoul` | 5분 | core read model |
+| `disaster:messages:list:seoul` | 5분 | Top 50 list read model |
+| `disaster:detail:{alertId}` | 60분 | detail read model |
+| `environment:weather:{nx}:{ny}` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
+| `environment:air:{stationName}` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
+
+## 재난 read model 재생성 규칙
+
+- 재생성 순서는 `detail -> recent -> core -> list`를 따른다.
+- worker는 정규화된 DB 데이터만 사용한다.
+- raw 메시지를 worker에서 다시 분류하지 않는다.
+- `isInScope=false` 메시지는 public Redis read model에 포함하지 않는다.
+- retired key인 `disaster:active`, `disaster:latest:*`, `disaster:alert:list`는 재생성하지 않는다.
 
 > env TTL은 외부 API 수집 주기와 무관하다.
 > 수집 완료 이벤트(EnvironmentDataCollected) 수신 즉시 overwrite로 갱신된다.

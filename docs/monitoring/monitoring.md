@@ -51,7 +51,7 @@
 우선 관찰 API:
 
 1. `GET /disaster-alerts`
-2. `GET /disasters/{disasterType}/latest`
+2. 재난 overview / core message read path
 3. `GET /shelters/nearby`
 4. main 화면 API
 5. 가족 조회 API
@@ -80,7 +80,7 @@ Spring Boot Actuator 기본 metric인 `http.server.requests`를 표준 HTTP metr
 | error rate | `http.server.requests` 중 `status=5xx`, `outcome=SERVER_ERROR` | `service`, `uri` |
 | client error | `http.server.requests` 중 `status=4xx`, `outcome=CLIENT_ERROR` | `service`, `uri` |
 
-Dashboard에서는 `/shelters/nearby`, `/disaster-alerts`, `/disasters/{disasterType}/latest`를 반드시 분리해서 본다.
+Dashboard에서는 `/shelters/nearby`, `/disaster-alerts`, 재난 overview/core read path를 반드시 분리해서 본다.
 
 ### 3.2 api-public-read Redis usage metric
 
@@ -96,12 +96,32 @@ Redis 자체 상태는 redis-exporter가 수집한다. endpoint별 cache 사용 
 | `api_read_cache_regen_requested_total` | Counter | `endpoint` | cache regeneration 요청 발생 |
 | `api_read_cache_regen_suppressed_total` | Counter | `endpoint` | suppress window로 regeneration 요청 생략 |
 
+재난 read model cache 관측에는 다음 `cache_key_family` 값을 공통 사용한다:
+
+- `disaster_messages_recent`
+- `disaster_message_core`
+- `disaster_messages_list`
+- `disaster_detail`
+
+권장 metric:
+
+| metric | type | label | 설명 |
+| --- | --- | --- | --- |
+| `cache_hit_total` | Counter | `service`, `cache_key_family` | Redis cache hit |
+| `cache_miss_total` | Counter | `service`, `cache_key_family` | Redis cache miss |
+| `cache_regeneration_requested_total` | Counter | `cache_key_family`, `event_type` | regeneration 요청 발생 |
+| `cache_regeneration_completed_total` | Counter | `cache_key_family` | regeneration 완료 |
+| `cache_regeneration_failed_total` | Counter | `cache_key_family`, `reason` | regeneration 실패 |
+| `redis_hot_key_detected_total` | Counter | `cache_key_family` | hot key 감지 |
+| `redis_payload_size_bytes` | Gauge or Summary | `cache_key_family` | payload size 관측 |
+
 필수 endpoint label 값은 route template을 사용한다.
 
 | API | endpoint label |
 | --- | --- |
 | `GET /disaster-alerts` | `/disaster-alerts` |
-| `GET /disasters/{disasterType}/latest` | `/disasters/{disasterType}/latest` |
+| disaster overview recent read | `/disaster-overview/recent` |
+| global or menu core message read | `/global/disaster-core` |
 | `GET /shelters/nearby` | `/shelters/nearby` |
 | `GET /shelters/{shelterId}` | `/shelters/{shelterId}` |
 | `GET /weather-alerts` | `/weather-alerts` |
@@ -341,6 +361,25 @@ SQS/Lambda native metric은 queue/function 상태를 보여준다. 어떤 event 
 | `worker_partial_batch_failure_total` | Counter | `event_type`, `queue_name` | partial batch failure 발생 |
 | `worker_dlq_publish_total` | Counter | `event_type`, `reason` | DLQ 전송 또는 DLQ 대상 실패 |
 
+재난 read model regeneration 관측에는 다음 cache family 지표를 추가하는 것을 권장한다:
+
+| metric | type | label | 설명 |
+| --- | --- | --- | --- |
+| `cache_regeneration_requested_total` | Counter | `cache_key_family`, `event_type` | `CacheRegenerationRequested` 수신 또는 downstream rebuild 요청 수 |
+| `cache_regeneration_completed_total` | Counter | `cache_key_family` | read model rebuild 완료 |
+| `cache_regeneration_failed_total` | Counter | `cache_key_family`, `reason` | read model rebuild 실패 |
+| `redis_hot_key_detected_total` | Counter | `cache_key_family` | hot key 감지 |
+| `redis_payload_size_bytes` | Gauge or Summary | `cache_key_family` | read model payload size |
+
+권장 `cache_key_family` 값:
+
+```text
+disaster_messages_recent
+disaster_message_core
+disaster_messages_list
+disaster_detail
+```
+
 권장 `event_type` 값:
 
 ```text
@@ -352,6 +391,8 @@ DisasterDataCollected
 EnvironmentDataCollected
 CacheRegenerationRequested
 ```
+
+`disaster:messages:list:seoul`는 low-cardinality MVP 설계의 결과로 hot key 후보가 될 수 있다. 이는 허용된 trade-off이며, hit ratio와 payload size를 함께 관찰해야 한다.
 
 권장 failure reason 값:
 
@@ -492,10 +533,13 @@ CloudWatch / RDS Enhanced Monitoring / Performance Insights
 필수 panel:
 
 - endpoint별 request rate, p95/p99 latency, 4xx/5xx
-- `/shelters/nearby`, `/disaster-alerts`, `/disasters/{disasterType}/latest` 상세
+- `/shelters/nearby`, `/disaster-alerts`, 재난 overview/core read path 상세
 - `api_read_cache_request_total` result 비율
 - `api_read_cache_fallback_total` reason별 추이
 - `api_read_db_fallback_query_total`, fallback latency
+- `cache_hit_total`, `cache_miss_total`의 `cache_key_family`별 추이
+- `redis_payload_size_bytes{cache_key_family=\"disaster_messages_list\"}` 추이
+- `redis_hot_key_detected_total{cache_key_family=\"disaster_messages_list\"}` 추이
 - Redis hit ratio, memory usage, evictions
 - RDS connections, CPU, read/write latency
 - api-core admin action success/failure
@@ -518,6 +562,7 @@ CloudWatch / RDS Enhanced Monitoring / Performance Insights
 - `worker_processing_duration_seconds` p95/p99
 - `worker_failures_total` reason별 추이
 - `worker_redis_write_total` result별 추이
+- `cache_regeneration_requested_total`, `cache_regeneration_completed_total`, `cache_regeneration_failed_total`의 `cache_key_family`별 추이
 - partial batch failure count
 
 ### 7.3 Ingestion dashboard

@@ -16,14 +16,22 @@ Current MVP scope is Seoul only.
 5. [api-core API](api/api-core.md)
 6. [Event envelope](event/event-envelope.md)
 7. [Redis keys](redis-key/redis-key.md)
-8. [Async worker](event/async-worker.md)
-9. [Monitoring](monitoring/monitoring.md)
+8. [Redis TTL](redis-key/cache-ttl.md)
+9. [Async worker](event/async-worker.md)
+10. [Monitoring](monitoring/monitoring.md)
 
 재난 메시지 분류와 정규화 저장 계약은 다음 문서를 함께 본다:
 
 - `docs/api/api-common.md`
 - `docs/ingestion/external-ingestion.md`
 - `docs/data/db-schema.md`
+
+Redis read model, event, TTL, worker regeneration 계약은 다음 문서를 함께 본다:
+
+- `docs/redis-key/redis-key.md`
+- `docs/redis-key/cache-ttl.md`
+- `docs/event/event-envelope.md`
+- `docs/event/async-worker.md`
 
 ## API Docs
 

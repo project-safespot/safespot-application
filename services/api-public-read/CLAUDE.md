@@ -23,13 +23,22 @@ Shelter:
 
 Disaster:
 
-- pointer: `disaster:latest:{disasterType}:{region}`
-- detail: `disaster:detail:{alertId}`
+- `disaster:messages:recent:seoul`
+- `disaster:message:core:seoul`
+- `disaster:messages:list:seoul`
+- `disaster:detail:{alertId}`
 
 Miss rules:
 
-- pointer miss -> request pointer regeneration
+- recent miss -> request recent regeneration
+- core miss -> request core regeneration
+- list miss -> request list regeneration
 - detail miss -> request detail regeneration
+
+Read rules:
+
+- disaster message filtering is payload-based, not Redis-key-based
+- do not add `{disasterType}`, `{category}`, or `{district}` key dimensions in MVP disaster message caches
 
 ## 4. Cache Responsibility Split
 
