@@ -585,7 +585,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | `disaster:messages:recent:seoul` | 서울 MVP 최근 재난 메시지 Top 5 read model | 5분 | readmodel-worker (normalized DB data 기준 재생성) | 신규 in-scope alert 반영 / cache miss / TTL 만료 |
 | `disaster:message:core:seoul` | 서울 MVP 핵심 재난 메시지 1건 read model | 5분 | readmodel-worker (normalized DB data 기준 재생성) | 신규 in-scope alert 반영 / cache miss / TTL 만료 |
 | `disaster:messages:list:seoul` | 서울 MVP 재난 메시지 목록 Top N read model | 5분 | readmodel-worker (normalized DB data 기준 재생성) | 신규 in-scope alert 반영 / cache miss / TTL 만료 |
-| `disaster:detail:{alertId}` | 개별 재난 알림 상세 read model | 10분 | readmodel-worker (normalized DB data 기준 재생성) | 해당 alert 반영 / cache miss / TTL 만료 |
+| `disaster:detail:{alertId}` | 개별 재난 알림 상세 read model | 3600 seconds / 60분 | readmodel-worker (normalized DB data 기준 재생성) | 해당 alert 반영 / cache miss / TTL 만료 |
 | `env:weather:{nx}:{ny}` | 격자 좌표 기반 날씨 예보 | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
 | `env:air:{station_name}` | 측정소 기반 대기질(AQI) | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
 
