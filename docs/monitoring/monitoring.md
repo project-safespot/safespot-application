@@ -1,4 +1,4 @@
-# SafeSpot Monitoring Specification
+# SafeSpot Monitoring 명세
 
 이 문서는 SafeSpot의 Application 담당자와 Async-worker(SQS/Lambda) 담당자가 구현하고 운영해야 할 metric/log 수집 기준을 정의한다.
 
@@ -123,7 +123,7 @@ Redis 자체 상태는 redis-exporter가 수집한다. endpoint별 cache 사용 
 | --- | --- |
 | `GET /disaster-alerts` | `/disaster-alerts` |
 | disaster overview recent read | `/disaster-overview/recent` |
-| global or menu core message read | `/global/disaster-core` |
+| global 또는 menu core message read | `/global/disaster-core` |
 | `GET /shelters/nearby` | `/shelters/nearby` |
 | `GET /shelters/{shelterId}` | `/shelters/{shelterId}` |
 | `GET /weather-alerts` | `/weather-alerts` |
@@ -299,8 +299,8 @@ SQS -> Lambda -> SqsBatchProcessor -> EventDispatcher -> Handler -> Service -> R
 | 목적 | CloudWatch metric | 설명 |
 | --- | --- | --- |
 | waiting messages | `ApproximateNumberOfMessagesVisible` | queue backlog |
-| in-flight messages | `ApproximateNumberOfMessagesNotVisible` | Lambda가 받아 처리 중인 메시지 |
-| delayed messages | `ApproximateNumberOfMessagesDelayed` | delay 상태 메시지 |
+| in-flight messages | `ApproximateNumberOfMessagesNotVisible` | Lambda가 받아 처리 중인 message |
+| delayed messages | `ApproximateNumberOfMessagesDelayed` | delay 상태 message |
 | oldest message age | `ApproximateAgeOfOldestMessage` | 처리 지연 시간 |
 | sent messages | `NumberOfMessagesSent` | 발행량 |
 | received messages | `NumberOfMessagesReceived` | 소비량 |

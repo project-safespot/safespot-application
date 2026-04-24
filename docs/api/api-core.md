@@ -1,72 +1,72 @@
 # SafeSpot REST API - api-core
 
-This document defines the `api-core` API contract.
+이 문서는 `api-core` API 계약을 정의한다.
 
-Common auth, response, error, enum, and validation rules come from `docs/api/api-common.md`.
+공통 auth, response, error, enum, validation 규칙은 `docs/api/api-common.md`를 따른다.
 
-## 1. Responsibility
+## 1. 책임
 
-`api-core` owns:
+`api-core`가 소유한다:
 
 - authentication
-- admin read APIs
-- admin write APIs
-- synchronous RDS transactions
-- event publication after commit
-- Redis invalidation by `DEL` only
+- admin read API
+- admin write API
+- synchronous RDS transaction
+- commit 후 event publication
+- `DEL`만 사용하는 Redis invalidation
 
-`api-core` does not own:
+`api-core`가 소유하지 않는다:
 
-- public read APIs
-- Redis rebuild execution
-- read-model rebuild execution
+- public read API
+- Redis rebuild 실행
+- read model rebuild 실행
 - external data ingestion
 
-## 2. Current Implementation vs Target State
+## 2. 현재 구현 vs 목표 상태
 
-Current implementation:
+현재 구현:
 
-- `api-core` commits RDS first.
-- It then publishes the event.
-- It deletes stale Redis keys when immediate invalidation is needed.
+- `api-core`는 RDS를 먼저 commit한다.
+- 그 다음 event를 publish한다.
+- 즉시 invalidation이 필요할 때 stale Redis key를 삭제한다.
 
-Target architecture:
+목표 아키텍처:
 
-- publish must remain after commit
-- publish must be durable
-- event loss is not allowed
-- replayable storage or a failure channel must exist if direct publish cannot complete safely
+- publish는 commit 후에만 수행해야 한다.
+- publish는 durable해야 한다.
+- event loss는 허용되지 않는다.
+- direct publish를 안전하게 완료할 수 없으면 replay 가능한 storage 또는 failure channel이 있어야 한다.
 
-## 3. Admin Dashboard Policy
+## 3. Admin Dashboard 정책
 
 `GET /admin/dashboard` is an operational dashboard.
 
-- `capacityTotal` is an operational metric
-- `currentOccupancy` is an operational metric
-- `availableCapacity` is an operational metric
-- `congestionLevel` is a state indicator
-- capacity is not an enforcement rule
-- policy: `정원 초과 입소 허용`
+- `capacityTotal`은 운영 metric이다.
+- `currentOccupancy`는 운영 metric이다.
+- `availableCapacity`는 운영 metric이다.
+- `congestionLevel`은 상태 표시자다.
+- capacity는 enforcement rule이 아니다.
+- 정책: `정원 초과 입소 허용`
 
-## 4. Event And Cache Responsibility
+## 4. Event 및 Cache 책임
 
-Event rules:
+Event 규칙:
 
-- publish only after DB commit
-- publish must be durable
-- no log-only failure handling
-- preserve full envelope for replay or recovery
+- DB commit 후에만 publish한다.
+- publish는 durable해야 한다.
+- log-only failure handling은 허용하지 않는다.
+- replay 또는 recovery를 위해 full envelope를 보존한다.
 
-Cache responsibility split:
+Cache 책임 분리:
 
-- `api-core` = `DEL` only
+- `api-core` = `DEL`만 수행
 - `async-worker` = rebuild
 
 ## 5. Endpoints
 
 ### 5.1 POST /auth/login
 
-Request:
+요청:
 
 ```json
 {
@@ -75,7 +75,7 @@ Request:
 }
 ```
 
-Response `200`:
+`200` 응답:
 
 ```json
 {
@@ -93,20 +93,20 @@ Response `200`:
 }
 ```
 
-Failures:
+실패:
 
 | Case | HTTP | Code |
 | --- | --- | --- |
-| Missing required field | 400 | `MISSING_REQUIRED_FIELD` |
-| Invalid format | 400 | `VALIDATION_ERROR` |
-| Invalid credentials | 401 | `INVALID_CREDENTIALS` |
-| Disabled account | 401 | `ACCOUNT_DISABLED` |
+| 필수 필드 누락 | 400 | `MISSING_REQUIRED_FIELD` |
+| 유효하지 않은 형식 | 400 | `VALIDATION_ERROR` |
+| 유효하지 않은 credential | 401 | `INVALID_CREDENTIALS` |
+| 비활성 계정 | 401 | `ACCOUNT_DISABLED` |
 
 ### 5.2 GET /me
 
-Role: `USER`, `ADMIN`
+역할: `USER`, `ADMIN`
 
-Response `200`:
+`200` 응답:
 
 ```json
 {
@@ -126,9 +126,9 @@ Response `200`:
 
 ### 5.3 GET /admin/dashboard
 
-Role: `ADMIN`
+역할: `ADMIN`
 
-Response `200`:
+`200` 응답:
 
 ```json
 {
@@ -154,18 +154,18 @@ Response `200`:
 }
 ```
 
-Notes:
+참고:
 
-- `FULL` is a status signal, not a rejection rule.
-- Over-capacity admission remains allowed.
+- `FULL`은 상태 signal이며 거절 규칙이 아니다.
+- Over-capacity admission은 계속 허용된다.
 
 ### 5.4 POST /admin/evacuation-entries
 
-Role: `ADMIN`
+역할: `ADMIN`
 
-Purpose: register a shelter entry.
+목적: shelter entry를 등록한다.
 
-Request:
+요청:
 
 ```json
 {
@@ -182,7 +182,7 @@ Request:
 }
 ```
 
-Response `201`:
+`201` 응답:
 
 ```json
 {
@@ -198,26 +198,26 @@ Response `201`:
 
 Event publication:
 
-- after DB commit
-- durable publish required
-- full envelope must be recoverable if publish path fails
-- payload contract: `EVENT-001` in `docs/event/event-envelope.md`
+- DB commit 후 수행한다.
+- durable publish가 필요하다.
+- publish path가 실패하면 full envelope를 recover할 수 있어야 한다.
+- payload contract: `docs/event/event-envelope.md`의 `EVENT-001`
 
-Failures:
+실패:
 
 | Case | HTTP | Code |
 | --- | --- | --- |
-| Missing required field | 400 | `MISSING_REQUIRED_FIELD` |
-| Invalid format | 400 | `VALIDATION_ERROR` |
-| Unknown shelter | 404 | `NOT_FOUND` |
+| 필수 필드 누락 | 400 | `MISSING_REQUIRED_FIELD` |
+| 유효하지 않은 형식 | 400 | `VALIDATION_ERROR` |
+| 알 수 없는 shelter | 404 | `NOT_FOUND` |
 
-There is no capacity-based rejection.
+capacity 기반 rejection은 없다.
 
 ### 5.5 POST /admin/evacuation-entries/{entryId}/exit
 
-Role: `ADMIN`
+역할: `ADMIN`
 
-Response `200`:
+`200` 응답:
 
 ```json
 {
@@ -232,22 +232,22 @@ Response `200`:
 
 Event publication:
 
-- after DB commit
-- durable publish required
+- DB commit 후 수행한다.
+- durable publish가 필요하다.
 - payload contract: `EVENT-002`
 
-Failures:
+실패:
 
 | Case | HTTP | Code |
 | --- | --- | --- |
-| Unknown entry | 404 | `NOT_FOUND` |
-| Already exited | 409 | `ALREADY_EXITED` |
+| 알 수 없는 entry | 404 | `NOT_FOUND` |
+| 이미 퇴소한 entry | 409 | `ALREADY_EXITED` |
 
 ### 5.6 PATCH /admin/evacuation-entries/{entryId}
 
-Role: `ADMIN`
+역할: `ADMIN`
 
-Request:
+요청:
 
 ```json
 {
@@ -260,7 +260,7 @@ Request:
 }
 ```
 
-Response `200`:
+`200` 응답:
 
 ```json
 {
@@ -274,15 +274,15 @@ Response `200`:
 
 Event publication:
 
-- after DB commit
-- durable publish required
+- DB commit 후 수행한다.
+- durable publish가 필요하다.
 - payload contract: `EVENT-003`
 
 ### 5.7 PATCH /admin/shelters/{shelterId}
 
-Role: `ADMIN`
+역할: `ADMIN`
 
-Request:
+요청:
 
 ```json
 {
@@ -295,7 +295,7 @@ Request:
 }
 ```
 
-Response `200`:
+`200` 응답:
 
 ```json
 {
@@ -309,18 +309,18 @@ Response `200`:
 
 Cache invalidation:
 
-- current implementation: `api-core` deletes stale keys only
+- 현재 구현: `api-core`는 stale key만 삭제한다.
 - `shelter:status:{shelterId}`
-- future list keys are rebuilt by worker, not by `api-core`
+- future list key는 `api-core`가 아니라 worker가 rebuild한다.
 
 Event publication:
 
-- after DB commit
-- durable publish required
-- no event loss
+- DB commit 후 수행한다.
+- durable publish가 필요하다.
+- event loss는 허용되지 않는다.
 - payload contract: `EVENT-004`
 
-## 6. Related Documents
+## 6. 관련 문서
 
 - common API rules: `docs/api/api-common.md`
 - event envelope: `docs/event/event-envelope.md`

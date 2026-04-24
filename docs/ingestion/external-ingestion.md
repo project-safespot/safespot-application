@@ -1,42 +1,42 @@
 # External Ingestion
 
-This document defines the `external-ingestion` contract for external collection, normalization before DB write, and post-write event publication.
+이 문서는 external collection, DB write 전 normalization, write 후 event publication에 대한 `external-ingestion` 계약을 정의한다.
 
-## 1. Scope
+## 1. 범위
 
-Current MVP scope is Seoul only.
+현재 MVP 범위는 서울만 해당한다.
 
-- external collection and normalization operate only on Seoul data for the MVP
-- region-derived outputs must stay within Seoul
+- MVP에서는 external collection과 normalization이 서울 데이터에 대해서만 동작한다.
+- region-derived output은 서울 범위 안에 있어야 한다.
 
-## 2. Current Implementation vs Target State
+## 2. 현재 구현 vs 목표 상태
 
-Current implementation:
+현재 구현:
 
-- external sources are collected on polling loops or CronJobs
-- normalized data is written to RDS before any downstream read model rebuild
-- raw and canonical values are stored together for disaster alerts
-- post-commit events may trigger later async processing, but `external-ingestion` does not build Redis read models directly
+- external source는 polling loop 또는 CronJob으로 수집한다.
+- normalized data는 downstream read model rebuild 전에 RDS에 기록한다.
+- disaster alert에는 raw 값과 canonical 값을 함께 저장한다.
+- post-commit event가 이후 async processing을 trigger할 수 있지만, `external-ingestion`은 Redis read model을 직접 build하지 않는다.
 
-Target architecture:
+목표 아키텍처:
 
-- the same scope remains, but durability and replay requirements must hold even if the publication mechanism changes
+- 동일한 범위가 유지되며, publication mechanism이 변경되더라도 durability와 replay 요구사항은 유지되어야 한다.
 
-## 3. Disaster Message Normalization Contract
+## 3. Disaster Message Normalization 계약
 
-`SAFETY_DATA_ALERT` and equivalent disaster-message sources must be normalized before DB storage.
+`SAFETY_DATA_ALERT` 및 동등한 disaster-message source는 DB 저장 전에 normalize해야 한다.
 
-Required flow:
+필수 flow:
 
 - external disaster message
 - `external-ingestion` normalizer
-- DB stores raw + canonical values
-- async-worker builds Redis read models later from normalized DB data
-- `api-public-read` reads Redis only and does not re-normalize disaster messages
+- DB는 raw + canonical 값을 저장한다.
+- async-worker는 이후 normalized DB data에서 Redis read model을 build한다.
+- `api-public-read`는 Redis만 읽고 disaster message를 다시 normalize하지 않는다.
 
-### 3.1 Supported Canonical `disasterType`
+### 3.1 지원 Canonical `disasterType`
 
-SafeSpot MVP public-read scope supports only these canonical values:
+SafeSpot MVP public-read 범위는 다음 canonical 값만 지원한다.
 
 | Canonical value | In scope | Mapping basis |
 | --- | --- | --- |
@@ -53,7 +53,7 @@ SafeSpot MVP public-read scope supports only these canonical values:
 
 - 강우 표현과 산사태 표현이 함께 있어도 주된 위험 대상이 산지, 사면, 산림 인접 지역, 산사태 취약지역, 산사태 대피소이면 `LANDSLIDE`
 
-### 3.2 Out-Of-Scope Type Policy
+### 3.2 Out-Of-Scope Type 정책
 
 다음 유형은 MVP public-read 범위 밖이다:
 
@@ -113,7 +113,7 @@ Canonical level은 다음 4개만 사용한다:
 - 원문 severity는 `rawLevel` 또는 `rawLevelTokens`로 보존해야 한다
 - source severity를 안전하게 매핑할 수 없으면 raw severity를 보존하고 canonical `level` / `levelRank`는 미해결 상태로 남겨야 한다
 
-### 3.5 Raw + Canonical Storage Policy
+### 3.5 Raw + Canonical Storage 정책
 
 재난 알림 정규화 결과는 raw 값과 canonical 값을 함께 저장해야 한다.
 
@@ -144,60 +144,60 @@ Canonical level은 다음 4개만 사용한다:
 - `isInScope`는 public disaster read model 포함 여부를 제어한다
 - `normalizationReason`은 매핑 또는 제외 근거를 설명한다
 
-## 4. Weather And Air-Quality Contract
+## 4. Weather 및 Air-Quality 계약
 
-Weather is region-scoped for the MVP.
+weather는 MVP에서 region-scoped이다.
 
-- region input is mapped to grid coordinates
+- region input은 grid coordinate로 mapping된다.
 - Seoul region -> Seoul grid mapping
-- `nx` / `ny` remain source API and DB storage selectors
-- current public Redis read models use the Seoul environment namespace: `environment:weather:seoul`, `environment:weather-alert:seoul`, `environment:air-quality:seoul`
+- `nx` / `ny`는 source API 및 DB storage selector로 남는다.
+- 현재 public Redis read model은 Seoul environment namespace를 사용한다: `environment:weather:seoul`, `environment:weather-alert:seoul`, `environment:air-quality:seoul`
 
-## 5. Event Publication Contract
+## 5. Event Publication 계약
 
-After normalized data is committed to RDS:
+normalized data가 RDS에 commit된 후:
 
-- publish after DB commit
-- publish must be durable
-- do not allow log-only failure handling
-- preserve the full envelope for replay or failure-channel recovery
+- DB commit 후 publish한다.
+- publish는 durable해야 한다.
+- log-only failure handling은 허용하지 않는다.
+- replay 또는 failure-channel recovery를 위해 full envelope를 보존한다.
 
 ## 6. Observability
 
-Structured log and metric labels may include `queue_name`, but:
+structured log 및 metric label에는 `queue_name`을 포함할 수 있지만:
 
-- `queue_name` must be a logical queue name
-- never log or label a raw queue URL as `queue_name`
+- `queue_name`은 logical queue name이어야 한다.
+- raw queue URL을 `queue_name`으로 log하거나 label에 넣으면 안 된다.
 
-## 7. Responsibility Split
+## 7. 책임 분리
 
-`external-ingestion` owns:
+`external-ingestion`이 소유한다:
 
 - external API collection
 - raw payload persistence
-- keyword and token extraction for disaster messages
+- disaster message의 keyword 및 token extraction
 - canonical `disasterType` mapping
 - canonical `messageCategory` mapping
 - canonical `level` / `levelRank` mapping
 - `isInScope` decision
-- normalized RDS writes
+- normalized RDS write
 - post-commit event publication
 
-`external-ingestion` does not own:
+`external-ingestion`이 소유하지 않는다:
 
 - Redis read model rebuild
 - direct Redis `SET`
 - direct Redis `DEL`
-- public read APIs
-- public-read reclassification or re-normalization
-- worker retry / DLQ execution
+- public read API
+- public-read reclassification 또는 re-normalization
+- worker retry / DLQ 실행
 
-Later-stage ownership:
+이후 단계 ownership:
 
-- async-worker: build Redis read models from normalized DB data
-- api-public-read: read Redis read models only
+- async-worker: normalized DB data에서 Redis read model을 build한다.
+- api-public-read: Redis read model만 읽는다.
 
-## 8. Related Documents
+## 8. 관련 문서
 
 - event envelope: `docs/event/event-envelope.md`
 - async worker behavior: `docs/event/async-worker.md`
