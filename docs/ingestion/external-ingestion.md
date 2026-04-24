@@ -111,11 +111,7 @@ Canonical level은 다음 4개만 사용한다:
 - raw severity 표현은 버리면 안 된다
 - 정규화 결과는 canonical `level`과 `levelRank`를 함께 저장해야 한다
 - 원문 severity는 `rawLevel` 또는 `rawLevelTokens`로 보존해야 한다
-- source severity를 안전하게 매핑할 수 없으면 raw token을 보존하고, 문서화된 가장 보수적인 기본값을 사용해야 한다
-
-기본값:
-
-- severity token이 있으나 안전한 canonical 매핑이 불가능하면 `level = CAUTION`, `levelRank = 2`
+- source severity를 안전하게 매핑할 수 없으면 raw severity를 보존하고 canonical `level` / `levelRank`는 미해결 상태로 남겨야 한다
 
 ### 3.5 Raw + Canonical Storage Policy
 
