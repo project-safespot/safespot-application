@@ -40,7 +40,7 @@ class SafetyDataAlertNormalizerTest {
     void normalize_validPayload_savesDisasterAlert() {
         ExternalApiRawPayload raw = buildRaw("""
             {"response":{"body":{"items":{"item":[
-              {"MSG_CN":"서울 홍수 경보","RCPTN_RGN_NM":"서울특별시",
+              {"MSG_CN":"서울 홍수 경보 발령","RCPTN_RGN_NM":"서울특별시",
                "EMRG_STEP_NM":"주의","DST_SE_NM":"홍수","CRT_DT":"2026-04-21 10:00:00"}
             ]}}}}
             """);
@@ -59,9 +59,12 @@ class SafetyDataAlertNormalizerTest {
         verify(disasterAlertRepo).save(argThat(a ->
             "FLOOD".equals(a.getDisasterType()) &&
             "SAFETY_DATA_ALERT".equals(a.getSource()) &&
-            "주의".equals(a.getLevel())
+            "CAUTION".equals(a.getLevel()) &&
+            Integer.valueOf(2).equals(a.getLevelRank()) &&
+            Boolean.TRUE.equals(a.getIsInScope()) &&
+            "홍수".equals(a.getRawType())
         ));
-        verify(cacheEventPublisher).publish(any(), any());
+        verify(cacheEventPublisher).publish(any(), eq("disaster-collection"));
     }
 
     @Test
@@ -79,6 +82,7 @@ class SafetyDataAlertNormalizerTest {
 
         assertThat(result.getSucceeded()).isEqualTo(0);
         verify(disasterAlertRepo, never()).save(any());
+        verify(cacheEventPublisher, never()).publish(any(), any());
     }
 
     @Test
@@ -91,6 +95,7 @@ class SafetyDataAlertNormalizerTest {
 
         assertThat(result.getSucceeded()).isEqualTo(0);
         assertThat(result.getFailed()).isEqualTo(0);
+        verify(cacheEventPublisher, never()).publish(any(), any());
     }
 
     @Test
@@ -101,13 +106,14 @@ class SafetyDataAlertNormalizerTest {
 
         assertThat(result.hasFailures()).isTrue();
         verify(disasterAlertRepo, never()).save(any());
+        verify(cacheEventPublisher, never()).publish(any(), any());
     }
 
     @Test
     void normalize_disasterTypeMapping() {
         ExternalApiRawPayload raw = buildRaw("""
             {"response":{"body":{"items":{"item":[
-              {"MSG_CN":"산사태 경보","RCPTN_RGN_NM":"서울 관악구",
+              {"MSG_CN":"산사태 경보 발령","RCPTN_RGN_NM":"서울 관악구",
                "EMRG_STEP_NM":"경계","DST_SE_NM":"산사태","CRT_DT":"2026-04-21 11:00:00"}
             ]}}}}
             """);
@@ -121,7 +127,43 @@ class SafetyDataAlertNormalizerTest {
 
         normalizer.normalize(raw);
 
-        verify(disasterAlertRepo).save(argThat(a -> "LANDSLIDE".equals(a.getDisasterType())));
+        verify(disasterAlertRepo).save(argThat(a ->
+            "LANDSLIDE".equals(a.getDisasterType()) &&
+            "WARNING".equals(a.getLevel()) &&
+            Integer.valueOf(3).equals(a.getLevelRank())
+        ));
+    }
+
+    @Test
+    void normalize_outOfScopeType_skipsInsert() {
+        ExternalApiRawPayload raw = buildRaw("""
+            {"response":{"body":{"items":{"item":[
+              {"MSG_CN":"폭염 주의","RCPTN_RGN_NM":"서울특별시",
+               "EMRG_STEP_NM":"주의","DST_SE_NM":"폭염","CRT_DT":"2026-04-21 12:00:00"}
+            ]}}}}
+            """);
+
+        NormalizationResult result = normalizer.normalize(raw);
+
+        assertThat(result.getSucceeded()).isEqualTo(0);
+        verify(disasterAlertRepo, never()).save(any());
+        verify(cacheEventPublisher, never()).publish(any(), any());
+    }
+
+    @Test
+    void normalize_nonSeoulRegion_skipsInsert() {
+        ExternalApiRawPayload raw = buildRaw("""
+            {"response":{"body":{"items":{"item":[
+              {"MSG_CN":"홍수 경보","RCPTN_RGN_NM":"부산광역시",
+               "EMRG_STEP_NM":"경계","DST_SE_NM":"홍수","CRT_DT":"2026-04-21 13:00:00"}
+            ]}}}}
+            """);
+
+        NormalizationResult result = normalizer.normalize(raw);
+
+        assertThat(result.getSucceeded()).isEqualTo(0);
+        verify(disasterAlertRepo, never()).save(any());
+        verify(cacheEventPublisher, never()).publish(any(), any());
     }
 
     private ExternalApiRawPayload buildRaw(String body) {

@@ -1,7 +1,7 @@
 package com.safespot.externalingestion.publisher;
 
-import com.safespot.externalingestion.publisher.event.CacheRefreshEvent;
+import com.safespot.externalingestion.publisher.event.IngestionEvent;
 
 public interface CacheEventPublisher {
-    void publish(CacheRefreshEvent event, String queueTarget);
+    void publish(IngestionEvent event, String logicalQueueName);
 }

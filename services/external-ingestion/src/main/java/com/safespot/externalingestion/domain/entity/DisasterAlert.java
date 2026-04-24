@@ -28,14 +28,35 @@ public class DisasterAlert {
     @Column(name = "alert_id")
     private Long alertId;
 
+    @Column(name = "raw_type", length = 100)
+    private String rawType;
+
     @Column(name = "disaster_type", nullable = false, length = 20)
     private String disasterType;
+
+    @Column(name = "raw_category_tokens", columnDefinition = "text")
+    private String rawCategoryTokens;
+
+    @Column(name = "message_category", length = 20)
+    private String messageCategory;
+
+    @Column(name = "raw_level", length = 100)
+    private String rawLevel;
+
+    @Column(name = "raw_level_tokens", columnDefinition = "text")
+    private String rawLevelTokens;
+
+    @Column(name = "level", length = 10)
+    private String level;
+
+    @Column(name = "level_rank")
+    private Integer levelRank;
 
     @Column(name = "region", nullable = false, length = 100)
     private String region;
 
-    @Column(name = "level", nullable = false, length = 10)
-    private String level;
+    @Column(name = "source_region", length = 100)
+    private String sourceRegion;
 
     @Lob
     @Column(name = "message", nullable = false, columnDefinition = "TEXT")
@@ -46,6 +67,13 @@ public class DisasterAlert {
 
     @Column(name = "issued_at", nullable = false)
     private OffsetDateTime issuedAt;
+
+    @Column(name = "is_in_scope")
+    private Boolean isInScope;
+
+    @Lob
+    @Column(name = "normalization_reason", columnDefinition = "TEXT")
+    private String normalizationReason;
 
     @Column(name = "expired_at")
     private OffsetDateTime expiredAt;

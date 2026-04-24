@@ -80,7 +80,9 @@ class IngestionIntegrationTest {
         assertThat(alerts).anyMatch(a ->
             "FLOOD".equals(a.getDisasterType()) &&
             "SAFETY_DATA_ALERT".equals(a.getSource()) &&
-            "경계".equals(a.getLevel()) &&
+            "WARNING".equals(a.getLevel()) &&
+            Integer.valueOf(3).equals(a.getLevelRank()) &&
+            Boolean.TRUE.equals(a.getIsInScope()) &&
             "서울특별시".equals(a.getRegion())
         );
     }

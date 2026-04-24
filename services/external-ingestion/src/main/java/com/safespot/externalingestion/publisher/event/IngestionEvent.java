@@ -8,7 +8,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
 @Getter
-public abstract class CacheRefreshEvent {
+public abstract class IngestionEvent {
 
     @JsonProperty("eventId")
     private final String eventId = UUID.randomUUID().toString();
@@ -16,22 +16,19 @@ public abstract class CacheRefreshEvent {
     @JsonProperty("occurredAt")
     private final String occurredAt = OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
 
-    @JsonProperty("version")
-    private final int version = 1;
-
     @JsonProperty("producer")
     private final String producer = "external-ingestion";
 
     @JsonProperty("traceId")
     private final String traceId;
 
+    protected IngestionEvent(String traceId) {
+        this.traceId = traceId;
+    }
+
     @JsonProperty("eventType")
     public abstract String getEventType();
 
     @JsonProperty("idempotencyKey")
     public abstract String getIdempotencyKey();
-
-    protected CacheRefreshEvent(String traceId) {
-        this.traceId = traceId;
-    }
 }
