@@ -562,9 +562,9 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | Redis Key | 의미 | TTL | 생성 주체 | 무효화 조건 |
 |---|---|---|---|---|
 | `shelter:status:{shelterId}` | 사용자용 대피소 현재인원·잔여인원·혼잡도 | **30초** | cache-worker (입소·퇴소·이송·수정 이벤트 수신 후 RDS COUNT 재계산) | 입소·퇴소·이송 이벤트 즉시 DEL (api-core) |
-| `shelter:list:{shelter_type}:{disaster_type}` | 유형+재난별 대피소 목록 | 10분 | api-public-read fallback 재생성 | shelter 마스터 변경 시 DEL 또는 TTL 만료 후 재생성 |
-| `disaster:active:{region}` | 지역별 현재 활성 재난 목록 | 2분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | expired_at 갱신 / 신규 alert 수신 |
-| `disaster:alert:list:{region}:{disasterType}` | 지역+유형별 전체 재난 알림 목록 | 5분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 재난 수집 완료 이벤트 수신 시 / TTL 만료 |
+| `shelter:list:seoul:{shelterType}:{disasterType}` | 서울 MVP 기준 유형+재난별 대피소 목록 | 10분 | api-public-read fallback 재생성 | shelter 마스터 변경 시 DEL 또는 TTL 만료 후 재생성 |
+| `shelter:list:{region}:{shelterType}:{disasterType}` | 향후 지역 확장 기준 유형+재난별 대피소 목록 | 10분 | api-public-read fallback 재생성 | shelter 마스터 변경 시 DEL 또는 TTL 만료 후 재생성 |
+| `disaster:latest:{disasterType}:{region}` | 지역+유형별 최신 재난 alert pointer | 5분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 신규 alert 수신 / pointer miss / TTL 만료 |
 | `disaster:detail:{alertId}` | 개별 재난 알림 상세 | 10분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 해당 alert 만료 / TTL 만료 |
 | `env:weather:{nx}:{ny}` | 격자 좌표 기반 날씨 예보 | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
 | `env:air:{station_name}` | 측정소 기반 대기질(AQI) | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
@@ -665,8 +665,7 @@ Normalizer Pod
   → 캐시 갱신 이벤트 발행 (SQS)
 
 readmodel-worker
-  → Redis disaster:active:{region} SET (TTL 2분)
-  → Redis disaster:alert:list:{region}:{disasterType} SET (TTL 5분)
+  → Redis disaster:latest:{disasterType}:{region} SET (TTL 5분)
   → Redis disaster:detail:{alertId} SET (TTL 10분)
 ```
 
@@ -727,5 +726,6 @@ cache-worker
 |---|---|---|
 | 2026-04-16 | v6.0 | 최초 작성 |
 | 2026-04-19 | v7.0 | disaster_alert_detail 추가 / 재난 상세 캐시 키 통일 / 데이터 흐름 최신화 / health_status 정책 명시 / API↔DB 매핑 확장 / UNIQUE 제약 명시 / shelter 외부 upsert 범위 명시 / external_api_* 테이블 5개 추가 / admin_audit_log reason 저장 정책 추가 |
-| 2026-04-20 | v7.1 | 서현 async+worker 문서 기준 Redis 키 전면 수정. disaster:detail:{alertId} / disaster:alert:list 추가 / 생성 주체 cache-worker·readmodel-worker 분리 반영 |
+| 2026-04-20 | v7.1 | 서현 async+worker 문서 기준 Redis 키 전면 수정. pointer/detail 모델(`disaster:latest:{disasterType}:{region}`, `disaster:detail:{alertId}`) 반영 / 생성 주체 cache-worker·readmodel-worker 분리 반영 |
 | 2026-04-22 | v7.2 | env:weather, env:air TTL 60분 → 120분 정정. TTL 철학 주석 추가 (fallback 안정성 목적, 데이터 신선도 아님) |
+| 2026-04-24 | v7.3 | shelter list 키를 지역 namespace 형식으로 정정(`shelter:list:seoul:{shelterType}:{disasterType}`, `shelter:list:{region}:{shelterType}:{disasterType}`). deprecated `disaster:alert:list` 혼선 제거 |

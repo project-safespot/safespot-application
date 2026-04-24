@@ -1,66 +1,100 @@
-    # SafeSpot REST API — api-public-read
+# SafeSpot REST API - api-public-read
 
-> 본 문서는 `api-public-read` 워크로드의 API 엔드포인트 명세다.
-> 공통 기준(인증 정책, 응답 구조, 에러 코드, Enum, Validation)은 `docs/api/api-common.md`를 참조한다.
-> 이벤트 envelope 및 payload 전문은 `docs/event/event-envelope.md`를 참조한다.
+This document defines the `api-public-read` API contract.
 
----
+Common auth, response, error, enum, and validation rules come from `docs/api/api-common.md`.
 
-## api-public-read 책임 범위
+## 1. Responsibility
 
-- 공개 shelter 조회
-- 공개 재난 조회
-- 보조 환경 조회
-- Redis 우선 조회
-- RDS fallback 처리
-- Redis miss 시 캐시 재생성 요청 이벤트 발행 (`CacheRegenerationRequested`, suppress window 적용)
+`api-public-read` owns:
 
----
+- public shelter reads
+- public disaster reads
+- public weather and air-quality reads
+- Redis-first reads
+- RDS fallback on Redis miss/down/parse error
+- cache regeneration request events
 
-## 구현 시 책임 경계
+It does not own:
 
-handler/service 책임은 워크로드 기준으로 분리한다.
-공통 DTO/enum/error schema는 공유 가능하지만, api-core의 handler/service 로직을 이 워크로드에 혼재시키지 않는다.
+- admin writes
+- authentication issuance
+- Redis rebuild execution
+- external ingestion
 
----
+## 2. Current Implementation vs Target State
 
-# 9. 공개 조회 API
+Current implementation:
 
-## 9.1 GET /shelters/nearby
+- read path is Redis first
+- fallback goes directly to RDS
+- cache regeneration event is currently documented, but worker-side regeneration for some keys may still be stubbed
 
-### 권한
+Target architecture:
 
-없음
+- regeneration requests flow through `EVENT-007`
+- workers rebuild the requested cache entries
 
-### 목적
+## 3. Seoul MVP Validation
 
-사용자 위치 기준 주변 대피소 목록을 반환한다.
+Current MVP scope is Seoul only.
 
-### 설계 원칙
+- non-Seoul `region` -> `400 UNSUPPORTED_REGION`
+- valid `lat` / `lng` outside Seoul -> `400 UNSUPPORTED_REGION`
+- invalid `lat` / `lng` format -> `400 VALIDATION_ERROR`
 
-- 클라이언트가 `lat`, `lng`, `radius`를 전송한다.
-- 서버는 위치를 저장하지 않는다.
-- 거리 계산은 애플리케이션 레이어에서 수행한다.
-- 응답은 **통합형**으로 제공한다.
-- 프론트는 동일 응답으로 리스트와 지도 핀을 함께 구성한다.
+## 4. Cache Model
 
-### Query Parameters
+### 4.1 Disaster cache
 
-| 파라미터 | 타입 | 필수 | 규칙 |
+Pointer/detail structure:
+
+- pointer: `disaster:latest:{disasterType}:{region}`
+- detail: `disaster:detail:{alertId}`
+
+Miss handling:
+
+- pointer miss -> publish pointer regeneration request
+- detail miss -> publish detail regeneration request
+
+### 4.2 Shelter cache
+
+Current key:
+
+- `shelter:status:{id}`
+
+Future list keys:
+
+- `shelter:list:seoul:*`
+- `shelter:list:{region}:*`
+
+### 4.3 Cache regeneration
+
+Current implementation:
+
+- regeneration request behavior exists at the API contract level
+- some regeneration flow remains a stub depending on key family
+
+Target architecture:
+
+- `EVENT-007` drives worker rebuild
+
+## 5. Endpoints
+
+### 5.1 GET /shelters/nearby
+
+Purpose: return nearby shelters for Seoul coordinates.
+
+Query parameters:
+
+| Parameter | Type | Required | Rule |
 | --- | --- | --- | --- |
-| `lat` | number | Y | -90 ~ 90 |
-| `lng` | number | Y | -180 ~ 180 |
-| `radius` | number | Y | 100 ~ 5000 |
+| `lat` | number | Y | valid coordinate within Seoul scope |
+| `lng` | number | Y | valid coordinate within Seoul scope |
+| `radius` | number | Y | `100` to `5000` |
 | `disasterType` | string | N | `EARTHQUAKE` / `FLOOD` / `LANDSLIDE` |
 
-### 정렬 / 페이징
-
-- 기본 정렬: `distanceM ASC`
-- paging 없음
-- 최대 반환 건수: TBD
-- 구현 초기 내부 보호용 제한값은 둘 수 있으나 API 계약값으로는 아직 확정하지 않음
-
-### Response 200
+Response `200`:
 
 ```json
 {
@@ -69,18 +103,17 @@ handler/service 책임은 워크로드 기준으로 분리한다.
     "items": [
       {
         "shelterId": 101,
-        "shelterName": "서울시민체육관",
-        "shelterType": "민방위대피소",
+        "shelterName": "Mapo Gymnasium Shelter",
         "disasterType": "EARTHQUAKE",
-        "address": "서울특별시 마포구 월드컵로 240",
+        "address": "Seoul Mapo-gu ...",
         "latitude": 37.5687,
         "longitude": 126.9081,
         "distanceM": 420,
         "capacityTotal": 120,
-        "currentOccupancy": 68,
-        "availableCapacity": 52,
-        "congestionLevel": "NORMAL",
-        "shelterStatus": "운영중",
+        "currentOccupancy": 128,
+        "availableCapacity": 0,
+        "congestionLevel": "FULL",
+        "shelterStatus": "OPERATING",
         "updatedAt": "2026-04-14T09:10:00+09:00"
       }
     ]
@@ -88,83 +121,56 @@ handler/service 책임은 워크로드 기준으로 분리한다.
 }
 ```
 
-### 실패
+Notes:
 
-| 상황 | HTTP | 코드 |
+- `congestionLevel` is informational only.
+- `FULL` does not prevent admission.
+
+Failures:
+
+| Case | HTTP | Code |
 | --- | --- | --- |
-| `lat`, `lng`, `radius` 누락 | 400 | `MISSING_REQUIRED_FIELD` |
-| 범위 초과 | 400 | `VALIDATION_ERROR` |
+| Missing required field | 400 | `MISSING_REQUIRED_FIELD` |
+| Invalid format/range | 400 | `VALIDATION_ERROR` |
+| Outside Seoul | 400 | `UNSUPPORTED_REGION` |
 
----
+### 5.2 GET /shelters/{shelterId}
 
-## 9.2 GET /shelters/{shelterId}
-
-### 권한
-
-없음
-
-### 목적
-
-특정 대피소 상세 정보를 반환한다.
-
-### Path Parameters
-
-| 파라미터 | 타입 | 필수 |
-| --- | --- | --- |
-| `shelterId` | number | Y |
-
-### Response 200
+Response `200`:
 
 ```json
 {
   "success": true,
   "data": {
     "shelterId": 101,
-    "shelterName": "서울시민체육관",
-    "shelterType": "민방위대피소",
+    "shelterName": "Mapo Gymnasium Shelter",
     "disasterType": "EARTHQUAKE",
-    "address": "서울특별시 마포구 월드컵로 240",
+    "address": "Seoul Mapo-gu ...",
     "latitude": 37.5687,
     "longitude": 126.9081,
     "capacityTotal": 120,
-    "currentOccupancy": 68,
-    "availableCapacity": 52,
-    "congestionLevel": "NORMAL",
-    "shelterStatus": "운영중",
-    "manager": "김담당",
+    "currentOccupancy": 128,
+    "availableCapacity": 0,
+    "congestionLevel": "FULL",
+    "shelterStatus": "OPERATING",
+    "manager": "Kim Admin",
     "contact": "02-123-4567",
-    "note": "지하 1층 이용",
+    "note": "Basement level 1",
     "updatedAt": "2026-04-14T09:10:00+09:00"
   }
 }
 ```
 
-### 실패
+### 5.3 GET /disaster-alerts
 
-| 상황 | HTTP | 코드 |
-| --- | --- | --- |
-| 존재하지 않는 `shelterId` | 404 | `NOT_FOUND` |
+Query parameters:
 
----
-
-## 9.3 GET /disaster-alerts
-
-### 권한
-
-없음
-
-### 목적
-
-지역/재난유형 기준 재난 알림 목록을 반환한다.
-
-### Query Parameters
-
-| 파라미터 | 타입 | 필수 | 규칙 |
+| Parameter | Type | Required | Rule |
 | --- | --- | --- | --- |
-| `region` | string | N | 예: `서울특별시` |
+| `region` | string | N | Seoul-only |
 | `disasterType` | string | N | `EARTHQUAKE` / `FLOOD` / `LANDSLIDE` |
 
-### Response 200
+Response `200`:
 
 ```json
 {
@@ -174,9 +180,9 @@ handler/service 책임은 워크로드 기준으로 분리한다.
       {
         "alertId": 55,
         "disasterType": "FLOOD",
-        "region": "서울특별시",
-        "level": "주의",
-        "message": "한강 수위 상승으로 인해 저지대 침수 주의",
+        "region": "Seoul",
+        "level": "WARNING",
+        "message": "River level warning",
         "issuedAt": "2026-04-14T08:55:00+09:00",
         "expiredAt": null
       }
@@ -185,39 +191,28 @@ handler/service 책임은 워크로드 기준으로 분리한다.
 }
 ```
 
-### 실패
+Failures:
 
-| 상황 | HTTP | 코드 |
+| Case | HTTP | Code |
 | --- | --- | --- |
-| `disasterType` 값 오류 | 400 | `VALIDATION_ERROR` |
+| Invalid enum | 400 | `VALIDATION_ERROR` |
+| Outside Seoul | 400 | `UNSUPPORTED_REGION` |
 
-> 결과 없음은 오류가 아니며 `200 + items: []` 로 반환한다.
+### 5.4 GET /disasters/{disasterType}/latest
 
----
+Query parameters:
 
-## 9.4 GET /disasters/{disasterType}/latest
-
-### 권한
-
-없음
-
-### 목적
-
-재난 유형 + 지역(region) 기준 최신 재난 상세 1건을 반환한다.
-
-### Path Parameters
-
-| 파라미터 | 타입 | 필수 | 규칙 |
+| Parameter | Type | Required | Rule |
 | --- | --- | --- | --- |
-| `disasterType` | string | Y | `EARTHQUAKE` / `FLOOD` / `LANDSLIDE` |
+| `region` | string | Y | Seoul-only |
 
-### Query Parameters
+Behavior:
 
-| 파라미터 | 타입 | 필수 | 규칙 |
-| --- | --- | --- | --- |
-| `region` | string | Y | 예: `서울특별시` |
+- current cache model uses a pointer key and a detail key
+- pointer lookup identifies the latest `alertId`
+- detail lookup returns the full alert body
 
-### Response 200
+Response `200`:
 
 ```json
 {
@@ -225,144 +220,109 @@ handler/service 책임은 워크로드 기준으로 분리한다.
   "data": {
     "alertId": 55,
     "disasterType": "EARTHQUAKE",
-    "region": "서울특별시",
-    "level": "주의",
-    "message": "서울 인근 지진 감지",
+    "region": "Seoul",
+    "level": "WARNING",
+    "message": "Seoul earthquake warning",
     "issuedAt": "2026-04-14T08:55:00+09:00",
     "expiredAt": null,
     "details": {
       "magnitude": 4.3,
-      "epicenter": "경기 북부",
+      "epicenter": "North Gyeonggi",
       "intensity": "IV"
     }
   }
 }
 ```
 
-### 실패
+Failures:
 
-| 상황 | HTTP | 코드 |
+| Case | HTTP | Code |
 | --- | --- | --- |
-| `region` 누락 | 400 | `MISSING_REQUIRED_FIELD` |
-| `disasterType` 값 오류 | 400 | `VALIDATION_ERROR` |
-| 데이터 없음 | 404 | `NOT_FOUND` |
+| Missing `region` | 400 | `MISSING_REQUIRED_FIELD` |
+| Invalid enum | 400 | `VALIDATION_ERROR` |
+| Outside Seoul | 400 | `UNSUPPORTED_REGION` |
+| Not found | 404 | `NOT_FOUND` |
 
----
+### 5.5 GET /weather-alerts
 
-## 9.5 GET /weather-alerts
+Supported inputs:
 
-### 권한
+- region-only Seoul lookup
+- optional grid lookup using `nx` / `ny`
 
-없음
+Weather API rules:
 
-### 목적
+- Seoul-only region validation applies
+- `nx` / `ny` must be valid grid coordinates when supplied
+- region input is mapped to a Seoul grid
 
-날씨 보조 정보를 반환한다.
+Query parameters:
 
-### Query Parameters
-
-| 파라미터 | 타입 | 필수 | 규칙 |
+| Parameter | Type | Required | Rule |
 | --- | --- | --- | --- |
-| `region` | string | N | 예: `서울특별시` |
-| `nx` | number | N | 격자 X |
-| `ny` | number | N | 격자 Y |
+| `region` | string | N | Seoul-only |
+| `nx` | number | N | valid grid x |
+| `ny` | number | N | valid grid y |
 
-> `region`, `nx`, `ny` 는 개별적으로는 선택값이지만, **최소 1개 이상은 반드시 제공**해야 한다.
+At least one of `region` or `nx` + `ny` must be supplied.
 
-### Response 200
+Response `200`:
 
 ```json
 {
   "success": true,
   "data": {
-    "region": "서울특별시",
+    "region": "Seoul",
     "nx": 60,
     "ny": 127,
     "temperature": 18.5,
-    "weatherCondition": "맑음",
+    "weatherCondition": "CLEAR",
     "forecastedAt": "2026-04-15T15:00:00+09:00"
   }
 }
 ```
 
-### 실패
+Failures:
 
-| 상황 | HTTP | 코드 |
+| Case | HTTP | Code |
 | --- | --- | --- |
-| `region`, `nx`, `ny` 모두 누락 | 400 | `MISSING_REQUIRED_FIELD` |
-| `nx` / `ny` 형식 오류 | 400 | `VALIDATION_ERROR` |
+| Missing selector | 400 | `MISSING_REQUIRED_FIELD` |
+| Invalid `nx` / `ny` | 400 | `VALIDATION_ERROR` |
+| Outside Seoul | 400 | `UNSUPPORTED_REGION` |
 
-> 데이터 없음은 오류가 아니며 `200 + data: null` 로 반환한다.
+### 5.6 GET /air-quality
 
----
+Query parameters:
 
-## 9.6 GET /air-quality
-
-### 권한
-
-없음
-
-### 목적
-
-대기질 보조 정보를 반환한다.
-
-### Query Parameters
-
-| 파라미터 | 타입 | 필수 | 규칙 |
+| Parameter | Type | Required | Rule |
 | --- | --- | --- | --- |
-| `region` | string | N | 예: `서울특별시` |
-| `stationName` | string | N | 예: `종로구` |
+| `region` | string | N | Seoul-only |
+| `stationName` | string | N | Seoul station name |
 
-> `region`, `stationName` 은 개별적으로는 선택값이지만, **최소 1개 이상은 반드시 제공**해야 한다.
+At least one of `region` or `stationName` must be supplied.
 
-### Response 200
+Failures:
 
-```json
-{
-  "success": true,
-  "data": {
-    "stationName": "종로구",
-    "aqi": 42,
-    "grade": "좋음",
-    "measuredAt": "2026-04-15T15:00:00+09:00"
-  }
-}
-```
-
-### 실패
-
-| 상황 | HTTP | 코드 |
+| Case | HTTP | Code |
 | --- | --- | --- |
-| `region`, `stationName` 모두 누락 | 400 | `MISSING_REQUIRED_FIELD` |
+| Missing selector | 400 | `MISSING_REQUIRED_FIELD` |
+| Outside Seoul | 400 | `UNSUPPORTED_REGION` |
 
-> 데이터 없음은 오류가 아니며 `200 + data: null` 로 반환한다.
+## 6. Fallback And Regeneration Rules
 
----
+- Redis hit -> return cached value
+- Redis miss/down/parse error -> fallback to RDS
+- return fallback response immediately
+- then publish regeneration request subject to suppress window
 
-# 12. 캐시 및 Fallback 정책
+`EVENT-007` status:
 
-## 12.1 기본 원칙
+- current: contract documented, some regeneration paths may still be stubbed
+- target: worker receives and rebuilds requested cache entries
 
-- 공개 조회는 Redis 우선 조회
-- Redis MISS 또는 Redis 장애 시 RDS fallback
-- fallback 응답 자체는 즉시 반환
-- fallback 이후 캐시 재생성 요청은 별도 이벤트로 전달
+## 7. Related Documents
 
-## 12.2 Suppress Window
-
-- `api-public-read` 는 Redis MISS 또는 Redis 장애로 fallback 발생 시
-- **API 인스턴스 로컬 suppress window 10초** 기준으로 동일 키당 1회만 `CacheRegenerationRequested` 이벤트를 발행한다
-- suppress window 안의 추가 fallback은 이벤트를 재발행하지 않는다
-
-## 12.3 적용 우선 대상
-
-- `shelter:status:{shelterId}`
-- `shelter:list:{shelterType}:{disasterType}`
-- `disaster:alert:list:{region}:{disasterType}`
-- `disaster:latest:{disasterType}:{region}`
-- `disaster:detail:{alertId}`
-
-## 12.4 이벤트 발행
-
-Redis miss + suppress window 통과 시 `CacheRegenerationRequested` 이벤트를 발행한다.
-payload 전문 및 worker 분기 처리는 `docs/event/event-envelope.md` EVENT-007 및 `docs/async/async-worker.md`를 참조한다.
+- common API rules: `docs/api/api-common.md`
+- event envelope: `docs/event/event-envelope.md`
+- worker behavior: `docs/event/async-worker.md`
+- Redis keys: `docs/redis-key/redis-key.md`

@@ -1,42 +1,72 @@
-# SafeSpot REST API — api-core
+# SafeSpot REST API - api-core
 
-> 본 문서는 `api-core` 워크로드의 API 엔드포인트 명세다.
-> 공통 기준(인증 정책, 응답 구조, 에러 코드, Enum, Validation)은 `docs/api/api-common.md`를 참조한다.
-> 이벤트 envelope 및 payload 전문은 `docs/event/event-envelope.md`를 참조한다.
+This document defines the `api-core` API contract.
 
----
+Common auth, response, error, enum, and validation rules come from `docs/api/api-common.md`.
 
-## api-core 책임 범위
+## 1. Responsibility
 
-- 인증
-- 관리자 운영 조회
-- 관리자 write
-- 동기 트랜잭션 처리
-- 이벤트 발행 (DB commit 이후)
-- Redis 캐시 무효화(DEL)
+`api-core` owns:
 
----
+- authentication
+- admin read APIs
+- admin write APIs
+- synchronous RDS transactions
+- event publication after commit
+- Redis invalidation by `DEL` only
 
-## 구현 시 책임 경계
+`api-core` does not own:
 
-handler/service 책임은 워크로드 기준으로 분리한다.
-공통 DTO/enum/error schema는 공유 가능하지만, api-public-read의 handler/service 로직을 이 워크로드에 혼재시키지 않는다.
+- public read APIs
+- Redis rebuild execution
+- read-model rebuild execution
+- external data ingestion
 
----
+## 2. Current Implementation vs Target State
 
-# 8. 인증 API
+Current implementation:
 
-## 8.1 POST /auth/login
+- `api-core` commits RDS first.
+- It then publishes the event.
+- It deletes stale Redis keys when immediate invalidation is needed.
 
-### 권한
+Target architecture:
 
-없음
+- publish must remain after commit
+- publish must be durable
+- event loss is not allowed
+- replayable storage or a failure channel must exist if direct publish cannot complete safely
 
-### 목적
+## 3. Admin Dashboard Policy
 
-로그인 ID/비밀번호를 검증하고 Access Token을 발급한다.
+`GET /admin/dashboard` is an operational dashboard.
 
-### Request
+- `capacityTotal` is an operational metric
+- `currentOccupancy` is an operational metric
+- `availableCapacity` is an operational metric
+- `congestionLevel` is a state indicator
+- capacity is not an enforcement rule
+- policy: `정원 초과 입소 허용`
+
+## 4. Event And Cache Responsibility
+
+Event rules:
+
+- publish only after DB commit
+- publish must be durable
+- no log-only failure handling
+- preserve full envelope for replay or recovery
+
+Cache responsibility split:
+
+- `api-core` = `DEL` only
+- `async-worker` = rebuild
+
+## 5. Endpoints
+
+### 5.1 POST /auth/login
+
+Request:
 
 ```json
 {
@@ -45,14 +75,7 @@ handler/service 책임은 워크로드 기준으로 분리한다.
 }
 ```
 
-### Request Validation
-
-| 필드 | 타입 | 필수 | 규칙 |
-| --- | --- | --- | --- |
-| `loginId` | string | Y | 1~50자 |
-| `password` | string | Y | 1~100자 |
-
-### Response 200
+Response `200`:
 
 ```json
 {
@@ -63,35 +86,27 @@ handler/service 책임은 워크로드 기준으로 분리한다.
     "user": {
       "userId": 1,
       "username": "admin01",
-      "name": "홍길동",
+      "name": "Admin User",
       "role": "ADMIN"
     }
   }
 }
 ```
 
-### 실패
+Failures:
 
-| 상황 | HTTP | 코드 |
+| Case | HTTP | Code |
 | --- | --- | --- |
-| 필수값 누락 | 400 | `MISSING_REQUIRED_FIELD` |
-| 형식 오류 | 400 | `VALIDATION_ERROR` |
-| 아이디/비밀번호 불일치 | 401 | `INVALID_CREDENTIALS` |
-| 비활성 계정 | 401 | `ACCOUNT_DISABLED` |
+| Missing required field | 400 | `MISSING_REQUIRED_FIELD` |
+| Invalid format | 400 | `VALIDATION_ERROR` |
+| Invalid credentials | 401 | `INVALID_CREDENTIALS` |
+| Disabled account | 401 | `ACCOUNT_DISABLED` |
 
----
+### 5.2 GET /me
 
-## 8.2 GET /me
+Role: `USER`, `ADMIN`
 
-### 권한
-
-로그인 사용자 (`USER`, `ADMIN`)
-
-### 목적
-
-현재 로그인한 사용자 기본 정보를 반환한다.
-
-### Response 200
+Response `200`:
 
 ```json
 {
@@ -99,7 +114,7 @@ handler/service 책임은 워크로드 기준으로 분리한다.
   "data": {
     "userId": 1,
     "username": "admin01",
-    "name": "홍길동",
+    "name": "Admin User",
     "phoneNumber": "01012345678",
     "role": "ADMIN",
     "isActive": true,
@@ -109,32 +124,11 @@ handler/service 책임은 워크로드 기준으로 분리한다.
 }
 ```
 
-### 노출 금지
+### 5.3 GET /admin/dashboard
 
-- `password_hash`
-- `rrn_front_6`
+Role: `ADMIN`
 
-### 실패
-
-| 상황 | HTTP | 코드 |
-| --- | --- | --- |
-| 토큰 없음 / 만료 | 401 | `UNAUTHORIZED` |
-
----
-
-# 10. 관리자 API
-
-## 10.1 GET /admin/dashboard
-
-### 권한
-
-`ADMIN`
-
-### 목적
-
-전체 대피소 상태 요약과 주요 대피소 목록을 반환한다.
-
-### Response 200
+Response `200`:
 
 ```json
 {
@@ -148,132 +142,47 @@ handler/service 책임은 워크로드 기준으로 분리한다.
     "shelters": [
       {
         "shelterId": 101,
-        "shelterName": "서울시민체육관",
-        "shelterType": "민방위대피소",
+        "shelterName": "Mapo Gymnasium Shelter",
         "capacityTotal": 120,
-        "currentOccupancy": 118,
-        "availableCapacity": 2,
+        "currentOccupancy": 128,
+        "availableCapacity": 0,
         "congestionLevel": "FULL",
-        "shelterStatus": "운영중"
+        "shelterStatus": "OPERATING"
       }
     ]
   }
 }
 ```
 
-### 실패
+Notes:
 
-| 상황 | HTTP | 코드 |
-| --- | --- | --- |
-| 토큰 없음 / 만료 | 401 | `UNAUTHORIZED` |
-| USER 권한으로 접근 | 403 | `FORBIDDEN` |
+- `FULL` is a status signal, not a rejection rule.
+- Over-capacity admission remains allowed.
 
----
+### 5.4 POST /admin/evacuation-entries
 
-## 10.2 GET /admin/evacuation-entries
+Role: `ADMIN`
 
-### 권한
+Purpose: register a shelter entry.
 
-`ADMIN`
-
-### 목적
-
-대피소별 입소자 목록을 조회한다.
-
-### Query Parameters
-
-| 파라미터 | 타입 | 필수 | 규칙 |
-| --- | --- | --- | --- |
-| `shelterId` | number | Y | 존재하는 대피소 ID |
-| `status` | string | N | `ENTERED` / `EXITED` / `TRANSFERRED` |
-
-### Response 200
-
-```json
-{
-  "success": true,
-  "data": {
-    "items": [
-      {
-        "entryId": 301,
-        "shelterId": 101,
-        "alertId": 55,
-        "userId": null,
-        "visitorName": "홍길동",
-        "visitorPhone": "01012345678",
-        "entryStatus": "ENTERED",
-        "enteredAt": "2026-04-14T10:20:00+09:00",
-        "exitedAt": null,
-        "note": "현장 등록",
-        "detail": {
-          "address": "서울특별시 마포구 ...",
-          "familyInfo": "배우자 1, 자녀 2",
-          "healthStatus": "당뇨",
-          "specialProtectionFlag": true
-        }
-      }
-    ]
-  }
-}
-```
-
-> 현재 MVP에서는 `detail` 객체를 응답에 포함한다.
-> 향후 상세 조회 요구가 증가하면 `GET /admin/evacuation-entries/{entryId}` 로 분리할 수 있다.
-
-### 실패
-
-| 상황 | HTTP | 코드 |
-| --- | --- | --- |
-| 토큰 없음 / 만료 | 401 | `UNAUTHORIZED` |
-| USER 권한으로 접근 | 403 | `FORBIDDEN` |
-| 존재하지 않는 `shelterId` | 404 | `NOT_FOUND` |
-| `status` 값 오류 | 400 | `VALIDATION_ERROR` |
-
----
-
-## 10.3 POST /admin/evacuation-entries
-
-### 권한
-
-`ADMIN`
-
-### 목적
-
-입소자를 등록한다.
-
-### Request
+Request:
 
 ```json
 {
   "shelterId": 101,
   "alertId": 55,
   "userId": null,
-  "name": "홍길동",
+  "name": "Kim Safe",
   "phoneNumber": "01012345678",
-  "address": "서울특별시 마포구 ...",
-  "familyInfo": "배우자 1, 자녀 2",
-  "healthStatus": "당뇨",
+  "address": "Seoul Mapo-gu ...",
+  "familyInfo": "2 adults, 1 child",
+  "healthStatus": "None",
   "specialProtectionFlag": true,
-  "note": "현장 등록"
+  "note": "Walk-in registration"
 }
 ```
 
-### Request Validation
-
-| 필드 | 타입 | 필수 | 규칙 |
-| --- | --- | --- | --- |
-| `shelterId` | number | Y | 존재하는 대피소 ID |
-| `alertId` | number | N | 존재하는 재난 알림 ID |
-| `userId` | number | N | 회원 ID |
-| `name` | string | Y | 1~50자 |
-| `phoneNumber` | string | N | 숫자 10~11자리 |
-| `address` | string | N | 최대 255자 |
-| `familyInfo` | string | N | 최대 100자 |
-| `healthStatus` | string | N | 최대 200자 |
-| `specialProtectionFlag` | boolean | N | 기본값 `false` |
-| `note` | string | N | 최대 500자 권장 |
-
-### Response 201
+Response `201`:
 
 ```json
 {
@@ -287,58 +196,28 @@ handler/service 책임은 워크로드 기준으로 분리한다.
 }
 ```
 
-> 201 응답은 **등록 성공 확인용 최소 필드만 반환**한다.
-> 현재는 등록 직후 상세 조회용 단건 API를 두지 않으며, 필요성이 생기면 후속 상세 조회 API를 별도 도입한다.
+Event publication:
 
-### 이벤트 발행
+- after DB commit
+- durable publish required
+- full envelope must be recoverable if publish path fails
+- payload contract: `EVENT-001` in `docs/event/event-envelope.md`
 
-DB commit 완료 후 `EvacuationEntryCreated` 이벤트를 발행한다.
-payload 전문은 `docs/event/event-envelope.md` EVENT-001을 참조한다.
+Failures:
 
-### 실패
-
-| 상황 | HTTP | 코드 |
+| Case | HTTP | Code |
 | --- | --- | --- |
-| 토큰 없음 / 만료 | 401 | `UNAUTHORIZED` |
-| USER 권한으로 접근 | 403 | `FORBIDDEN` |
-| 존재하지 않는 `shelterId` | 404 | `NOT_FOUND` |
-| 필수값 누락 | 400 | `MISSING_REQUIRED_FIELD` |
-| 형식 오류 | 400 | `VALIDATION_ERROR` |
-| 대피소 수용 인원 초과 | 409 | `SHELTER_FULL` |
+| Missing required field | 400 | `MISSING_REQUIRED_FIELD` |
+| Invalid format | 400 | `VALIDATION_ERROR` |
+| Unknown shelter | 404 | `NOT_FOUND` |
 
----
+There is no capacity-based rejection.
 
-## 10.4 POST /admin/evacuation-entries/{entryId}/exit
+### 5.5 POST /admin/evacuation-entries/{entryId}/exit
 
-### 권한
+Role: `ADMIN`
 
-`ADMIN`
-
-### 목적
-
-입소자 퇴소 처리
-
-### Path Parameters
-
-| 파라미터 | 타입 | 필수 |
-| --- | --- | --- |
-| `entryId` | number | Y |
-
-### Request
-
-```json
-{
-  "reason": "자택 복귀"
-}
-```
-
-### Request Validation
-
-| 필드 | 타입 | 필수 | 규칙 |
-| --- | --- | --- | --- |
-| `reason` | string | N | 최대 200자 |
-
-### Response 200
+Response `200`:
 
 ```json
 {
@@ -351,70 +230,37 @@ payload 전문은 `docs/event/event-envelope.md` EVENT-001을 참조한다.
 }
 ```
 
-### 이벤트 발행
+Event publication:
 
-DB commit 완료 후 `EvacuationEntryExited` 이벤트를 발행한다.
-payload 전문은 `docs/event/event-envelope.md` EVENT-002를 참조한다.
+- after DB commit
+- durable publish required
+- payload contract: `EVENT-002`
 
-### 실패
+Failures:
 
-| 상황 | HTTP | 코드 |
+| Case | HTTP | Code |
 | --- | --- | --- |
-| 토큰 없음 / 만료 | 401 | `UNAUTHORIZED` |
-| USER 권한으로 접근 | 403 | `FORBIDDEN` |
-| 존재하지 않는 `entryId` | 404 | `NOT_FOUND` |
-| 이미 퇴소 처리된 입소자 | 409 | `ALREADY_EXITED` |
+| Unknown entry | 404 | `NOT_FOUND` |
+| Already exited | 409 | `ALREADY_EXITED` |
 
----
+### 5.6 PATCH /admin/evacuation-entries/{entryId}
 
-## 10.5 PATCH /admin/evacuation-entries/{entryId}
+Role: `ADMIN`
 
-### 권한
-
-`ADMIN`
-
-### 목적
-
-입소자 정보를 수정한다.
-
-### Path Parameters
-
-| 파라미터 | 타입 | 필수 |
-| --- | --- | --- |
-| `entryId` | number | Y |
-
-### Request
+Request:
 
 ```json
 {
-  "address": "서울특별시 마포구 ...",
-  "familyInfo": "배우자 1, 자녀 1",
-  "healthStatus": "휠체어 필요",
+  "address": "Seoul Mapo-gu ...",
+  "familyInfo": "2 adults",
+  "healthStatus": "Needs medication",
   "specialProtectionFlag": true,
-  "note": "현장 확인 후 수정",
-  "reason": "정보 교정"
+  "note": "Updated after check-in",
+  "reason": "Admin correction"
 }
 ```
 
-### Validation
-
-| 필드 | 타입 | 필수 | 규칙 |
-| --- | --- | --- | --- |
-| `address` | string | N | 최대 255자 |
-| `familyInfo` | string | N | 최대 100자 |
-| `healthStatus` | string | N | 최대 200자 |
-| `specialProtectionFlag` | boolean | N | boolean |
-| `note` | string | N | 최대 500자 권장 |
-| `reason` | string | N | 최대 200자 |
-
-### reason 필드 정책
-
-- `reason`은 **선택 필드**
-- 관리자 감사 로그 기록용으로 사용한다
-- 응답에는 포함하지 않는다
-- 일반 조회 응답에도 노출하지 않는다
-
-### Response 200
+Response `200`:
 
 ```json
 {
@@ -426,69 +272,30 @@ payload 전문은 `docs/event/event-envelope.md` EVENT-002를 참조한다.
 }
 ```
 
-### 이벤트 발행
+Event publication:
 
-DB commit 완료 후 `EvacuationEntryUpdated` 이벤트를 발행한다.
-payload 전문은 `docs/event/event-envelope.md` EVENT-003을 참조한다.
+- after DB commit
+- durable publish required
+- payload contract: `EVENT-003`
 
-### 실패
+### 5.7 PATCH /admin/shelters/{shelterId}
 
-| 상황 | HTTP | 코드 |
-| --- | --- | --- |
-| 토큰 없음 / 만료 | 401 | `UNAUTHORIZED` |
-| USER 권한으로 접근 | 403 | `FORBIDDEN` |
-| 존재하지 않는 `entryId` | 404 | `NOT_FOUND` |
-| 형식 오류 | 400 | `VALIDATION_ERROR` |
+Role: `ADMIN`
 
----
-
-## 10.6 PATCH /admin/shelters/{shelterId}
-
-### 권한
-
-`ADMIN`
-
-### 목적
-
-대피소 운영 정보를 수정한다.
-
-### Path Parameters
-
-| 파라미터 | 타입 | 필수 |
-| --- | --- | --- |
-| `shelterId` | number | Y |
-
-### Request
+Request:
 
 ```json
 {
   "capacityTotal": 140,
-  "shelterStatus": "운영중",
-  "manager": "김담당",
+  "shelterStatus": "OPERATING",
+  "manager": "Kim Admin",
   "contact": "02-123-4567",
-  "note": "현장 재점검 결과 수용 가능 인원 상향",
-  "reason": "현장 재점검"
+  "note": "Operational capacity updated",
+  "reason": "On-site review"
 }
 ```
 
-### Validation
-
-| 필드 | 타입 | 필수 | 규칙 |
-| --- | --- | --- | --- |
-| `capacityTotal` | number | N | 1 이상 |
-| `shelterStatus` | string | N | `운영중` / `운영중단` / `준비중` |
-| `manager` | string | N | 최대 50자 |
-| `contact` | string | N | 최대 50자 |
-| `note` | string | N | 최대 500자 권장 |
-| `reason` | string | Y | 최대 200자 |
-
-### reason 필드 정책
-
-- `reason`은 **필수 필드**
-- 관리자 감사 로그 기록용으로 사용한다
-- 응답에는 포함하지 않는다
-
-### Response 200
+Response `200`:
 
 ```json
 {
@@ -500,23 +307,22 @@ payload 전문은 `docs/event/event-envelope.md` EVENT-003을 참조한다.
 }
 ```
 
-### 캐시 무효화
+Cache invalidation:
 
-DB commit 완료 후 아래 Redis 키를 즉시 DEL한다.
+- current implementation: `api-core` deletes stale keys only
 - `shelter:status:{shelterId}`
-- `shelter:list:{shelterType}:{disasterType}`
+- future list keys are rebuilt by worker, not by `api-core`
 
-### 이벤트 발행
+Event publication:
 
-캐시 DEL 완료 후 `ShelterUpdated` 이벤트를 발행한다.
-payload 전문은 `docs/event/event-envelope.md` EVENT-004를 참조한다.
+- after DB commit
+- durable publish required
+- no event loss
+- payload contract: `EVENT-004`
 
-### 실패
+## 6. Related Documents
 
-| 상황 | HTTP | 코드 |
-| --- | --- | --- |
-| 토큰 없음 / 만료 | 401 | `UNAUTHORIZED` |
-| USER 권한으로 접근 | 403 | `FORBIDDEN` |
-| 존재하지 않는 `shelterId` | 404 | `NOT_FOUND` |
-| `reason` 누락 | 400 | `MISSING_REQUIRED_FIELD` |
-| 형식 오류 | 400 | `VALIDATION_ERROR` |
+- common API rules: `docs/api/api-common.md`
+- event envelope: `docs/event/event-envelope.md`
+- worker rebuild behavior: `docs/event/async-worker.md`
+- Redis keys: `docs/redis-key/redis-key.md`
