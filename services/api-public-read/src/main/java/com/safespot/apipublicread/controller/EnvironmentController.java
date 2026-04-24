@@ -1,5 +1,6 @@
 package com.safespot.apipublicread.controller;
 
+import com.safespot.apipublicread.cache.RegionToGridResolver;
 import com.safespot.apipublicread.dto.AirQualityDto;
 import com.safespot.apipublicread.dto.ApiResponse;
 import com.safespot.apipublicread.dto.WeatherAlertDto;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class EnvironmentController {
 
     private final EnvironmentReadService environmentReadService;
+    private final RegionToGridResolver regionToGridResolver;
 
     @GetMapping("/weather-alerts")
     public ResponseEntity<ApiResponse<WeatherAlertDto>> getWeather(
@@ -31,6 +33,12 @@ public class EnvironmentController {
         }
         if ((nx != null && ny == null) || (nx == null && ny != null)) {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "nx와 ny는 함께 제공해야 합니다.");
+        }
+        if (region != null && !regionToGridResolver.isSupported(region)) {
+            throw new ApiException(ErrorCode.UNSUPPORTED_REGION, "현재 서울 지역만 지원합니다.");
+        }
+        if (nx != null && ny != null && !regionToGridResolver.isSupportedGrid(nx, ny)) {
+            throw new ApiException(ErrorCode.UNSUPPORTED_REGION, "지원하지 않는 서울 격자 좌표입니다.");
         }
 
         WeatherAlertDto dto = environmentReadService.findWeather(region, nx, ny);

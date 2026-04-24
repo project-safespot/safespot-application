@@ -1,36 +1,50 @@
 package com.safespot.apipublicread.cache;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.concurrent.ConcurrentHashMap;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 
+@Slf4j
 @Component
+@RequiredArgsConstructor
 public class SuppressWindowService {
 
-    private static final long SUPPRESS_WINDOW_MS = 10_000L;
+    private static final Duration SUPPRESS_TTL = Duration.ofSeconds(30);
 
-    private final ConcurrentHashMap<String, Long> lastEmitTime = new ConcurrentHashMap<>();
+    private final StringRedisTemplate redisTemplate;
 
-    public boolean shouldPublish(String key) {
-        long now = System.currentTimeMillis();
-        Long last = lastEmitTime.get(key);
-        return last == null || (now - last) >= SUPPRESS_WINDOW_MS;
+    public boolean tryPublish(String cacheKey) {
+        String suppressKey = "suppress:cache-regeneration:" + hash(cacheKey);
+        try {
+            Boolean set = redisTemplate.opsForValue().setIfAbsent(suppressKey, "1", SUPPRESS_TTL);
+            return Boolean.TRUE.equals(set);
+        } catch (RedisConnectionFailureException e) {
+            log.warn("[Suppress] Redis unavailable for key={}: {}", suppressKey, e.getMessage());
+            return false;
+        } catch (Exception e) {
+            log.warn("[Suppress] Redis error for key={}: {}", suppressKey, e.getMessage());
+            return false;
+        }
     }
 
-    public void markEmitted(String key) {
-        lastEmitTime.put(key, System.currentTimeMillis());
-    }
-
-    public boolean tryPublish(String key) {
-        long now = System.currentTimeMillis();
-        boolean[] emitted = {false};
-        lastEmitTime.compute(key, (k, last) -> {
-            if (last == null || (now - last) >= SUPPRESS_WINDOW_MS) {
-                emitted[0] = true;
-                return now;
+    private static String hash(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(64);
+            for (byte b : digest) {
+                sb.append(String.format("%02x", b));
             }
-            return last;
-        });
-        return emitted[0];
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

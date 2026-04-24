@@ -117,7 +117,7 @@ public class EvacuationService {
         final OffsetDateTime enteredAt = entry.getEnteredAt();
         eventPublisher.publishEvent(new EvacuationEntryCreatedSpringEvent(this,
                 EventEnvelope.of("EvacuationEntryCreated",
-                        "entry:" + entryId + ":ENTERED:v1",
+                        "entry:" + entryId + ":ENTERED",
                         EvacuationEntryCreatedPayload.builder()
                                 .entryId(entryId)
                                 .shelterId(entry.getShelterId())
@@ -175,7 +175,7 @@ public class EvacuationService {
 
         eventPublisher.publishEvent(new EvacuationEntryExitedSpringEvent(this,
                 EventEnvelope.of("EvacuationEntryExited",
-                        "entry:" + entryId + ":EXITED:v1",
+                        "entry:" + entryId + ":EXITED",
                         EvacuationEntryExitedPayload.builder()
                                 .entryId(entryId)
                                 .shelterId(entry.getShelterId())

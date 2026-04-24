@@ -87,8 +87,6 @@ public class ShelterAdminService {
                         "shelter:" + shelterId + ":UPDATED:",
                         ShelterUpdatedPayload.builder()
                                 .shelterId(shelterId)
-                                .shelterType(shelter.getShelterType())
-                                .disasterType(shelter.getDisasterType())
                                 .recordedByAdminId(adminId)
                                 .updatedAt(updatedAt)
                                 .changedFields(changedFields)
