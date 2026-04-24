@@ -1,36 +1,36 @@
-# Redis Cache TTL Policy
+# Redis Cache TTL 정책
 
-This document is the source of truth for Redis cache TTL values.
+이 문서는 Redis cache TTL 값의 기준 문서다.
 
-RDS remains the source of truth. TTL is fallback freshness protection, not the primary regeneration mechanism.
+RDS는 원천 데이터로 남는다. TTL은 fallback freshness protection이며 primary regeneration mechanism이 아니다.
 
-## TTL Contract
+## TTL 계약
 
-| Key pattern | TTL | Reason |
+| Key pattern | TTL | 이유 |
 | --- | --- | --- |
-| `shelter:status:{shelterId}` | 30 seconds | Shelter occupancy and congestion can change quickly during entry/exit flows. |
-| `shelter:list:seoul:{shelterType}:{disasterType}` | 600 seconds | Shelter list membership changes less frequently than shelter status. |
-| `shelter:list:{region}:{shelterType}:{disasterType}` | 600 seconds | Same future list-model policy as the Seoul namespace. |
-| `disaster:messages:recent:seoul` | 300 seconds | Recent overview should stay fresh. |
-| `disaster:message:core:seoul` | 300 seconds | Core message should not remain stale. |
-| `disaster:messages:list:seoul` | 300 seconds | Disaster message list should reflect recent updates. |
-| `disaster:detail:{alertId}` | 3600 seconds | Detail payload changes rarely after normalization. |
-| `environment:weather:seoul` | 7200 seconds | Environment TTL is fallback stability protection, not data freshness. |
-| `environment:air-quality:seoul` | 7200 seconds | Environment TTL is fallback stability protection, not data freshness. |
-| `environment:weather-alert:seoul` | 7200 seconds | Environment TTL is fallback stability protection, not data freshness. |
-| `suppress:cache-regeneration:{cacheKeyHash}` | 30 seconds | Prevent duplicate regeneration requests for the same target key. |
+| `shelter:status:{shelterId}` | 30 seconds | shelter occupancy와 congestion은 entry/exit flow 중 빠르게 바뀔 수 있다. |
+| `shelter:list:seoul:{shelterType}:{disasterType}` | 600 seconds | shelter list membership은 shelter status보다 덜 자주 바뀐다. |
+| `shelter:list:{region}:{shelterType}:{disasterType}` | 600 seconds | Seoul namespace와 같은 future list-model policy. |
+| `disaster:messages:recent:seoul` | 300 seconds | recent overview는 fresh 상태를 유지해야 한다. |
+| `disaster:message:core:seoul` | 300 seconds | core message가 stale 상태로 남으면 안 된다. |
+| `disaster:messages:list:seoul` | 300 seconds | disaster message list는 최근 update를 반영해야 한다. |
+| `disaster:detail:{alertId}` | 3600 seconds | detail payload는 normalization 후 거의 변경되지 않는다. |
+| `environment:weather:seoul` | 7200 seconds | environment TTL은 data freshness가 아니라 fallback stability protection이다. |
+| `environment:air-quality:seoul` | 7200 seconds | environment TTL은 data freshness가 아니라 fallback stability protection이다. |
+| `environment:weather-alert:seoul` | 7200 seconds | environment TTL은 data freshness가 아니라 fallback stability protection이다. |
+| `suppress:cache-regeneration:{cacheKeyHash}` | 30 seconds | 같은 target key에 대한 중복 regeneration request를 방지한다. |
 
-## Regeneration Rules
+## Regeneration 규칙
 
-- TTL does not replace event-driven regeneration.
-- normalized DB writes and regeneration requests should refresh relevant keys before TTL expiry where possible.
-- TTL exists to limit stale cache lifetime when event-driven regeneration is delayed or missed.
+- TTL은 event-driven regeneration을 대체하지 않는다.
+- normalized DB write와 regeneration request는 가능하면 TTL expiry 전에 관련 key를 refresh해야 한다.
+- TTL은 event-driven regeneration이 지연되거나 누락될 때 stale cache lifetime을 제한하기 위해 존재한다.
 
-Disaster message rebuild triggers:
+Disaster message rebuild trigger:
 
-- new in-scope disaster messages normalized into DB
-- cache miss or stale detection followed by `CacheRegenerationRequested`
-- explicit rebuild requests from downstream worker flow
+- DB에 normalize된 새로운 in-scope disaster message
+- cache miss 또는 stale detection 후 `CacheRegenerationRequested`
+- downstream worker flow의 explicit rebuild request
 
 Disaster message target mapping:
 
@@ -39,27 +39,27 @@ Disaster message target mapping:
 - `disaster:messages:list:seoul`
 - `disaster:detail:{alertId}`
 
-## Suppress Window Notes
+## Suppress Window 참고
 
-Suppress keys must use the actual regeneration target key as hash input.
+suppress key는 실제 regeneration target key를 hash input으로 사용해야 한다.
 
-Example:
+예:
 
 - target key: `disaster:messages:list:seoul`
 - suppress key: `suppress:cache-regeneration:{hash("disaster:messages:list:seoul")}`
 
-Different key families must not share one suppress key accidentally.
+서로 다른 key family가 우발적으로 하나의 suppress key를 공유하면 안 된다.
 
-## Ownership Notes
+## Ownership 참고
 
-- `api-core` invalidates stale shelter keys by `DEL` only where immediate removal is required.
-- `api-public-read` requests regeneration after miss, stale detection, or degraded-mode fallback.
-- `async-worker` rebuilds cache data.
-- `external-ingestion` writes normalized DB data and publishes post-commit events or triggers, but does not rebuild public Redis read models.
+- `api-core`는 즉시 제거가 필요한 stale shelter key를 `DEL`로만 invalidate한다.
+- `api-public-read`는 miss, stale detection, degraded-mode fallback 후 regeneration을 요청한다.
+- `async-worker`는 cache data를 rebuild한다.
+- `external-ingestion`은 normalized DB data를 write하고 post-commit event 또는 trigger를 publish하지만, public Redis read model을 rebuild하지 않는다.
 
 ## 변경 이력
 
 | 날짜 | 버전 | 변경 내용 |
 |---|---|---|
-| 2026-04-24 | v1.0 | Redis TTL source-of-truth 문서 추가. shelter/disaster 캐시 TTL, 선택 근거, regeneration trigger 규칙 명시 |
+| 2026-04-24 | v1.0 | Redis TTL 기준 문서 추가. shelter/disaster 캐시 TTL, 선택 근거, regeneration trigger 규칙 명시 |
 | 2026-04-24 | v1.1 | disaster message read model TTL을 `recent/core/list/detail` 구조로 전환. suppress window TTL 30초와 fallback freshness 원칙 명시 |

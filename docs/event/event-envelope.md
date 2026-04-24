@@ -1,10 +1,10 @@
 # SafeSpot Event Envelope
 
-This document defines the shared event envelope, idempotency rules, and event examples.
+이 문서는 공통 event envelope, idempotency 규칙, event 예시를 정의한다.
 
-Worker behavior belongs in `docs/event/async-worker.md`.
+worker behavior는 `docs/event/async-worker.md`에 둔다.
 
-## 1. Common Envelope
+## 1. 공통 Envelope
 
 ```json
 {
@@ -18,29 +18,29 @@ Worker behavior belongs in `docs/event/async-worker.md`.
 }
 ```
 
-| Field | Type | Meaning |
+| Field | Type | 의미 |
 | --- | --- | --- |
-| `eventId` | string | unique event ID |
-| `eventType` | string | contract event type |
-| `occurredAt` | string | event time |
-| `producer` | string | producing service |
+| `eventId` | string | 고유 event ID |
+| `eventType` | string | 계약 event type |
+| `occurredAt` | string | event 발생 시각 |
+| `producer` | string | event를 생성한 service |
 | `traceId` | string | trace ID |
 | `idempotencyKey` | string | dedupe key |
 | `payload` | object | event payload |
 
-## 2. Publish Durability Requirement
+## 2. Publish Durability 요구사항
 
-All producers must follow these rules:
+모든 producer는 다음 규칙을 따라야 한다.
 
-- publish only after DB commit
-- publish must be durable
-- log-only failure handling is not acceptable
-- on failure, the full envelope must be preserved for replay or recovery
-- replayable storage or a failure channel is required when direct publish cannot complete safely
+- DB commit 후에만 publish한다.
+- publish는 durable해야 한다.
+- log-only failure handling은 허용하지 않는다.
+- 실패 시 replay 또는 recovery를 위해 full envelope를 보존해야 한다.
+- direct publish를 안전하게 완료할 수 없으면 replayable storage 또는 failure channel이 필요하다.
 
-## 3. Idempotency Rules
+## 3. Idempotency 규칙
 
-Current canonical keys:
+현재 canonical key:
 
 | Event | idempotencyKey |
 | --- | --- |
@@ -52,13 +52,13 @@ Current canonical keys:
 | `EnvironmentDataCollected` | `collected:env:{collectionType}:{region}:{timeWindow}` |
 | `CacheRegenerationRequested` | `cache-regen:{cacheKeyHash}:{windowStart}` |
 
-Version suffixes are not used for `ENTERED` and `EXITED`.
+`ENTERED`와 `EXITED`에는 version suffix를 사용하지 않는다.
 
-For `CacheRegenerationRequested`, `cacheKeyHash` must be derived from the exact `cacheKey` target.
+`CacheRegenerationRequested`에서 `cacheKeyHash`는 정확한 target `cacheKey`에서 파생해야 한다.
 
-`collected:env:*` is an event idempotency namespace only. Redis environment read-model keys use `environment:*`.
+`collected:env:*`는 event idempotency namespace일 뿐이다. Redis environment read-model key는 `environment:*`를 사용한다.
 
-## 4. Event Types
+## 4. Event Type
 
 ### EVENT-001 `EvacuationEntryCreated`
 
@@ -187,15 +187,15 @@ For `CacheRegenerationRequested`, `cacheKeyHash` must be derived from the exact 
 
 ### EVENT-007 `CacheRegenerationRequested`
 
-Purpose: request async Redis read model regeneration after a read-path cache miss, stale detection, or downstream rebuild trigger.
+목적: read-path cache miss, stale detection, downstream rebuild trigger 후 async Redis read model regeneration을 요청한다.
 
-Rules:
+규칙:
 
-- this event requests a Redis read model rebuild
-- it does not imply `api-public-read` directly writes Redis
-- `async-worker` owns rebuild execution
-- `api-public-read` may publish the request on cache miss or stale detection
-- `external-ingestion` may trigger downstream regeneration after normalized DB writes, depending on the event flow
+- 이 event는 Redis read model rebuild를 요청한다.
+- `api-public-read`가 Redis에 직접 write한다는 의미가 아니다.
+- rebuild execution은 `async-worker`가 소유한다.
+- `api-public-read`는 cache miss 또는 stale detection 시 request를 publish할 수 있다.
+- event flow에 따라 `external-ingestion`은 normalized DB write 후 downstream regeneration을 trigger할 수 있다.
 
 ```json
 {
@@ -215,17 +215,17 @@ Rules:
 }
 ```
 
-Payload fields:
+Payload field:
 
-| Field | Meaning |
+| Field | 의미 |
 | --- | --- |
-| `cacheKey` | exact Redis target key |
+| `cacheKey` | 정확한 Redis target key |
 | `cacheKeyFamily` | logical read-model family |
-| `requestedAt` | request creation time |
-| `reason` | why regeneration was requested |
+| `requestedAt` | request 생성 시각 |
+| `reason` | regeneration이 요청된 이유 |
 | `schemaVersion` | event payload contract version |
 
-Recommended `cacheKeyFamily` values:
+권장 `cacheKeyFamily` 값:
 
 - `disaster_messages_recent`
 - `disaster_message_core`
@@ -237,22 +237,22 @@ Recommended `cacheKeyFamily` values:
 - `environment_air_quality`
 - `environment_weather_alert`
 
-Supported disaster message cache targets:
+지원 disaster message cache target:
 
 - `disaster:messages:recent:seoul`
 - `disaster:message:core:seoul`
 - `disaster:messages:list:seoul`
 - `disaster:detail:{alertId}`
 
-Supported environment cache targets:
+지원 environment cache target:
 
 - `environment:weather:seoul`
 - `environment:air-quality:seoul`
 - `environment:weather-alert:seoul`
 
-Retired disaster keys are not supported `CacheRegenerationRequested` targets.
+retired disaster key는 지원되는 `CacheRegenerationRequested` target이 아니다.
 
-## 5. Related Documents
+## 5. 관련 문서
 
 - async worker behavior: `docs/event/async-worker.md`
 - Redis keys: `docs/redis-key/redis-key.md`

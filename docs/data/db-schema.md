@@ -698,7 +698,7 @@ readmodel-worker
 - async-worker는 retired key를 재생성하면 안 된다
 - `disasterType`과 `messageCategory`는 Redis key dimension이 아니라 payload field다
 - Redis list는 Top N read model이며 full history가 아니다
-- 전체 이력과 source of truth는 RDS에 남는다
+- 전체 이력과 원천 데이터는 RDS에 남는다
 
 #### 입소 처리 흐름
 
