@@ -70,7 +70,10 @@ Behavior:
 
 - read RDS state
 - rebuild `shelter:status:{shelterId}`
+<<<<<<< HEAD
 - near-term planned contract: `CacheRegenerationRequested`가 오면 `shelter:list:seoul:{shelterType}:{disasterType}`와 `shelter:list:{region}:{shelterType}:{disasterType}`도 동일 책임 경계에서 재생성한다
+=======
+>>>>>>> dcbcfe8 (docs: snapshot before targeted contract fixes)
 - `congestionLevel` is informational only
 - capacity does not reject admission
 

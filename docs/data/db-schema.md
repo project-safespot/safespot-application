@@ -563,8 +563,13 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | Redis Key | 의미 | TTL | 생성 주체 | 무효화 조건 |
 |---|---|---|---|---|
 | `shelter:status:{shelterId}` | 사용자용 대피소 현재인원·잔여인원·혼잡도 | **30초** | cache-worker (입소·퇴소·이송·수정 이벤트 수신 후 RDS COUNT 재계산) | 입소·퇴소·이송 이벤트 즉시 DEL (api-core) |
+<<<<<<< HEAD
 | `shelter:list:seoul:{shelterType}:{disasterType}` | 서울 MVP 기준 유형+재난별 대피소 목록. near-term planned contract이며 upcoming implementation 기준 키 | 10분 | `api-public-read`가 `CacheRegenerationRequested` 발행 후 async-worker가 재생성 | shelter 마스터 변경 후 재생성 요청 또는 TTL 만료 후 재생성 |
 | `shelter:list:{region}:{shelterType}:{disasterType}` | 향후 지역 확장 기준 유형+재난별 대피소 목록. near-term planned contract이며 upcoming implementation 기준 키 | 10분 | `api-public-read`가 `CacheRegenerationRequested` 발행 후 async-worker가 재생성 | shelter 마스터 변경 후 재생성 요청 또는 TTL 만료 후 재생성 |
+=======
+| `shelter:list:seoul:{shelterType}:{disasterType}` | 서울 MVP 기준 유형+재난별 대피소 목록 | 10분 | api-public-read fallback 재생성 | shelter 마스터 변경 시 DEL 또는 TTL 만료 후 재생성 |
+| `shelter:list:{region}:{shelterType}:{disasterType}` | 향후 지역 확장 기준 유형+재난별 대피소 목록 | 10분 | api-public-read fallback 재생성 | shelter 마스터 변경 시 DEL 또는 TTL 만료 후 재생성 |
+>>>>>>> dcbcfe8 (docs: snapshot before targeted contract fixes)
 | `disaster:latest:{disasterType}:{region}` | 지역+유형별 최신 재난 alert pointer | 5분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 신규 alert 수신 / pointer miss / TTL 만료 |
 | `disaster:detail:{alertId}` | 개별 재난 알림 상세 | 10분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 해당 alert 만료 / TTL 만료 |
 | `env:weather:{nx}:{ny}` | 격자 좌표 기반 날씨 예보 | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
