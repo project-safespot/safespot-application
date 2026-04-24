@@ -99,7 +99,10 @@ public class SqsEventPublisher {
                             attempt + 1, MAX_RETRIES + 1, BACKOFF_MS[attempt],
                             envelope.getEventType(), envelope.getEventId(), e);
                 } else {
-                    log.error("[SQS] publish permanently failed after {} attempts — manual recovery required: " +
+                    // GAP: durable publish not implemented. Contract requires replayable storage or
+                    // failure channel on permanent publish failure (docs/event/event-envelope.md §2).
+                    // Current behavior: event is lost. Do not promote this to completed behavior.
+                    log.error("[SQS] publish permanently failed after {} attempts — event lost, manual recovery required: " +
                                     "eventId={} eventType={} idempotencyKey={} producer={}",
                             MAX_RETRIES + 1, envelope.getEventId(), envelope.getEventType(),
                             envelope.getIdempotencyKey(), envelope.getProducer(), e);

@@ -44,7 +44,6 @@ public class DomainEventPublisher {
     public void handle(ShelterUpdatedSpringEvent event) {
         var payload = event.getEnvelope().getPayload();
         shelterCacheService.invalidateShelterCache(payload.getShelterId());
-        shelterCacheService.invalidateShelterListCache(payload.getShelterType(), payload.getDisasterType());
         sqsEventPublisher.publish(event.getEnvelope());
     }
 }
