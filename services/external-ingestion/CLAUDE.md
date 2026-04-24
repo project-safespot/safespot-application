@@ -10,7 +10,15 @@ It does not own Redis rebuild execution, public read APIs, admin writes, or work
 
 - Seoul MVP only
 - normalized region outputs are Seoul-only in the MVP
+- normalize disaster messages before DB save
+- preserve `rawType`, `rawLevel`, and raw token fields
+- in-scope disaster types are only `EARTHQUAKE`, `LANDSLIDE`, `FLOOD`
+- do not coerce unsupported raw types into those three canonical values unless an explicit rule allows it
+- standalone `강풍` is out of scope
+- `강풍` with `태풍`, `호우`, `침수`, `해안`, or `저지대` context may map to `FLOOD`
+- mixed `호우` + `산사태` messages choose primary type by the main risk target
 - direct Redis writes are not allowed here
+- do not write Redis read models directly
 - queue names in observability must be logical names, never queue URLs
 
 ## 3. Cache And Event Contract

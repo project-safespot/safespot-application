@@ -48,7 +48,7 @@
 |---|---|
 | `app_user` | 서비스 회원 및 관리자 계정 정보를 저장하는 중심 엔티티 |
 | `shelter` | 대피소 유형·재난 유형·운영 상태·담당자 정보를 포함한 공공 대피소 마스터 테이블 |
-| `disaster_alert` | 지진·홍수·산사태 3종 재난의 공공 API 발령·해제 이력을 영구 보관 |
+| `disaster_alert` | 지진·홍수·산사태 3종 재난의 정규화 결과와 원문 분류 근거를 함께 보관 |
 | `disaster_alert_detail` | 재난 상세 정보 저장 테이블. `disaster_alert`와 1:1 관계이며 지진 규모·진앙·진도 및 유형별 상세 JSON을 저장 |
 | `evacuation_entry` | 개별 입소자의 현재 상태를 추적 (현재인원 COUNT의 기준 테이블) |
 | `entry_detail` | 입소자의 가족관계·건강상태·특별관리 여부 등 상세 정보 (`evacuation_entry`와 1:1) |
@@ -161,23 +161,37 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 
 ### 2.3 disaster_alert
 
-지진·홍수·산사태 3종 재난의 공공 API 발령·해제 이력을 영구 보관.
+지진·홍수·산사태 3종 재난의 공공 API 발령·해제 이력을 영구 보관한다. `external-ingestion`은 DB 저장 전에 raw 값과 canonical 값을 함께 정규화해야 한다.
 
 | 컬럼명 | 데이터 타입 | KEY | NULL | Default | 설명 |
 |---|---|---|---|---|---|
 | `alert_id` | BIGSERIAL | PK | NO | — | 재난 알림 고유 ID (자동 증가) |
+| `raw_type` | VARCHAR(100) | — | YES | NULL | 외부 원문 유형 값. UI 표시 및 감사 추적용 |
 | `disaster_type` | VARCHAR(20) | CHK | NO | — | CHECK IN ('EARTHQUAKE','LANDSLIDE','FLOOD') |
+| `raw_category_tokens` | JSONB | — | YES | NULL | 원문 category 판정 토큰 목록 |
+| `message_category` | VARCHAR(20) | CHK | YES | NULL | canonical category. `ALERT` / `GUIDANCE` / `CLEAR` |
+| `raw_level` | VARCHAR(100) | — | YES | NULL | 외부 원문 severity 값 |
+| `raw_level_tokens` | JSONB | — | YES | NULL | 원문 severity 판정 토큰 목록 |
 | `region` | VARCHAR(100) | IDX | NO | — | 발생 지역 (시/구 단위) |
+| `source_region` | VARCHAR(100) | — | YES | NULL | 외부 소스가 제공한 원문 지역 표현 |
 | `level` | VARCHAR(10) | CHK | NO | — | CHECK IN ('INTEREST','CAUTION','WARNING','CRITICAL') |
+| `level_rank` | SMALLINT | — | YES | NULL | canonical level 순위. `INTEREST=1`, `CAUTION=2`, `WARNING=3`, `CRITICAL=4` |
 | `message` | TEXT | — | NO | — | 재난문자 원문 |
 | `source` | VARCHAR(50) | — | NO | — | 출처 API 식별자 (예: KMA_EARTHQUAKE) |
 | `issued_at` | TIMESTAMPTZ | IDX | NO | — | 재난 발령 시각 |
+| `is_in_scope` | BOOLEAN | — | YES | NULL | public disaster read model 포함 여부 |
+| `normalization_reason` | TEXT | — | YES | NULL | canonical 매핑 또는 제외 근거 |
 | `expired_at` | TIMESTAMPTZ | — | YES | NULL | 재난 해제 시각 (NULL = 현재 활성 재난) |
 | `created_at` | TIMESTAMPTZ | — | NO | CURRENT_TIMESTAMP | DB 저장 시각 |
 
 > - `expired_at = NULL` → 현재 활성 재난. Ingestion Pod가 해제 감지 시 `expired_at` 업데이트.
 > - `source` 컬럼 운용값: `SAFETY_DATA_ALERT`, `KMA_EARTHQUAKE`, `SEOUL_EARTHQUAKE`, `FORESTRY_LANDSLIDE`, `SEOUL_RIVER_LEVEL`
-> - 외부 API의 한국어 단계값은 저장 전에 canonical 영문값(`INTEREST`,`CAUTION`,`WARNING`,`CRITICAL`)으로 정규화해야 한다.
+> - 외부 API의 원문 유형과 단계값은 버리지 않는다. `raw_type`, `raw_level`, token 필드로 함께 보존해야 한다.
+> - `disaster_type`은 `EARTHQUAKE`, `LANDSLIDE`, `FLOOD`만 허용한다. 그 외 메시지는 `is_in_scope = FALSE`로 저장할 수 있으나 public disaster read model에는 포함되면 안 된다.
+> - `message_category`는 `ALERT`, `GUIDANCE`, `CLEAR` canonical 값만 사용한다.
+> - `level` / `level_rank`는 core message selection용 canonical 값이다.
+> - `normalization_reason`은 매핑 근거 또는 제외 사유를 남겨야 한다.
+> - 위 raw/canonical 필드가 아직 실제 DDL에 없으면 schema update required 상태로 본다. 이 문서는 정규화 저장 계약을 우선 정의한다.
 
 ---
 
