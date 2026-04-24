@@ -23,14 +23,29 @@ It does not own Redis rebuild execution, public read APIs, admin writes, or work
 
 ## 3. Cache And Event Contract
 
-Disaster cache model:
+`external-ingestion` owns:
 
-- pointer: `disaster:latest:{disasterType}:{region}`
-- detail: `disaster:detail:{alertId}`
+- external disaster message collection
+- raw value preservation
+- canonical normalization
+- DB write of raw + canonical fields
+- post-normalization event or trigger if the existing flow requires it
 
-Rebuild contract:
+`external-ingestion` does not own:
 
-- normalized state must support rebuilding both pointer and detail
+- Redis read model rebuild
+- Redis `SET` for public-read models
+- `api-public-read` fallback logic
+- UI filtering
+
+Downstream public Redis read models are owned by `async-worker`:
+
+- `disaster:messages:recent:seoul`
+- `disaster:message:core:seoul`
+- `disaster:messages:list:seoul`
+- `disaster:detail:{alertId}`
+
+`external-ingestion` must not write those read models directly.
 
 Publish contract:
 

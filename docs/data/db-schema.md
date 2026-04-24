@@ -174,8 +174,8 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | `raw_level_tokens` | JSONB | — | YES | NULL | 원문 severity 판정 토큰 목록 |
 | `region` | VARCHAR(100) | IDX | NO | — | 발생 지역 (시/구 단위) |
 | `source_region` | VARCHAR(100) | — | YES | NULL | 외부 소스가 제공한 원문 지역 표현 |
-| `level` | VARCHAR(10) | CHK | NO | — | CHECK IN ('INTEREST','CAUTION','WARNING','CRITICAL') |
-| `level_rank` | SMALLINT | — | YES | NULL | canonical level 순위. `INTEREST=1`, `CAUTION=2`, `WARNING=3`, `CRITICAL=4` |
+| `level` | VARCHAR(10) | CHK | YES | NULL | canonical level. 현재 문서 계약상 unsafe mapping 시 NULL 허용이 필요하며 schema update required |
+| `level_rank` | SMALLINT | — | YES | NULL | canonical level 순위. `INTEREST=1`, `CAUTION=2`, `WARNING=3`, `CRITICAL=4`. unsafe mapping 시 NULL 허용 |
 | `message` | TEXT | — | NO | — | 재난문자 원문 |
 | `source` | VARCHAR(50) | — | NO | — | 출처 API 식별자 (예: KMA_EARTHQUAKE) |
 | `issued_at` | TIMESTAMPTZ | IDX | NO | — | 재난 발령 시각 |
@@ -191,7 +191,9 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 > - 범위 밖 재난 메시지는 현재 계약상 `disaster_alert` row로 적재하지 않는다. raw collection record로만 남기며, 향후 스키마 업데이트가 명시적으로 승인된 경우에만 예외를 둘 수 있다.
 > - `message_category`는 `ALERT`, `GUIDANCE`, `CLEAR` canonical 값만 사용한다.
 > - `level` / `level_rank`는 core message selection용 canonical 값이다.
+> - severity를 안전하게 canonical로 매핑할 수 없으면 `raw_level` / `raw_level_tokens`만 보존하고 `level` / `level_rank`는 unresolved 상태(NULL)로 남겨야 한다.
 > - `normalization_reason`은 매핑 근거 또는 제외 사유를 남겨야 한다.
+> - 현재 표의 기존 `level NOT NULL` 가정은 Step 1 계약과 충돌하므로 schema update required 상태로 본다. 이 문서는 unresolved canonical severity를 허용하는 계약을 우선 정의한다.
 > - 범위 안 재난 메시지에 필요한 raw/canonical 필드가 아직 실제 DDL에 없으면 schema update required 상태로 본다. 이 문서는 정규화 저장 계약을 우선 정의한다.
 
 ---
@@ -580,8 +582,10 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | `shelter:status:{shelterId}` | 사용자용 대피소 현재인원·잔여인원·혼잡도 | **30초** | cache-worker (입소·퇴소·이송·수정 이벤트 수신 후 RDS COUNT 재계산) | 입소·퇴소·이송 이벤트 즉시 DEL (api-core) |
 | `shelter:list:seoul:{shelterType}:{disasterType}` | 서울 MVP 기준 유형+재난별 대피소 목록. near-term planned contract이며 upcoming implementation 기준 키 | 10분 | `api-public-read`가 `CacheRegenerationRequested` 발행 후 async-worker가 재생성 | shelter 마스터 변경 후 재생성 요청 또는 TTL 만료 후 재생성 |
 | `shelter:list:{region}:{shelterType}:{disasterType}` | 향후 지역 확장 기준 유형+재난별 대피소 목록. near-term planned contract이며 upcoming implementation 기준 키 | 10분 | `api-public-read`가 `CacheRegenerationRequested` 발행 후 async-worker가 재생성 | shelter 마스터 변경 후 재생성 요청 또는 TTL 만료 후 재생성 |
-| `disaster:latest:{disasterType}:{region}` | 지역+유형별 최신 재난 alert pointer | 5분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 신규 alert 수신 / pointer miss / TTL 만료 |
-| `disaster:detail:{alertId}` | 개별 재난 알림 상세 | 10분 | readmodel-worker (DisasterDataCollected 이벤트 수신 후 SET) | 해당 alert 만료 / TTL 만료 |
+| `disaster:messages:recent:seoul` | 서울 MVP 최근 재난 메시지 Top 5 read model | 5분 | readmodel-worker (normalized DB data 기준 재생성) | 신규 in-scope alert 반영 / cache miss / TTL 만료 |
+| `disaster:message:core:seoul` | 서울 MVP 핵심 재난 메시지 1건 read model | 5분 | readmodel-worker (normalized DB data 기준 재생성) | 신규 in-scope alert 반영 / cache miss / TTL 만료 |
+| `disaster:messages:list:seoul` | 서울 MVP 재난 메시지 목록 Top N read model | 5분 | readmodel-worker (normalized DB data 기준 재생성) | 신규 in-scope alert 반영 / cache miss / TTL 만료 |
+| `disaster:detail:{alertId}` | 개별 재난 알림 상세 read model | 10분 | readmodel-worker (normalized DB data 기준 재생성) | 해당 alert 반영 / cache miss / TTL 만료 |
 | `env:weather:{nx}:{ny}` | 격자 좌표 기반 날씨 예보 | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
 | `env:air:{station_name}` | 측정소 기반 대기질(AQI) | **120분** | cache-worker (EnvironmentDataCollected 이벤트 수신 후 SET) | TTL 만료 / 갱신 이벤트 |
 
@@ -636,7 +640,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | air_quality_log grade 컬럼 | API 원문 보존 | value에서 유도 가능하나 기준값 변경 대응 및 API 원문 일치를 위해 저장 |
 | 재난 상세 저장 방식 | `disaster_alert_detail` 1:1 분리 | `GET /disasters/{type}/latest` 상세 응답 수용 및 유형별 확장 JSON 처리 |
 | 환경 데이터 중복 방지 | 복합 UNIQUE 적용 | external-ingestion 반복 수집 시 중복 적재 방지 |
-| 재난 상세 캐시 키 | `alertId` 기준 | pointer/detail 분리 모델에서 detail key는 `disaster:detail:{alertId}` 사용 |
+| 재난 메시지 캐시 키 | 4개 canonical read model 고정 | `disaster:detail:{alertId}` → `disaster:messages:recent:seoul` → `disaster:message:core:seoul` → `disaster:messages:list:seoul` 순으로 재생성 |
 | 외부 수집 후 캐시 갱신 | direct Redis write 대신 이벤트 연계 | compute와 async+worker 책임 분리 |
 | shelter 외부 upsert 범위 | 7개 컬럼만 허용 | 내부 운영 컬럼 보호 (manager, contact, shelter_status, note) |
 
@@ -680,9 +684,20 @@ Normalizer Pod
   → 캐시 갱신 이벤트 발행 (SQS)
 
 readmodel-worker
-  → Redis disaster:latest:{disasterType}:{region} SET (TTL 5분)
-  → Redis disaster:detail:{alertId} SET (TTL 10분)
+  → normalized DB data 조회
+  → Redis disaster:detail:{alertId} SET
+  → Redis disaster:messages:recent:seoul SET
+  → Redis disaster:message:core:seoul SET
+  → Redis disaster:messages:list:seoul SET
 ```
+
+재난 read model 규칙:
+
+- 재생성 순서는 `disaster:detail:{alertId}` → `disaster:messages:recent:seoul` → `disaster:message:core:seoul` → `disaster:messages:list:seoul`
+- async-worker는 retired key를 재생성하면 안 된다
+- `disasterType`과 `messageCategory`는 Redis key dimension이 아니라 payload field다
+- Redis list는 Top N read model이며 full history가 아니다
+- 전체 이력과 source of truth는 RDS에 남는다
 
 #### 입소 처리 흐름
 
@@ -735,6 +750,6 @@ cache-worker
 |---|---|---|
 | 2026-04-16 | v6.0 | 최초 작성 |
 | 2026-04-19 | v7.0 | disaster_alert_detail 추가 / 재난 상세 캐시 키 통일 / 데이터 흐름 최신화 / health_status 정책 명시 / API↔DB 매핑 확장 / UNIQUE 제약 명시 / shelter 외부 upsert 범위 명시 / external_api_* 테이블 5개 추가 / admin_audit_log reason 저장 정책 추가 |
-| 2026-04-20 | v7.1 | 서현 async+worker 문서 기준 Redis 키 전면 수정. pointer/detail 모델(`disaster:latest:{disasterType}:{region}`, `disaster:detail:{alertId}`) 반영 / 생성 주체 cache-worker·readmodel-worker 분리 반영 |
+| 2026-04-20 | v7.1 | 서현 async+worker 문서 기준 Redis 키 전면 수정. 당시 pointer/detail 모델 반영 이력 |
 | 2026-04-22 | v7.2 | env:weather, env:air TTL 60분 → 120분 정정. TTL 철학 주석 추가 (fallback 안정성 목적, 데이터 신선도 아님) |
 | 2026-04-24 | v7.3 | shelter list 키를 지역 namespace 형식으로 정정(`shelter:list:seoul:{shelterType}:{disasterType}`, `shelter:list:{region}:{shelterType}:{disasterType}`). deprecated `disaster:alert:list` 혼선 제거 |

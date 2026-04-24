@@ -12,8 +12,8 @@ Common auth, response, error, enum, and validation rules come from `docs/api/api
 - public disaster reads
 - public weather and air-quality reads
 - Redis-first reads
-- RDS fallback on Redis miss/down/parse error
 - cache regeneration request events
+- temporary degraded-mode fallback handling when current implementation cannot serve from Redis
 
 It does not own:
 
@@ -27,12 +27,13 @@ It does not own:
 Current implementation:
 
 - read path is Redis first
-- fallback goes directly to RDS
+- some misses or parse failures may still fall back to RDS as a temporary degraded-mode escape hatch
 - cache regeneration event is currently documented, but worker-side regeneration for some keys may still be stubbed
 
 Target architecture:
 
 - regeneration requests flow through `EVENT-007`
+- normal public hot path does not depend on RDS
 - workers rebuild the requested cache entries
 
 ## 3. Seoul MVP Validation
@@ -330,9 +331,9 @@ Failures:
 ## 6. Fallback And Regeneration Rules
 
 - Redis hit -> return cached value
-- Redis miss/down/parse error -> fallback to RDS
-- return fallback response immediately
-- then publish regeneration request subject to suppress window
+- Redis miss/stale/parse failure -> publish regeneration request subject to suppress window
+- if the current implementation cannot serve from Redis, degraded-mode fallback to RDS may be used temporarily
+- degraded-mode fallback is not target hot-path behavior
 
 `EVENT-007` status:
 
