@@ -87,13 +87,41 @@ Capacity is not a rejection condition, so there is no capacity-based `409`.
 - `FLOOD`
 - `LANDSLIDE`
 
-### 6.3 entryStatus
+Only these three values are in public disaster scope for the MVP.
+
+- out-of-scope disaster messages must not be exposed through public disaster read models
+- external raw type values may differ from canonical `disasterType`
+- API and Redis contracts use canonical values only
+- raw values may be included separately for display or audit as `rawType`
+
+### 6.3 messageCategory
+
+- `ALERT`
+- `GUIDANCE`
+- `CLEAR`
+
+`messageCategory` uses canonical normalized values even when external messages use different wording.
+
+### 6.4 level
+
+- `INTEREST`
+- `CAUTION`
+- `WARNING`
+- `CRITICAL`
+
+`level` is the canonical severity enum.
+
+- `levelRank` mapping is fixed: `INTEREST=1`, `CAUTION=2`, `WARNING=3`, `CRITICAL=4`
+- external raw severity values may differ from canonical `level`
+- raw severity may be included separately for display or audit as `rawLevel`
+
+### 6.5 entryStatus
 
 - `ENTERED`
 - `EXITED`
 - `TRANSFERRED`
 
-### 6.4 congestionLevel
+### 6.6 congestionLevel
 
 | Value | Meaning |
 | --- | --- |

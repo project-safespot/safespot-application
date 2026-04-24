@@ -50,9 +50,11 @@ Current canonical keys:
 | `ShelterUpdated` | `shelter:{shelterId}:UPDATED:{eventId}` |
 | `DisasterDataCollected` | `collected:disaster:{collectionType}:{region}:{completedAt}` |
 | `EnvironmentDataCollected` | `collected:env:{collectionType}:{region}:{timeWindow}` |
-| `CacheRegenerationRequested` | `cache-regen:{cacheKey}:{windowStart}` |
+| `CacheRegenerationRequested` | `cache-regen:{cacheKeyHash}:{windowStart}` |
 
 Version suffixes are not used for `ENTERED` and `EXITED`.
+
+For `CacheRegenerationRequested`, `cacheKeyHash` must be derived from the exact `cacheKey` target.
 
 ## 4. Event Types
 
@@ -183,17 +185,15 @@ Version suffixes are not used for `ENTERED` and `EXITED`.
 
 ### EVENT-007 `CacheRegenerationRequested`
 
-Purpose: request async cache regeneration after a read-path fallback.
+Purpose: request async Redis read model regeneration after a read-path cache miss, stale detection, or downstream rebuild trigger.
 
-Current implementation:
+Rules:
 
-- contract exists
-- some regeneration paths may still be stubbed
-
-Target architecture:
-
-- `api-public-read` emits an SQS-backed request event
-- async worker rebuilds the requested key family
+- this event requests a Redis read model rebuild
+- it does not imply `api-public-read` directly writes Redis
+- `async-worker` owns rebuild execution
+- `api-public-read` may publish the request on cache miss or stale detection
+- `external-ingestion` may trigger downstream regeneration after normalized DB writes, depending on the event flow
 
 ```json
 {
@@ -202,21 +202,46 @@ Target architecture:
   "occurredAt": "2026-04-15T15:05:00+09:00",
   "producer": "api-public-read",
   "traceId": "uuid-v4",
-  "idempotencyKey": "cache-regen:disaster:latest:EARTHQUAKE:seoul:1744980300",
+  "idempotencyKey": "cache-regen:sha256(disaster:messages:list:seoul):1744980300",
   "payload": {
-    "cacheKey": "disaster:latest:EARTHQUAKE:seoul",
-    "requestedAt": "2026-04-15T15:05:00+09:00"
+    "cacheKey": "disaster:messages:list:seoul",
+    "cacheKeyFamily": "disaster_messages_list",
+    "requestedAt": "2026-04-15T15:05:00+09:00",
+    "reason": "cache_miss",
+    "schemaVersion": 1
   }
 }
 ```
 
-Supported cache families include:
+Payload fields:
 
-- `shelter:status:{shelterId}`
-- `shelter:list:seoul:{shelterType}:{disasterType}` (near-term planned contract, not fully implemented yet)
-- `shelter:list:{region}:{shelterType}:{disasterType}` (near-term planned contract, not fully implemented yet)
-- `disaster:latest:{disasterType}:{region}`
+| Field | Meaning |
+| --- | --- |
+| `cacheKey` | exact Redis target key |
+| `cacheKeyFamily` | logical read-model family |
+| `requestedAt` | request creation time |
+| `reason` | why regeneration was requested |
+| `schemaVersion` | event payload contract version |
+
+Recommended `cacheKeyFamily` values:
+
+- `disaster_messages_recent`
+- `disaster_message_core`
+- `disaster_messages_list`
+- `disaster_detail`
+- `shelter_status`
+- `shelter_list`
+- `environment_weather`
+- `environment_air`
+
+Supported disaster message cache targets:
+
+- `disaster:messages:recent:seoul`
+- `disaster:message:core:seoul`
+- `disaster:messages:list:seoul`
 - `disaster:detail:{alertId}`
+
+Retired disaster keys are not supported `CacheRegenerationRequested` targets.
 
 ## 5. Related Documents
 

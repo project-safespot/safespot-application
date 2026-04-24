@@ -19,10 +19,26 @@ Shelter:
 
 - current key: `shelter:status:{shelterId}`
 
-Disaster:
+Disaster message read models:
 
-- pointer: `disaster:latest:{disasterType}:{region}`
-- detail: `disaster:detail:{alertId}`
+- `disaster:detail:{alertId}`
+- `disaster:messages:recent:seoul`
+- `disaster:message:core:seoul`
+- `disaster:messages:list:seoul`
+
+Required rebuild order:
+
+1. `disaster:detail:{alertId}`
+2. `disaster:messages:recent:seoul`
+3. `disaster:message:core:seoul`
+4. `disaster:messages:list:seoul`
+
+Worker rules:
+
+- rebuild only from normalized DB data
+- do not reclassify raw messages here
+- exclude `isInScope=false` messages from public Redis read models
+- do not rebuild retired keys such as `disaster:active`, `disaster:latest:*`, or `disaster:alert:list`
 
 Responsibility split:
 
@@ -34,7 +50,7 @@ Responsibility split:
 - `EvacuationEntryCreated` -> `entry:{entryId}:ENTERED`
 - `EvacuationEntryExited` -> `entry:{entryId}:EXITED`
 - no version suffix on those keys
-- `CacheRegenerationRequested` stays `cache-regen:{cacheKey}:{windowStart}`
+- `CacheRegenerationRequested` stays `cache-regen:{cacheKeyHash}:{windowStart}`
 
 ## 5. Current vs Target Awareness
 

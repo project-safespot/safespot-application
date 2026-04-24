@@ -12,8 +12,8 @@ Common auth, response, error, enum, and validation rules come from `docs/api/api
 - public disaster reads
 - public weather and air-quality reads
 - Redis-first reads
-- RDS fallback on Redis miss/down/parse error
 - cache regeneration request events
+- temporary degraded-mode fallback handling when current implementation cannot serve from Redis
 
 It does not own:
 
@@ -27,12 +27,13 @@ It does not own:
 Current implementation:
 
 - read path is Redis first
-- fallback goes directly to RDS
+- some misses or parse failures may still fall back to RDS as a temporary degraded-mode escape hatch
 - cache regeneration event is currently documented, but worker-side regeneration for some keys may still be stubbed
 
 Target architecture:
 
 - regeneration requests flow through `EVENT-007`
+- normal public hot path does not depend on RDS
 - workers rebuild the requested cache entries
 
 ## 3. Seoul MVP Validation
@@ -47,14 +48,25 @@ Current MVP scope is Seoul only.
 
 ### 4.1 Disaster cache
 
-Pointer/detail structure:
+Canonical disaster message read models:
 
-- pointer: `disaster:latest:{disasterType}:{region}`
-- detail: `disaster:detail:{alertId}`
+- `disaster:messages:recent:seoul`
+- `disaster:message:core:seoul`
+- `disaster:messages:list:seoul`
+- `disaster:detail:{alertId}`
+
+Rules:
+
+- `api-public-read` is Redis-first
+- disaster read models are rebuilt by `async-worker`, not by this service
+- `disasterType` and `messageCategory` are payload fields, not Redis key dimensions
+- filtering for disaster message list reads is payload-based
 
 Miss handling:
 
-- pointer miss -> publish pointer regeneration request
+- recent miss -> publish recent regeneration request
+- core miss -> publish core regeneration request
+- list miss -> publish list regeneration request
 - detail miss -> publish detail regeneration request
 
 ### 4.2 Shelter cache
@@ -198,6 +210,13 @@ Failures:
 | Invalid enum | 400 | `VALIDATION_ERROR` |
 | Outside Seoul | 400 | `UNSUPPORTED_REGION` |
 
+Redis read model reference:
+
+- primary key: `disaster:messages:list:seoul`
+- filtering by `disasterType` is applied on payload items
+- `messageCategory`, `level`, and `rawType` may also be filtered from payload fields
+- this key is a Top N read model, not full history
+
 ### 5.4 GET /disasters/{disasterType}/latest
 
 Query parameters:
@@ -208,9 +227,10 @@ Query parameters:
 
 Behavior:
 
-- current cache model uses a pointer key and a detail key
-- pointer lookup identifies the latest `alertId`
-- detail lookup returns the full alert body
+- disaster latest-style reads must use the canonical disaster message read models rather than a `{disasterType}` pointer key
+- selection comes from payload fields in `disaster:messages:list:seoul` or `disaster:messages:recent:seoul`
+- detail expansion uses `disaster:detail:{alertId}`
+- do not introduce `{disasterType}` as a Redis key dimension for MVP disaster message caches
 
 Response `200`:
 
@@ -311,14 +331,21 @@ Failures:
 ## 6. Fallback And Regeneration Rules
 
 - Redis hit -> return cached value
-- Redis miss/down/parse error -> fallback to RDS
-- return fallback response immediately
-- then publish regeneration request subject to suppress window
+- Redis miss/stale/parse failure -> publish regeneration request subject to suppress window
+- if the current implementation cannot serve from Redis, degraded-mode fallback to RDS may be used temporarily
+- degraded-mode fallback is not target hot-path behavior
 
 `EVENT-007` status:
 
 - current: contract documented, some regeneration paths may still be stubbed
 - target: worker receives and rebuilds requested cache entries
+
+Disaster cache regeneration rules:
+
+- `api-public-read` may publish `CacheRegenerationRequested`
+- `api-public-read` must not call Redis `SET` to rebuild read models directly
+- `async-worker` owns rebuild of `disaster:messages:recent:seoul`, `disaster:message:core:seoul`, `disaster:messages:list:seoul`, and `disaster:detail:{alertId}`
+- normal hot-path reads should not depend on RDS, even though RDS remains the source of truth
 
 ## 7. Related Documents
 

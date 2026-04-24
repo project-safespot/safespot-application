@@ -2,31 +2,55 @@
 
 This document is the source of truth for Redis cache TTL values.
 
-RDS remains the source of truth. TTL controls cache freshness, fallback behavior, and regeneration cadence.
+RDS remains the source of truth. TTL is fallback freshness protection, not the primary regeneration mechanism.
 
 ## TTL Contract
 
-| Key pattern | TTL | Reason | Regeneration trigger |
-| --- | --- | --- | --- |
-| `shelter:status:{shelterId}` | 30 seconds | Shelter occupancy and congestion can change quickly during entry/exit flows. Short TTL limits stale operational state while keeping cache hit value. | Rebuild after shelter-related events or `CacheRegenerationRequested`; immediate stale-key `DEL` may happen from `api-core` |
-| `shelter:list:seoul:{shelterType}:{disasterType}` | 10 minutes | Shelter list membership changes less frequently than shelter status. Longer TTL reduces repeated list rebuild cost while allowing bounded staleness. | Rebuild on fallback or worker-driven regeneration after relevant shelter updates |
-| `shelter:list:{region}:{shelterType}:{disasterType}` | 10 minutes | Same future list-model policy as the Seoul namespace. Region remains extensible even though current MVP is Seoul only. | Rebuild on fallback or worker-driven regeneration after relevant shelter updates |
-| `disaster:latest:{disasterType}:{region}` | 5 minutes | Pointer keys should refresh faster than long-lived reference data so latest alert selection stays current without excessive rebuild churn. | Rebuild on new disaster collection, pointer miss, or `CacheRegenerationRequested` for pointer keys |
-| `disaster:detail:{alertId}` | 10 minutes | Alert detail is less volatile than latest selection. A moderate TTL balances detail freshness and reuse across repeated reads. | Rebuild on disaster collection affecting the alert, detail miss, or `CacheRegenerationRequested` for detail keys |
+| Key pattern | TTL | Reason |
+| --- | --- | --- |
+| `shelter:status:{shelterId}` | 30 seconds | Shelter occupancy and congestion can change quickly during entry/exit flows. |
+| `shelter:list:seoul:{shelterType}:{disasterType}` | 600 seconds | Shelter list membership changes less frequently than shelter status. |
+| `shelter:list:{region}:{shelterType}:{disasterType}` | 600 seconds | Same future list-model policy as the Seoul namespace. |
+| `disaster:messages:recent:seoul` | 300 seconds | Recent overview should stay fresh. |
+| `disaster:message:core:seoul` | 300 seconds | Core message should not remain stale. |
+| `disaster:messages:list:seoul` | 300 seconds | Disaster message list should reflect recent updates. |
+| `disaster:detail:{alertId}` | 3600 seconds | Detail payload changes rarely after normalization. |
+| `suppress:cache-regeneration:{cacheKeyHash}` | 30 seconds | Prevent duplicate regeneration requests for the same target key. |
 
 ## Regeneration Rules
 
-- Redis hit returns cached data.
-- Redis miss, Redis down, or parse error falls back to RDS.
-- After fallback, the caller publishes a regeneration request subject to the suppress window policy.
-- Pointer and detail regeneration are split:
-- pointer miss -> regenerate `disaster:latest:{disasterType}:{region}`
-- detail miss -> regenerate `disaster:detail:{alertId}`
+- TTL does not replace event-driven regeneration.
+- normalized DB writes and regeneration requests should refresh relevant keys before TTL expiry where possible.
+- TTL exists to limit stale cache lifetime when event-driven regeneration is delayed or missed.
+
+Disaster message rebuild triggers:
+
+- new in-scope disaster messages normalized into DB
+- cache miss or stale detection followed by `CacheRegenerationRequested`
+- explicit rebuild requests from downstream worker flow
+
+Disaster message target mapping:
+
+- `disaster:messages:recent:seoul`
+- `disaster:message:core:seoul`
+- `disaster:messages:list:seoul`
+- `disaster:detail:{alertId}`
+
+## Suppress Window Notes
+
+Suppress keys must use the actual regeneration target key as hash input.
+
+Example:
+
+- target key: `disaster:messages:list:seoul`
+- suppress key: `suppress:cache-regeneration:{hash("disaster:messages:list:seoul")}`
+
+Different key families must not share one suppress key accidentally.
 
 ## Ownership Notes
 
-- `api-core` invalidates stale keys by `DEL` only where immediate removal is required.
-- `api-public-read` requests regeneration after fallback.
+- `api-core` invalidates stale shelter keys by `DEL` only where immediate removal is required.
+- `api-public-read` requests regeneration after fallback or stale detection.
 - `async-worker` rebuilds cache data.
 
 ## 변경 이력
@@ -34,3 +58,4 @@ RDS remains the source of truth. TTL controls cache freshness, fallback behavior
 | 날짜 | 버전 | 변경 내용 |
 |---|---|---|
 | 2026-04-24 | v1.0 | Redis TTL source-of-truth 문서 추가. shelter/disaster 캐시 TTL, 선택 근거, regeneration trigger 규칙 명시 |
+| 2026-04-24 | v1.1 | disaster message read model TTL을 `recent/core/list/detail` 구조로 전환. suppress window TTL 30초와 fallback freshness 원칙 명시 |

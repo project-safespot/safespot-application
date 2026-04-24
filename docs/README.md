@@ -11,11 +11,27 @@ Current MVP scope is Seoul only.
 
 1. [Root guide](../CLAUDE.md)
 2. [Common API policy](api/api-common.md)
-3. [api-core API](api/api-core.md)
-4. [Event envelope](event/event-envelope.md)
-5. [Redis keys](redis-key/redis-key.md)
-6. [Async worker](event/async-worker.md)
-7. [Monitoring](monitoring/monitoring.md)
+3. [External ingestion](ingestion/external-ingestion.md)
+4. [DB schema](data/db-schema.md)
+5. [api-core API](api/api-core.md)
+6. [Event envelope](event/event-envelope.md)
+7. [Redis keys](redis-key/redis-key.md)
+8. [Redis TTL](redis-key/cache-ttl.md)
+9. [Async worker](event/async-worker.md)
+10. [Monitoring](monitoring/monitoring.md)
+
+재난 메시지 분류와 정규화 저장 계약은 다음 문서를 함께 본다:
+
+- `docs/api/api-common.md`
+- `docs/ingestion/external-ingestion.md`
+- `docs/data/db-schema.md`
+
+Redis read model, event, TTL, worker regeneration 계약은 다음 문서를 함께 본다:
+
+- `docs/redis-key/redis-key.md`
+- `docs/redis-key/cache-ttl.md`
+- `docs/event/event-envelope.md`
+- `docs/event/async-worker.md`
 
 ## API Docs
 
@@ -44,7 +60,7 @@ Current MVP scope is Seoul only.
 
 | Document | Description |
 | --- | --- |
-| [external-ingestion.md](ingestion/external-ingestion.md) | External collection, normalization, and cache refresh event contract |
+| [external-ingestion.md](ingestion/external-ingestion.md) | External collection, disaster classification normalization, and post-write event contract |
 | [monitoring.md](monitoring/monitoring.md) | Application and worker metric/log requirements |
 | [git-workflow.md](git-workflow.md) | Branch and review workflow |
 
