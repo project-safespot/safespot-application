@@ -144,13 +144,14 @@ Canonical level은 다음 4개만 사용한다:
 - `isInScope`는 public disaster read model 포함 여부를 제어한다
 - `normalizationReason`은 매핑 또는 제외 근거를 설명한다
 
-## 4. Weather Contract
+## 4. Weather And Air-Quality Contract
 
 Weather is region-scoped for the MVP.
 
 - region input is mapped to grid coordinates
 - Seoul region -> Seoul grid mapping
-- `nx` / `ny` remain the storage and cache selectors
+- `nx` / `ny` remain source API and DB storage selectors
+- current public Redis read models use the Seoul environment namespace: `environment:weather:seoul`, `environment:weather-alert:seoul`, `environment:air-quality:seoul`
 
 ## 5. Event Publication Contract
 

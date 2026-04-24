@@ -35,7 +35,7 @@ Target architecture:
 ## 3. Cache Ownership Split
 
 - `api-core` invalidates stale shelter keys by `DEL` only
-- `api-public-read` requests regeneration after fallback or stale detection
+- `api-public-read` requests regeneration after miss, stale detection, or degraded-mode fallback
 - `async-worker` rebuilds cache contents
 
 ## 4. Key Families
@@ -55,9 +55,9 @@ Disaster message read models:
 
 Environment:
 
-- `environment:weather:{nx}:{ny}`
-- `environment:weather:region:{region}`
-- `environment:air:{stationName}`
+- `environment:weather:seoul`
+- `environment:air-quality:seoul`
+- `environment:weather-alert:seoul`
 
 Retired disaster keys must not be rebuilt.
 
@@ -115,7 +115,7 @@ Triggers:
 
 Behavior:
 
-- rebuild `environment:weather:{nx}:{ny}`, `environment:weather:region:{region}`, or `environment:air:{stationName}`
+- rebuild `environment:weather:seoul`, `environment:air-quality:seoul`, or `environment:weather-alert:seoul`
 
 ## 6. EVENT-007 Handling
 

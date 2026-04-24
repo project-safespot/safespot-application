@@ -43,7 +43,9 @@ Worker rules:
 Responsibility split:
 
 - `api-core` deletes stale cache when needed
+- `api-public-read` requests regeneration after miss, stale detection, or degraded-mode fallback
 - `async-worker` rebuilds cache contents
+- service-level guides must not override root or `docs/` contracts
 
 ## 4. Idempotency Rules
 

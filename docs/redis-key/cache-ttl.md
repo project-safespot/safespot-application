@@ -15,6 +15,9 @@ RDS remains the source of truth. TTL is fallback freshness protection, not the p
 | `disaster:message:core:seoul` | 300 seconds | Core message should not remain stale. |
 | `disaster:messages:list:seoul` | 300 seconds | Disaster message list should reflect recent updates. |
 | `disaster:detail:{alertId}` | 3600 seconds | Detail payload changes rarely after normalization. |
+| `environment:weather:seoul` | 7200 seconds | Environment TTL is fallback stability protection, not data freshness. |
+| `environment:air-quality:seoul` | 7200 seconds | Environment TTL is fallback stability protection, not data freshness. |
+| `environment:weather-alert:seoul` | 7200 seconds | Environment TTL is fallback stability protection, not data freshness. |
 | `suppress:cache-regeneration:{cacheKeyHash}` | 30 seconds | Prevent duplicate regeneration requests for the same target key. |
 
 ## Regeneration Rules
@@ -50,8 +53,9 @@ Different key families must not share one suppress key accidentally.
 ## Ownership Notes
 
 - `api-core` invalidates stale shelter keys by `DEL` only where immediate removal is required.
-- `api-public-read` requests regeneration after fallback or stale detection.
+- `api-public-read` requests regeneration after miss, stale detection, or degraded-mode fallback.
 - `async-worker` rebuilds cache data.
+- `external-ingestion` writes normalized DB data and publishes post-commit events or triggers, but does not rebuild public Redis read models.
 
 ## 변경 이력
 

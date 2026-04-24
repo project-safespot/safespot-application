@@ -89,9 +89,9 @@ Redis 자체 상태는 redis-exporter가 수집한다. endpoint별 cache 사용 
 | metric | type | label | 설명 |
 | --- | --- | --- | --- |
 | `api_read_cache_request_total` | Counter | `endpoint`, `result` | Redis read 결과. `result=hit|miss|down|parse_error` |
-| `api_read_cache_fallback_total` | Counter | `endpoint`, `reason` | DB fallback 발생. `reason=redis_miss|redis_down|parse_error` |
-| `api_read_db_fallback_query_total` | Counter | `endpoint` | fallback 후 RDS 조회 발생 |
-| `api_read_db_fallback_latency_seconds` | Timer | `endpoint` | fallback RDS query latency |
+| `api_read_cache_fallback_total` | Counter | `endpoint`, `reason` | degraded-mode DB fallback 발생. `reason=redis_miss|redis_down|parse_error` |
+| `api_read_db_fallback_query_total` | Counter | `endpoint` | degraded-mode fallback 후 RDS 조회 발생 |
+| `api_read_db_fallback_latency_seconds` | Timer | `endpoint` | degraded-mode fallback RDS query latency |
 | `api_read_cache_regen_publish_total` | Counter | `endpoint`, `result` | `CacheRegenerationRequested` 발행 결과. `result=success|failure` |
 | `api_read_cache_regen_requested_total` | Counter | `endpoint` | cache regeneration 요청 발생 |
 | `api_read_cache_regen_suppressed_total` | Counter | `endpoint` | suppress window로 regeneration 요청 생략 |
@@ -109,11 +109,13 @@ Redis 자체 상태는 redis-exporter가 수집한다. endpoint별 cache 사용 
 | --- | --- | --- | --- |
 | `cache_hit_total` | Counter | `service`, `cache_key_family` | Redis cache hit |
 | `cache_miss_total` | Counter | `service`, `cache_key_family` | Redis cache miss |
-| `cache_regeneration_requested_total` | Counter | `cache_key_family`, `event_type` | regeneration 요청 발생 |
+| `cache_regeneration_requested_total` | Counter | `cache_key_family`, `event_type`, `reason`, `schema_version` | regeneration 요청 발생 |
 | `cache_regeneration_completed_total` | Counter | `cache_key_family` | regeneration 완료 |
 | `cache_regeneration_failed_total` | Counter | `cache_key_family`, `reason` | regeneration 실패 |
 | `redis_hot_key_detected_total` | Counter | `cache_key_family` | hot key 감지 |
 | `redis_payload_size_bytes` | Gauge or Summary | `cache_key_family` | payload size 관측 |
+
+`cache_key_family` label은 `CacheRegenerationRequested.payload.cacheKeyFamily`에서 파생한다. `cacheKey`, `cacheKeyFamily`, `reason`, `schemaVersion`은 structured log field로 남긴다. `cacheKey`는 cardinality가 커질 수 있으므로 metric label로 사용하지 않는다.
 
 필수 endpoint label 값은 route template을 사용한다.
 
@@ -365,7 +367,7 @@ SQS/Lambda native metric은 queue/function 상태를 보여준다. 어떤 event 
 
 | metric | type | label | 설명 |
 | --- | --- | --- | --- |
-| `cache_regeneration_requested_total` | Counter | `cache_key_family`, `event_type` | `CacheRegenerationRequested` 수신 또는 downstream rebuild 요청 수 |
+| `cache_regeneration_requested_total` | Counter | `cache_key_family`, `event_type`, `reason`, `schema_version` | `CacheRegenerationRequested` 수신 또는 downstream rebuild 요청 수 |
 | `cache_regeneration_completed_total` | Counter | `cache_key_family` | read model rebuild 완료 |
 | `cache_regeneration_failed_total` | Counter | `cache_key_family`, `reason` | read model rebuild 실패 |
 | `redis_hot_key_detected_total` | Counter | `cache_key_family` | hot key 감지 |
@@ -392,7 +394,9 @@ EnvironmentDataCollected
 CacheRegenerationRequested
 ```
 
-`disaster:messages:list:seoul`는 low-cardinality MVP 설계의 결과로 hot key 후보가 될 수 있다. 이는 허용된 trade-off이며, hit ratio와 payload size를 함께 관찰해야 한다.
+`CacheRegenerationRequested` 처리 log에는 `cacheKey`, `cacheKeyFamily`, `reason`, `schemaVersion`을 포함한다.
+
+`disaster:messages:list:seoul`는 low-cardinality MVP 설계의 결과로 hot key 후보가 될 수 있다. 이는 낮은 Redis cardinality를 위한 허용된 MVP trade-off이며, hit ratio, payload size, hot key metric을 함께 관찰해야 한다.
 
 권장 failure reason 값:
 

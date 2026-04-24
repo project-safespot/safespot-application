@@ -56,6 +56,8 @@ Version suffixes are not used for `ENTERED` and `EXITED`.
 
 For `CacheRegenerationRequested`, `cacheKeyHash` must be derived from the exact `cacheKey` target.
 
+`collected:env:*` is an event idempotency namespace only. Redis environment read-model keys use `environment:*`.
+
 ## 4. Event Types
 
 ### EVENT-001 `EvacuationEntryCreated`
@@ -232,7 +234,8 @@ Recommended `cacheKeyFamily` values:
 - `shelter_status`
 - `shelter_list`
 - `environment_weather`
-- `environment_air`
+- `environment_air_quality`
+- `environment_weather_alert`
 
 Supported disaster message cache targets:
 
@@ -240,6 +243,12 @@ Supported disaster message cache targets:
 - `disaster:message:core:seoul`
 - `disaster:messages:list:seoul`
 - `disaster:detail:{alertId}`
+
+Supported environment cache targets:
+
+- `environment:weather:seoul`
+- `environment:air-quality:seoul`
+- `environment:weather-alert:seoul`
 
 Retired disaster keys are not supported `CacheRegenerationRequested` targets.
 

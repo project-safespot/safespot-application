@@ -69,8 +69,8 @@ Owns:
 
 - public read APIs
 - Redis-first read path
-- RDS fallback on Redis miss, Redis down, or parse error
-- cache regeneration requests on fallback
+- temporary degraded-mode RDS fallback on Redis miss, Redis down, or parse error
+- cache regeneration requests on miss, stale, or degraded-mode fallback
 - suppress window behavior
 
 Does not own:
@@ -78,6 +78,7 @@ Does not own:
 - admin writes
 - token issuance
 - Redis rebuild execution
+- Redis `SET` for read-model rebuild
 - external API ingestion
 
 ### 4.3 external-ingestion
@@ -85,15 +86,18 @@ Does not own:
 Owns:
 
 - external API collection
-- raw payload persistence
-- normalization
-- RDS writes for collected data
-- post-write cache refresh event publication
+- raw payload and raw value preservation
+- canonical normalization before DB write
+- RDS writes for raw + canonical collected data
+- post-normalization event or trigger publication after DB commit
 
 Does not own:
 
-- Redis writes
+- Redis read-model rebuild
+- Redis `SET` for public-read models
 - public read APIs
+- public-read filtering
+- UI rendering
 - admin writes
 - worker retry / DLQ processing
 
@@ -128,7 +132,11 @@ Read path:
 Client
 -> api-public-read
 -> Redis hit
--> RDS fallback on miss/down/parse error
+-> response
+
+Redis miss/stale/down/parse error
+-> CacheRegenerationRequested
+-> temporary degraded-mode RDS fallback only when current implementation cannot serve from Redis
 ```
 
 Write path:
@@ -172,15 +180,20 @@ Responsibility split:
 
 ### 7.2 Disaster cache
 
-Pointer/detail model:
+Current disaster message read models:
 
-- pointer: `disaster:latest:{disasterType}:{region}`
-- detail: `disaster:detail:{alertId}`
+- `disaster:messages:recent:seoul`
+- `disaster:message:core:seoul`
+- `disaster:messages:list:seoul`
+- `disaster:detail:{alertId}`
 
 Rules:
 
-- pointer miss -> publish pointer regeneration request
-- detail miss -> publish detail regeneration request
+- `disasterType`, `messageCategory`, and district are not Redis key dimensions for MVP disaster message lists.
+- filtering is payload-based in `api-public-read`.
+- RDS stores full history and remains the source of truth.
+- `api-public-read` requests regeneration on miss, stale, or degraded-mode fallback.
+- `async-worker` rebuilds Redis read models from normalized DB data.
 
 ## 8. Documentation Source Of Truth
 
@@ -198,6 +211,8 @@ Documentation index: `docs/README.md`
 | External ingestion | `docs/ingestion/external-ingestion.md` |
 | RDS schema | `docs/data/db-schema.md` |
 | Git workflow | `docs/git-workflow.md` |
+
+Service-level `CLAUDE.md` and `README.md` files must not override root or `docs/` contracts.
 
 If documents conflict:
 
@@ -233,3 +248,5 @@ If documents conflict:
 - Writing Redis as source of truth
 - Letting read path depend on SQS
 - Cross-service code import for convenience
+- Treating direct RDS fallback in `api-public-read` as the target hot path
+- Using retired disaster keys as active Redis contracts

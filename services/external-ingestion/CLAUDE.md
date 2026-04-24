@@ -37,6 +37,7 @@ It does not own Redis rebuild execution, public read APIs, admin writes, or work
 - Redis `SET` for public-read models
 - `api-public-read` fallback logic
 - UI filtering
+- UI rendering
 
 Downstream public Redis read models are owned by `async-worker`:
 
