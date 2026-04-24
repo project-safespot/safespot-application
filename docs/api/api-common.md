@@ -1,156 +1,42 @@
-# SafeSpot REST API 공통 명세
+# SafeSpot REST API Common Policy
 
-> 본 문서는 SafeSpot REST API의 공통 기준, 인증 정책, 공통 스키마를 정의한다.
-> api-core.md 및 api-public-read.md는 본 문서를 기준으로 한다.
-> 현재 프로젝트에서 합의된 최신 기준을 우선 반영하며, 기존 문서와 충돌 시 본 문서를 구현 기준으로 사용한다.
+This document defines shared API rules for SafeSpot REST APIs.
 
----
+- `docs/api/api-core.md` uses this as the common write-side policy.
+- `docs/api/api-public_read.md` uses this as the common read-side policy.
 
-## 0. 문서 기준 및 범위
+## 1. Scope
 
-### 0.1 현재 기준
+Current implementation policy:
 
-- 인증은 **Access Token only** 로 운영한다.
-- `GET /me` 는 `app_user` 단일 조회 기준으로 구현한다.
-- `admin_audit_log` 는 `payload_before`, `payload_after` 를 유지한다.
-- `PATCH /admin/evacuation-entries/{entryId}` 의 `reason` 은 **선택**이다.
-- `PATCH /admin/shelters/{shelterId}` 의 `reason` 은 **필수**이다.
-- `GET /admin/dashboard` 는 관리자 보호 워크로드인 `api-core` 소속이다.
-- 공개 조회 API는 `api-public-read` 워크로드 기준으로 설계한다.
-- 수집기 및 기타 비동기 처리 워크로드는 본 문서 범위에서 제외한다.
-- 이벤트는 **DB commit 이후 발행**한다.
-- Redis fallback 이후 재생성 요청 이벤트는 **API 인스턴스 로컬 suppress window 10초** 기준으로 동일 키당 1회만 발행한다.
+- Authentication uses access token only.
+- Public reads belong to `api-public-read`.
+- Admin writes belong to `api-core`.
+- Events are published after DB commit.
 
-### 0.2 범위
+Target architecture policy:
 
-본 문서에는 아래가 포함된다.
-- 워크로드 기준 정의
-- 인증 정책
-- 공통 응답 구조
-- 공통 validation / error 규칙
-- 보안 / 로그 / 개인정보 주의사항
-- 향후 확장 후보
+- Event publication must remain durable and loss-intolerant even if the implementation mechanism changes.
 
-본 문서에는 아래가 포함되지 않는다.
-- 개별 API 엔드포인트 명세 (api-core.md / api-public-read.md 참조)
-- 이벤트 envelope 및 payload 상세 (docs/event/event-envelope.md 참조)
-- worker 내부 처리 로직 (docs/async/async-worker.md 참조)
-- external-ingestion 상세 명세
-- 메시징 인프라(SQS/SNS) 구성 상세
-- Terraform 리소스 정의
+## 2. MVP Region Policy
 
----
+Current MVP scope is Seoul only.
 
-## 1. 워크로드 기준
+- Requests outside Seoul must return `400 UNSUPPORTED_REGION`.
+- This applies even when the input format is valid.
+- Valid `lat` / `lng` outside Seoul are still rejected with `UNSUPPORTED_REGION`.
 
-### 1.1 api-core
+## 3. Base Rules
 
-- 인증
-- 관리자 운영 조회
-- 관리자 write
-- 동기 트랜잭션 처리
-- 이벤트 발행
-- Redis 캐시 무효화(DEL)
+- Base URL: `https://api.safespot.kr`
+- Content type: `application/json`
+- Auth header: `Authorization: Bearer {accessToken}`
+- Time format: ISO 8601 / RFC 3339
+- ID format: numeric IDs backed by BIGINT/BIGSERIAL
 
-### 1.2 api-public-read
+## 4. Common Response Shape
 
-- 공개 shelter 조회
-- 공개 재난 조회
-- 보조 환경 조회
-- Redis 우선 조회
-- RDS fallback 처리
-- Redis miss 시 캐시 재생성 요청 이벤트 발행 (suppress window 적용)
-
----
-
-## 2. Base URL / 공통
-
-### 2.1 Base URL
-
-`https://api.safespot.kr`
-
-### 2.2 Content-Type
-
-`application/json`
-
-### 2.3 인증 헤더
-
-```
-Authorization: Bearer {accessToken}
-```
-
-### 2.4 시간 형식
-
-모든 시간 필드는 ISO 8601 / RFC3339 문자열을 사용한다.
-
-예:
-
-```
-2026-04-15T15:20:00+09:00
-```
-
-### 2.5 ID 형식
-
-현재 명세 기준 모든 ID는 number(BIGSERIAL/BIGINT 기반)로 응답한다.
-
----
-
-## 3. 인증 정책
-
-### 3.1 역할
-
-- `GUEST`
-- `USER`
-- `ADMIN`
-
-### 3.2 인증 방식
-
-- JWT Access Token only
-- Refresh Token 미도입
-- Logout API 미도입
-- Access Token 만료 시 재로그인
-
-### 3.3 JWT Payload
-
-```json
-{
-  "sub": "1",
-  "role": "ADMIN",
-  "username": "admin01",
-  "iat": 1760000000,
-  "exp": 1760086400
-}
-```
-
-### 3.4 JWT Payload 규칙
-
-| 필드 | 설명 |
-| --- | --- |
-| `sub` | 사용자 ID |
-| `role` | `USER` 또는 `ADMIN` |
-| `username` | 로그인 ID |
-| `iat` | 발급 시각 (epoch seconds) |
-| `exp` | 만료 시각 (epoch seconds) |
-
-### 3.5 JWT에 넣지 않는 값
-
-- `name`
-- `phone`
-- `rrn_front_6`
-- `address`
-- `familyInfo`
-- `healthStatus`
-- `specialProtectionFlag`
-
-### 3.6 Access Token 만료시간
-
-- 기본: `1800초` (30분)
-
----
-
-## 4. 공통 응답 구조
-
-### 4.1 성공
+Success:
 
 ```json
 {
@@ -159,38 +45,36 @@ Authorization: Bearer {accessToken}
 }
 ```
 
-### 4.2 실패
+Failure:
 
 ```json
 {
   "success": false,
   "error": {
     "code": "VALIDATION_ERROR",
-    "message": "요청 값이 올바르지 않습니다."
+    "message": "Request value is invalid."
   }
 }
 ```
 
----
+## 5. Common Error Codes
 
-## 5. 공통 에러 코드
-
-| HTTP | 에러 코드 | 설명 |
+| HTTP | Code | Meaning |
 | --- | --- | --- |
-| 400 | `VALIDATION_ERROR` | 요청 값 형식/범위 오류 |
-| 400 | `MISSING_REQUIRED_FIELD` | 필수값 누락 |
-| 401 | `UNAUTHORIZED` | 토큰 없음 또는 만료 |
-| 401 | `INVALID_CREDENTIALS` | 로그인 실패 |
-| 401 | `ACCOUNT_DISABLED` | 비활성 계정 |
-| 403 | `FORBIDDEN` | 권한 없음 |
-| 404 | `NOT_FOUND` | 대상 리소스 없음 |
-| 409 | `ALREADY_EXITED` | 이미 퇴소 처리된 입소자 |
-| 409 | `SHELTER_FULL` | 대피소 수용 인원 초과 |
-| 500 | `INTERNAL_ERROR` | 서버 내부 오류 |
+| 400 | `VALIDATION_ERROR` | Invalid format, range, or enum |
+| 400 | `MISSING_REQUIRED_FIELD` | Required field is missing |
+| 400 | `UNSUPPORTED_REGION` | Request is outside Seoul MVP scope |
+| 401 | `UNAUTHORIZED` | Token missing or expired |
+| 401 | `INVALID_CREDENTIALS` | Login failed |
+| 401 | `ACCOUNT_DISABLED` | Disabled account |
+| 403 | `FORBIDDEN` | Permission denied |
+| 404 | `NOT_FOUND` | Resource not found |
+| 409 | `ALREADY_EXITED` | Exit requested for an already exited entry |
+| 500 | `INTERNAL_ERROR` | Internal server error |
 
----
+Capacity is not a rejection condition, so there is no capacity-based `409`.
 
-## 6. 공통 Enum 정의
+## 6. Common Enums
 
 ### 6.1 role
 
@@ -203,106 +87,82 @@ Authorization: Bearer {accessToken}
 - `FLOOD`
 - `LANDSLIDE`
 
-### 6.3 disasterLevel
-
-- `관심`
-- `주의`
-- `경계`
-- `심각`
-
-### 6.4 shelterType
-
-- `민방위대피소`
-- `지진옥외대피장소`
-- `이재민임시주거시설`
-- `이재민임시주거시설(지진겸용)`
-- `수해대피소`
-- `산사태임시대피소`
-
-### 6.5 shelterStatus
-
-- `운영중`
-- `운영중단`
-- `준비중`
-
-### 6.6 entryStatus
+### 6.3 entryStatus
 
 - `ENTERED`
 - `EXITED`
 - `TRANSFERRED`
 
-### 6.7 congestionLevel
+### 6.4 congestionLevel
 
-| 값 | 기준 |
+| Value | Meaning |
 | --- | --- |
-| `AVAILABLE` | 점유율 0~49% |
-| `NORMAL` | 점유율 50~74% |
-| `CROWDED` | 점유율 75~99% |
-| `FULL` | 점유율 100% |
+| `AVAILABLE` | 0-49% occupancy |
+| `NORMAL` | 50-74% occupancy |
+| `CROWDED` | 75-99% occupancy |
+| `FULL` | 100% or more occupancy |
 
-> 응답 예시에 표시된 `congestionLevel` 값은 단일 예시이며, 실제 응답에서는 위 enum 중 하나가 반환된다.
+`congestionLevel` is a state indicator only.
 
----
+- It does not reject requests.
+- It does not cap admission.
+- Over-capacity admission is allowed.
 
-## 7. 공통 Validation 규칙
+## 7. Validation Categories
 
-| 필드 | 규칙 |
+Validation failures are grouped into:
+
+- `VALIDATION_ERROR`
+- `MISSING_REQUIRED_FIELD`
+- `UNSUPPORTED_REGION`
+
+## 8. Common Validation Rules
+
+| Field | Rule |
 | --- | --- |
-| `loginId` | 1~50자, 공백만 불가 |
-| `password` | 1~100자 |
-| `lat` | -90.0 ~ 90.0 |
-| `lng` | -180.0 ~ 180.0 |
-| `radius` | 정수, 100 ~ 5000 |
-| `name` | 1~50자 |
-| `phoneNumber` | 숫자만, 10~11자리 |
-| `address` | 최대 255자 |
-| `familyInfo` | 최대 100자 |
-| `healthStatus` | 최대 200자 |
-| `note` | 최대 500자 권장 |
-| `reason` | 최대 200자 |
-| `region` | 최대 100자 권장 |
-| `stationName` | 최대 100자 권장 |
+| `loginId` | 1-50 chars, no blank-only value |
+| `password` | 1-100 chars |
+| `lat` | numeric, `-90.0` to `90.0` |
+| `lng` | numeric, `-180.0` to `180.0` |
+| `radius` | integer, `100` to `5000` |
+| `name` | 1-50 chars |
+| `phoneNumber` | digits only, 10-11 chars |
+| `address` | max 255 chars |
+| `familyInfo` | max 100 chars |
+| `healthStatus` | max 200 chars |
+| `note` | recommended max 500 chars |
+| `reason` | max 200 chars |
+| `region` | Seoul-only region name for MVP |
+| `stationName` | max 100 chars |
+| `nx` | integer grid x value |
+| `ny` | integer grid y value |
 
----
+Region validation rules:
 
-## 11. 이벤트 명세
+- malformed coordinates -> `VALIDATION_ERROR`
+- valid coordinates outside Seoul -> `UNSUPPORTED_REGION`
+- non-Seoul region name -> `UNSUPPORTED_REGION`
 
-이벤트 envelope 및 payload 전문은 `docs/event/event-envelope.md`를 참조한다.
+## 9. Capacity Policy
 
----
+Capacity is an operational metric, not an enforcement rule.
 
-## 13. 보안 / 로그 / 개인정보 주의사항
+- over-capacity admission is allowed
+- capacity is not a rejection condition
+- `capacityTotal`, `currentOccupancy`, and `availableCapacity` are operational fields
+- `congestionLevel` communicates state only
 
-### 13.1 저장 금지 / 노출 금지
+## 10. Security And Logging
 
-- `password_hash` 응답 금지
-- `rrn_front_6` 응답 금지
-- 위치 정보(`lat`, `lng`) 저장 금지
-- 공개 조회 응답에 개인정보 포함 금지
+- Do not return `password_hash`.
+- Do not return national ID fragments.
+- Do not log raw personal data unnecessarily.
+- Public read responses must not expose personal information.
+- Admin audit logs may persist before/after payloads in RDS, but event payloads must not include unnecessary personal data.
 
-### 13.2 로그 금지
+## 11. Related Documents
 
-애플리케이션 로그에 아래 직접 기록 금지:
-- 이름
-- 전화번호
-- 주소
-- 건강상태
-- 가족관계
-- 비밀번호
-- 주민번호 관련 값
-
-### 13.3 관리자 감사 로그
-
-- `payload_before`, `payload_after` 유지
-- append-only
-- 관리자도 직접 수정 불가
-
----
-
-## 15. 향후 확장 후보 (현 시점 미도입)
-
-- Refresh Token
-- `GET /admin/evacuation-entries/{entryId}` 단건 상세 조회 API
-- `GET /shelters/nearby` 최대 반환 건수 확정
-- paging 도입
-- worker별 이벤트 스키마 버전 고도화
+- api-core endpoints: `docs/api/api-core.md`
+- api-public-read endpoints: `docs/api/api-public_read.md`
+- event envelope and idempotency: `docs/event/event-envelope.md`
+- async worker behavior: `docs/event/async-worker.md`

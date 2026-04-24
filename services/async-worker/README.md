@@ -148,9 +148,8 @@ Fat JAR 위치: `services/async-worker/build/libs/async-worker-*.jar`
 | 키 패턴 | TTL | 비고 |
 |---------|-----|------|
 | `shelter:status:{shelterId}` | 30초 | 재난 상황 즉각 반영 |
-| `disaster:active:{region}` | 2분 | |
-| `disaster:alert:list:{region}:{type}` | 5분 | |
-| `disaster:detail:{alertId}` | 10분 | |
+| `disaster:latest:{type}:{region}` | 5분 | pointer key |
+| `disaster:detail:{alertId}` | 10분 | detail key |
 | `env:weather:{nx}:{ny}` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
 | `env:air:{station_name}` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
 
