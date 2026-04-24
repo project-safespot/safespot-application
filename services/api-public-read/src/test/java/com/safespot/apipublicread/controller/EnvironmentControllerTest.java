@@ -1,9 +1,12 @@
 package com.safespot.apipublicread.controller;
 
+import com.safespot.apipublicread.cache.RegionToGridResolver;
 import com.safespot.apipublicread.dto.AirQualityDto;
+import com.safespot.apipublicread.dto.ApiResponse;
 import com.safespot.apipublicread.dto.WeatherAlertDto;
 import com.safespot.apipublicread.exception.GlobalExceptionHandler;
 import com.safespot.apipublicread.service.EnvironmentReadService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -12,6 +15,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -22,6 +26,16 @@ class EnvironmentControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean EnvironmentReadService environmentReadService;
+    @MockitoBean RegionToGridResolver regionToGridResolver;
+
+    @BeforeEach
+    void stubSeoulDefaults() {
+        lenient().when(regionToGridResolver.isSupported("서울특별시")).thenReturn(true);
+        lenient().when(regionToGridResolver.isSupported("서울")).thenReturn(true);
+        lenient().when(regionToGridResolver.isSupported("부산광역시")).thenReturn(false);
+        lenient().when(regionToGridResolver.isSupportedGrid(60, 127)).thenReturn(true);
+        lenient().when(regionToGridResolver.isSupportedGrid(10, 10)).thenReturn(false);
+    }
 
     @Test
     void getWeather_withNxNy_success() throws Exception {
@@ -32,6 +46,20 @@ class EnvironmentControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.temperature").value(18.5))
                 .andExpect(jsonPath("$.data.nx").value(60));
+    }
+
+    @Test
+    void getWeather_nonSeoulRegion_returns400() throws Exception {
+        mockMvc.perform(get("/weather-alerts").param("region", "부산광역시"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("UNSUPPORTED_REGION"));
+    }
+
+    @Test
+    void getWeather_nonSeoulGrid_returns400() throws Exception {
+        mockMvc.perform(get("/weather-alerts").param("nx", "10").param("ny", "10"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("UNSUPPORTED_REGION"));
     }
 
     @Test
