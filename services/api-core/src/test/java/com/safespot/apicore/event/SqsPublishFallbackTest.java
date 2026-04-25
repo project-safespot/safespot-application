@@ -57,9 +57,12 @@ class SqsPublishFallbackTest {
     }
 
     @Test
-    void failureWriter_invalidPath_doesNotThrow() {
-        // Path under a file (not a dir) forces write failure without creating dirs.
-        Path invalidFile = tempDir.resolve("not-a-dir.txt/failures.ndjson");
+    void failureWriter_invalidPath_doesNotThrow() throws Exception {
+        // Create a regular file, then attempt to write under it as if it were a directory.
+        // This guarantees write failure: parent exists but is not a directory.
+        Path notADir = tempDir.resolve("not-a-dir.txt");
+        Files.writeString(notADir, "i am a file");
+        Path invalidFile = notADir.resolve("child.ndjson");
 
         EventPublishFailureWriter writer =
                 new EventPublishFailureWriter(objectMapper, metrics, invalidFile.toString());
@@ -70,8 +73,7 @@ class SqsPublishFallbackTest {
                 .failedAt(OffsetDateTime.now()).retryCount(4).lastError("timeout")
                 .replayableEnvelope("{}").build();
 
-        // Must not throw even when path is unwritable.
-        writer.write(record);
+        writer.write(record); // must not throw
     }
 
     @Test
