@@ -31,6 +31,7 @@ import java.util.List;
 public class ForestryLandslideNormalizer implements Normalizer {
 
     private static final String QUEUE = "disaster-collection";
+    private static final String EVENT_TYPE = "DisasterDataCollected";
     private static final String REGION = "seoul";
     private static final String DISASTER_TYPE = "LANDSLIDE";
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
@@ -40,6 +41,7 @@ public class ForestryLandslideNormalizer implements Normalizer {
     private final CacheEventPublisher cacheEventPublisher;
     private final IngestionMetrics metrics;
     private final ObjectMapper objectMapper;
+    private final SeoulScopePolicy seoulScopePolicy;
 
     @Override
     public String getSourceCode() {
@@ -61,6 +63,13 @@ public class ForestryLandslideNormalizer implements Normalizer {
             for (JsonNode item : items) {
                 try {
                     metrics.incrementDisasterAlertReceived(getSourceCode());
+                    String sourceRegion = item.path("PRV_AREA_NM").asText("서울특별시");
+
+                    if (!seoulScopePolicy.isInScope(sourceRegion)) {
+                        log.debug("[FORESTRY_LANDSLIDE] non-Seoul region={} — skip", sourceRegion);
+                        continue;
+                    }
+
                     OffsetDateTime issuedAt = parseDateTime(item.path("STD_DT").asText());
 
                     if (disasterAlertRepo.existsBySourceAndIssuedAt(getSourceCode(), issuedAt)) {
@@ -68,14 +77,13 @@ public class ForestryLandslideNormalizer implements Normalizer {
                     }
 
                     String riskGrade = item.path("RISK_GRADE").asText("");
-                    String sourceRegion = item.path("PRV_AREA_NM").asText("서울특별시");
 
                     DisasterAlert alert = new DisasterAlert();
                     alert.setSource(getSourceCode());
                     alert.setRawType("산사태위험");
                     alert.setDisasterType(DISASTER_TYPE);
                     alert.setSourceRegion(sourceRegion);
-                    alert.setRegion(sourceRegion);
+                    alert.setRegion(REGION);
                     alert.setRawLevel(riskGrade);
                     alert.setRawLevelTokens(toJsonArray(List.of(riskGrade)));
                     alert.setLevel(mapLevel(riskGrade));
@@ -119,10 +127,11 @@ public class ForestryLandslideNormalizer implements Normalizer {
             DisasterDataCollectedEvent event = new DisasterDataCollectedEvent(
                 traceId, DISASTER_TYPE, REGION, affectedAlertIds, false, completedAt);
             cacheEventPublisher.publish(event, QUEUE);
-            metrics.incrementSqsPublish(getSourceCode());
+            metrics.incrementSqsPublish(getSourceCode(), QUEUE, EVENT_TYPE);
         } catch (Exception e) {
-            metrics.incrementSqsPublishFailure(getSourceCode());
-            log.error("[FORESTRY_LANDSLIDE] event publish failed alertIds={}", affectedAlertIds, e);
+            metrics.incrementSqsPublishFailure(getSourceCode(), QUEUE, EVENT_TYPE);
+            log.error("[FORESTRY_LANDSLIDE] event publish failed — traceId={} collectionType={} region={} alertIds={} completedAt={}",
+                traceId, DISASTER_TYPE, REGION, affectedAlertIds, completedAt, e);
         }
     }
 
