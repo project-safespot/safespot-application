@@ -85,6 +85,20 @@ class DisasterAlertReadServiceTest {
     }
 
     @Test
+    void findAlerts_cacheMiss_rdsResultCappedAt50() {
+        when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+        List<DisasterAlert> rdsAlerts = java.util.stream.IntStream.rangeClosed(1, 51)
+                .mapToObj(i -> stubAlert(i, "FLOOD"))
+                .toList();
+        when(disasterAlertRepository.findAlerts(null, null)).thenReturn(rdsAlerts);
+
+        List<DisasterAlertItem> result = disasterAlertReadService.findAlerts(null, null);
+
+        assertThat(result).hasSize(50);
+    }
+
+    @Test
     void findAlerts_cacheMiss_suppressWindowPreventsDoublePublish() {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
@@ -177,7 +191,7 @@ class DisasterAlertReadServiceTest {
 
     private DisasterAlert stubAlert(long alertId, String disasterType) {
         DisasterAlert alert = mock(DisasterAlert.class);
-        when(alert.getAlertId()).thenReturn(alertId);
+        lenient().when(alert.getAlertId()).thenReturn(alertId);
         lenient().when(alert.getDisasterType()).thenReturn(disasterType);
         lenient().when(alert.getRegion()).thenReturn("서울특별시");
         lenient().when(alert.getLevel()).thenReturn("주의");
