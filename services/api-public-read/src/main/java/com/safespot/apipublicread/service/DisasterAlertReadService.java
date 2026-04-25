@@ -15,6 +15,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
@@ -28,6 +31,9 @@ public class DisasterAlertReadService {
 
     static final String LIST_KEY = "disaster:messages:list:seoul";
     static final String DETAIL_KEY_PREFIX = "disaster:detail:";
+
+    private static final PageRequest FALLBACK_PAGE =
+            PageRequest.of(0, 50, Sort.by(Sort.Direction.DESC, "issuedAt"));
 
     private final DisasterAlertRepository disasterAlertRepository;
     private final RedisReadCache redisReadCache;
@@ -48,8 +54,8 @@ public class DisasterAlertReadService {
             cacheRegenerationPublisher.publish(LIST_KEY);
         }
 
-        return disasterAlertRepository.findAlerts(region, disasterType)
-                .stream().limit(50).map(this::toItem).toList();
+        return disasterAlertRepository.findAlerts(region, disasterType, FALLBACK_PAGE)
+                .stream().map(this::toItem).toList();
     }
 
     public DisasterLatestDto findLatest(String disasterType, String region) {

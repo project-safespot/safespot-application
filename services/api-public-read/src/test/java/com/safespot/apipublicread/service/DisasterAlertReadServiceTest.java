@@ -15,6 +15,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -54,7 +57,7 @@ class DisasterAlertReadServiceTest {
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).alertId()).isEqualTo(56L);
-        verify(disasterAlertRepository, never()).findAlerts(any(), any());
+        verify(disasterAlertRepository, never()).findAlerts(any(), any(), any());
         verify(cacheRegenerationPublisher, never()).publish(any());
     }
 
@@ -66,7 +69,7 @@ class DisasterAlertReadServiceTest {
         List<DisasterAlertItem> result = disasterAlertReadService.findAlerts(null, null);
 
         assertThat(result).hasSize(2);
-        verify(disasterAlertRepository, never()).findAlerts(any(), any());
+        verify(disasterAlertRepository, never()).findAlerts(any(), any(), any());
     }
 
     @Test
@@ -74,7 +77,8 @@ class DisasterAlertReadServiceTest {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
         DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
-        when(disasterAlertRepository.findAlerts("서울특별시", "EARTHQUAKE")).thenReturn(List.of(alert));
+        when(disasterAlertRepository.findAlerts(eq("서울특별시"), eq("EARTHQUAKE"), any(PageRequest.class)))
+                .thenReturn(List.of(alert));
         when(suppressWindowService.tryPublish(LIST_KEY)).thenReturn(true);
 
         List<DisasterAlertItem> result = disasterAlertReadService.findAlerts("서울특별시", "EARTHQUAKE");
@@ -85,24 +89,27 @@ class DisasterAlertReadServiceTest {
     }
 
     @Test
-    void findAlerts_cacheMiss_rdsResultCappedAt50() {
+    void findAlerts_cacheMiss_repositoryCalledWithPageableAndReturns50() {
+        PageRequest expectedPage = PageRequest.of(0, 50, Sort.by(Sort.Direction.DESC, "issuedAt"));
+
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
-        List<DisasterAlert> rdsAlerts = java.util.stream.IntStream.rangeClosed(1, 51)
+        List<DisasterAlert> rdsAlerts = java.util.stream.IntStream.rangeClosed(1, 50)
                 .mapToObj(i -> stubAlert(i, "FLOOD"))
                 .toList();
-        when(disasterAlertRepository.findAlerts(null, null)).thenReturn(rdsAlerts);
+        when(disasterAlertRepository.findAlerts(null, null, expectedPage)).thenReturn(rdsAlerts);
 
         List<DisasterAlertItem> result = disasterAlertReadService.findAlerts(null, null);
 
         assertThat(result).hasSize(50);
+        verify(disasterAlertRepository).findAlerts(null, null, expectedPage);
     }
 
     @Test
     void findAlerts_cacheMiss_suppressWindowPreventsDoublePublish() {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
-        when(disasterAlertRepository.findAlerts(any(), any())).thenReturn(List.of());
+        when(disasterAlertRepository.findAlerts(any(), any(), any(PageRequest.class))).thenReturn(List.of());
         when(suppressWindowService.tryPublish(LIST_KEY)).thenReturn(false);
 
         disasterAlertReadService.findAlerts(null, null);
