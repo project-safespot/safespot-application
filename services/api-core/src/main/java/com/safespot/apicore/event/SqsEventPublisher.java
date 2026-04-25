@@ -12,9 +12,20 @@ import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
+import java.time.OffsetDateTime;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+/**
+ * MVP event publisher with local NDJSON fallback on permanent failure.
+ *
+ * ARCHITECTURAL GAP: This is NOT a transactional outbox.
+ * - Permanent SQS failures after retries write a full envelope to a local NDJSON file.
+ * - The file enables manual replay via EventPublishReplayService.
+ * - Records in memory at JVM crash time are still lost.
+ * - Multi-node deployments require shared fallback storage or proper outbox.
+ * Target architecture: lightweight transactional outbox table (separate PR).
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -26,6 +37,7 @@ public class SqsEventPublisher {
     private final ObjectMapper objectMapper;
     private final Environment environment;
     private final ApiCoreMetrics metrics;
+    private final EventPublishFailureWriter failureWriter;
 
     @Autowired(required = false)
     private SqsClient sqsClient;
@@ -99,17 +111,37 @@ public class SqsEventPublisher {
                             attempt + 1, MAX_RETRIES + 1, BACKOFF_MS[attempt],
                             envelope.getEventType(), envelope.getEventId(), e);
                 } else {
-                    // GAP: durable publish not implemented. Contract requires replayable storage or
-                    // failure channel on permanent publish failure (docs/event/event-envelope.md §2).
-                    // Current behavior: event is lost. Do not promote this to completed behavior.
-                    log.error("[SQS] publish permanently failed after {} attempts — event lost, manual recovery required: " +
-                                    "eventId={} eventType={} idempotencyKey={} producer={}",
-                            MAX_RETRIES + 1, envelope.getEventId(), envelope.getEventType(),
-                            envelope.getIdempotencyKey(), envelope.getProducer(), e);
-                    metrics.incSqsPublish(envelope.getEventType(), "failure", queueName);
+                    handlePermanentFailure(envelope, body, queueName, e);
                 }
             }
         }
+    }
+
+    private void handlePermanentFailure(EventEnvelope<?> envelope, String body,
+                                        String queueName, Exception lastException) {
+        metrics.incSqsPublish(envelope.getEventType(), "failure", queueName);
+        metrics.incSqsPublishPermanentFailure(envelope.getEventType(), queueName);
+
+        // Structured log — contains full envelope for log-based replay if NDJSON write fails.
+        log.error("[sqs_publish_permanent_failure] eventId={} eventType={} idempotencyKey={} " +
+                        "traceId={} queueName={} failedAt={} retryCount={} lastError={} replayableEnvelope={}",
+                envelope.getEventId(), envelope.getEventType(), envelope.getIdempotencyKey(),
+                envelope.getTraceId(), queueName, OffsetDateTime.now(),
+                MAX_RETRIES + 1, lastException.getMessage(), body, lastException);
+
+        EventPublishFailureRecord record = EventPublishFailureRecord.builder()
+                .eventId(envelope.getEventId())
+                .eventType(envelope.getEventType())
+                .idempotencyKey(envelope.getIdempotencyKey())
+                .traceId(envelope.getTraceId())
+                .queueName(queueName)
+                .failedAt(OffsetDateTime.now())
+                .retryCount(MAX_RETRIES + 1)
+                .lastError(lastException.getMessage())
+                .replayableEnvelope(body)
+                .build();
+
+        failureWriter.write(record);
     }
 
     private String resolveQueueName() {
