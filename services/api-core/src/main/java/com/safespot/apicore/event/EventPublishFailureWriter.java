@@ -52,13 +52,13 @@ public class EventPublishFailureWriter {
             }
             Files.writeString(failurePath, line, StandardCharsets.UTF_8,
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-            log.info("[SQS-FALLBACK] failure record persisted: eventId={} file={}",
-                    record.getEventId(), failurePath);
+            log.info("[SQS-FALLBACK] failure record persisted: eventId={} eventType={} file={}",
+                    record.getEventId(), record.getEventType(), failurePath);
             metrics.incSqsPublishFallbackPersist("success");
         } catch (Exception e) {
             // File write failure must never propagate to caller.
-            log.error("[SQS-FALLBACK] failed to persist failure record: eventId={} file={} error={}",
-                    record.getEventId(), failurePath, e.getMessage());
+            log.error("[SQS-FALLBACK] failed to persist failure record: eventId={} eventType={} file={} error={}",
+                    record.getEventId(), record.getEventType(), failurePath, e.getMessage());
             metrics.incSqsPublishFallbackPersist("failure");
         }
     }
