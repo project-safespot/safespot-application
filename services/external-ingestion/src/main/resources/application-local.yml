@@ -21,3 +21,12 @@ spring:
 
 server:
   port: 8082
+
+# LocalStack SQS 수동 검증 (필요 시 주석 해제):
+# ingestion:
+#   sqs:
+#     enabled: true
+#     endpoint-override: http://localhost:4566
+#     disaster-cache-queue-url: http://localhost:4566/000000000000/disaster-cache
+#     environment-cache-queue-url: http://localhost:4566/000000000000/environment-cache
+# LocalStack 큐 생성: aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name disaster-cache

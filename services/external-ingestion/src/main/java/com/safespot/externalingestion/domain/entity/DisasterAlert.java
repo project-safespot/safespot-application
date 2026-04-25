@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 
@@ -34,7 +36,8 @@ public class DisasterAlert {
     @Column(name = "disaster_type", nullable = false, length = 20)
     private String disasterType;
 
-    // PostgreSQL: jsonb (V1 Flyway migration). columnDefinition="text" here is for H2 ddl-auto compatibility only.
+    // PostgreSQL: jsonb (V1 Flyway migration). columnDefinition="text" for H2 ddl-auto compatibility only.
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "raw_category_tokens", columnDefinition = "text")
     private String rawCategoryTokens;
 
@@ -44,7 +47,8 @@ public class DisasterAlert {
     @Column(name = "raw_level", length = 100)
     private String rawLevel;
 
-    // PostgreSQL: jsonb (V1 Flyway migration). columnDefinition="text" here is for H2 ddl-auto compatibility only.
+    // PostgreSQL: jsonb (V1 Flyway migration). columnDefinition="text" for H2 ddl-auto compatibility only.
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "raw_level_tokens", columnDefinition = "text")
     private String rawLevelTokens;
 
