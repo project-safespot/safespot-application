@@ -40,6 +40,7 @@ import java.util.List;
 public class KmaEarthquakeNormalizer implements Normalizer {
 
     private static final String QUEUE = "disaster-collection";
+    private static final String EVENT_TYPE = "DisasterDataCollected";
     private static final String REGION = "seoul";
     private static final String DISASTER_TYPE = "EARTHQUAKE";
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
@@ -50,6 +51,7 @@ public class KmaEarthquakeNormalizer implements Normalizer {
     private final CacheEventPublisher cacheEventPublisher;
     private final IngestionMetrics metrics;
     private final ObjectMapper objectMapper;
+    private final SeoulScopePolicy seoulScopePolicy;
 
     @Override
     public String getSourceCode() {
@@ -74,6 +76,13 @@ public class KmaEarthquakeNormalizer implements Normalizer {
             for (JsonNode item : items) {
                 try {
                     metrics.incrementDisasterAlertReceived(getSourceCode());
+                    String sourceRegion = item.path("EQ_REG").asText("서울특별시");
+
+                    if (!seoulScopePolicy.isInScope(sourceRegion)) {
+                        log.debug("[KMA_EARTHQUAKE] non-Seoul region={} — skip", sourceRegion);
+                        continue;
+                    }
+
                     OffsetDateTime issuedAt = parseDateTime(item.path("TM_FC").asText());
 
                     if (disasterAlertRepo.existsBySourceAndIssuedAt(getSourceCode(), issuedAt)) {
@@ -82,14 +91,13 @@ public class KmaEarthquakeNormalizer implements Normalizer {
                     }
 
                     String rawLevelStr = item.path("WARN_VAL").asText("");
-                    String sourceRegion = item.path("EQ_REG").asText("서울특별시");
 
                     DisasterAlert alert = new DisasterAlert();
                     alert.setSource(getSourceCode());
                     alert.setRawType("지진");
                     alert.setDisasterType(DISASTER_TYPE);
                     alert.setSourceRegion(sourceRegion);
-                    alert.setRegion(sourceRegion);
+                    alert.setRegion(REGION);
                     alert.setRawLevel(rawLevelStr);
                     alert.setRawLevelTokens(toJsonArray(List.of(rawLevelStr)));
                     alert.setLevel(mapLevel(rawLevelStr));
@@ -162,10 +170,11 @@ public class KmaEarthquakeNormalizer implements Normalizer {
             DisasterDataCollectedEvent event = new DisasterDataCollectedEvent(
                 traceId, DISASTER_TYPE, REGION, affectedAlertIds, false, completedAt);
             cacheEventPublisher.publish(event, QUEUE);
-            metrics.incrementSqsPublish(getSourceCode());
+            metrics.incrementSqsPublish(getSourceCode(), QUEUE, EVENT_TYPE);
         } catch (Exception e) {
-            metrics.incrementSqsPublishFailure(getSourceCode());
-            log.error("[KMA_EARTHQUAKE] event publish failed alertIds={}", affectedAlertIds, e);
+            metrics.incrementSqsPublishFailure(getSourceCode(), QUEUE, EVENT_TYPE);
+            log.error("[KMA_EARTHQUAKE] event publish failed — traceId={} collectionType={} region={} alertIds={} completedAt={}",
+                traceId, DISASTER_TYPE, REGION, affectedAlertIds, completedAt, e);
         }
     }
 

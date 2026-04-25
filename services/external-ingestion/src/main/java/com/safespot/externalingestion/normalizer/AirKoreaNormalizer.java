@@ -123,10 +123,11 @@ public class AirKoreaNormalizer implements Normalizer {
             EnvironmentDataCollectedEvent event = new EnvironmentDataCollectedEvent(
                 traceId, COLLECTION_TYPE, REGION, timeWindow, completedAt);
             cacheEventPublisher.publish(event, QUEUE);
-            metrics.incrementSqsPublish(getSourceCode());
+            metrics.incrementSqsPublish(getSourceCode(), QUEUE, "EnvironmentDataCollected");
         } catch (Exception e) {
-            metrics.incrementSqsPublishFailure(getSourceCode());
-            log.error("[AIR_KOREA] event publish failed", e);
+            metrics.incrementSqsPublishFailure(getSourceCode(), QUEUE, "EnvironmentDataCollected");
+            log.error("[AIR_KOREA] event publish failed — traceId={} collectionType={} region={} timeWindow={} completedAt={}",
+                traceId, COLLECTION_TYPE, REGION, timeWindow, completedAt, e);
         }
     }
 

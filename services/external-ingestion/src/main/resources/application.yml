@@ -20,6 +20,8 @@ management:
 ingestion:
   sqs:
     enabled: false
+    region: ap-northeast-2
+    endpoint-override: ""
     normalization-queue-url: ""
     disaster-cache-queue-url: ""
     environment-cache-queue-url: ""

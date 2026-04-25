@@ -83,7 +83,8 @@ class IngestionIntegrationTest {
             "WARNING".equals(a.getLevel()) &&
             Integer.valueOf(3).equals(a.getLevelRank()) &&
             Boolean.TRUE.equals(a.getIsInScope()) &&
-            "서울특별시".equals(a.getRegion())
+            "seoul".equals(a.getRegion()) &&
+            "서울특별시".equals(a.getSourceRegion())
         );
     }
 

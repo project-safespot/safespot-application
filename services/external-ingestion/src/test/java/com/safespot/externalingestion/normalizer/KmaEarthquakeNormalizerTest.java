@@ -36,7 +36,7 @@ class KmaEarthquakeNormalizerTest {
     void setUp() {
         ObjectMapper om = new ObjectMapper().registerModule(new JavaTimeModule());
         IngestionMetrics metrics = new IngestionMetrics(new SimpleMeterRegistry());
-        normalizer = new KmaEarthquakeNormalizer(disasterAlertRepo, detailRepo, cacheEventPublisher, metrics, om);
+        normalizer = new KmaEarthquakeNormalizer(disasterAlertRepo, detailRepo, cacheEventPublisher, metrics, om, new SeoulScopePolicy());
     }
 
     @Test
@@ -112,6 +112,47 @@ class KmaEarthquakeNormalizerTest {
         verify(disasterAlertRepo).delete(saved);
         // cache event must NOT fire
         verify(cacheEventPublisher, never()).publish(any(), any());
+    }
+
+    @Test
+    void normalize_nonSeoulRegion_skipsInsert() {
+        ExternalApiRawPayload raw = buildRaw("""
+            {"response":{"body":{"items":{"item":[
+              {"TM_FC":"202604211000","EQ_REG":"부산광역시",
+               "EQ_MAG":"3.5","EQ_DPT":"10","EQ_LOC":"부산 북부 10km",
+               "JDG_INTS":"진도2","WARN_VAL":"주의"}
+            ]}}}}
+            """);
+
+        NormalizationResult result = normalizer.normalize(raw);
+
+        assertThat(result.getSucceeded()).isEqualTo(0);
+        verify(disasterAlertRepo, never()).save(any());
+        verify(cacheEventPublisher, never()).publish(any(), any());
+    }
+
+    @Test
+    void normalize_seoulAlert_usesCanonicalRegion() {
+        ExternalApiRawPayload raw = buildRaw("""
+            {"response":{"body":{"items":{"item":[
+              {"TM_FC":"202604211100","EQ_REG":"서울특별시",
+               "EQ_MAG":"2.1","EQ_DPT":"5","EQ_LOC":"서울 중구",
+               "JDG_INTS":"진도1","WARN_VAL":"관심"}
+            ]}}}}
+            """);
+
+        given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any(OffsetDateTime.class))).willReturn(false);
+        DisasterAlert saved = new DisasterAlert();
+        saved.setAlertId(5L);
+        saved.setDisasterType("EARTHQUAKE");
+        given(disasterAlertRepo.save(any(DisasterAlert.class))).willReturn(saved);
+
+        normalizer.normalize(raw);
+
+        verify(disasterAlertRepo).save(argThat(a ->
+            "seoul".equals(a.getRegion()) &&
+            "서울특별시".equals(a.getSourceRegion())
+        ));
     }
 
     private ExternalApiRawPayload buildRaw(String body) {

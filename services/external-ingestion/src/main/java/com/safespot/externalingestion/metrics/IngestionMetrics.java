@@ -101,16 +101,20 @@ public class IngestionMetrics {
             .increment();
     }
 
-    public void incrementSqsPublish(String source) {
+    public void incrementSqsPublish(String source, String queueName, String eventType) {
         Counter.builder("ingestion_sqs_publish_total")
             .tag("source", source)
+            .tag("queue_name", queueName)
+            .tag("event_type", eventType)
             .register(registry)
             .increment();
     }
 
-    public void incrementSqsPublishFailure(String source) {
+    public void incrementSqsPublishFailure(String source, String queueName, String eventType) {
         Counter.builder("ingestion_sqs_publish_failure_total")
             .tag("source", source)
+            .tag("queue_name", queueName)
+            .tag("event_type", eventType)
             .register(registry)
             .increment();
     }
