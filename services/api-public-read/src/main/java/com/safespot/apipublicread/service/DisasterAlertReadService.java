@@ -49,7 +49,7 @@ public class DisasterAlertReadService {
         }
 
         return disasterAlertRepository.findAlerts(region, disasterType)
-                .stream().map(this::toItem).toList();
+                .stream().limit(50).map(this::toItem).toList();
     }
 
     public DisasterLatestDto findLatest(String disasterType, String region) {
