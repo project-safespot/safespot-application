@@ -36,6 +36,7 @@ import java.util.List;
 public class SeoulEarthquakeNormalizer implements Normalizer {
 
     private static final String QUEUE = "disaster-collection";
+    private static final String EVENT_TYPE = "DisasterDataCollected";
     private static final String REGION = "seoul";
     private static final String DISASTER_TYPE = "EARTHQUAKE";
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
@@ -45,6 +46,7 @@ public class SeoulEarthquakeNormalizer implements Normalizer {
     private final CacheEventPublisher cacheEventPublisher;
     private final IngestionMetrics metrics;
     private final ObjectMapper objectMapper;
+    private final SeoulScopePolicy seoulScopePolicy;
 
     @Override
     public String getSourceCode() {
@@ -66,6 +68,13 @@ public class SeoulEarthquakeNormalizer implements Normalizer {
             for (JsonNode row : rows) {
                 try {
                     metrics.incrementDisasterAlertReceived(getSourceCode());
+                    String sourceRegion = row.path("OCCR_PLC").asText("서울특별시");
+
+                    if (!seoulScopePolicy.isInScope(sourceRegion)) {
+                        log.debug("[SEOUL_EARTHQUAKE] non-Seoul location={} — skip", sourceRegion);
+                        continue;
+                    }
+
                     OffsetDateTime issuedAt = parseDateTime(row.path("OCCR_DT").asText());
 
                     if (disasterAlertRepo.existsBySourceAndIssuedAt(getSourceCode(), issuedAt)) {
@@ -73,7 +82,6 @@ public class SeoulEarthquakeNormalizer implements Normalizer {
                         continue;
                     }
 
-                    String sourceRegion = row.path("OCCR_PLC").asText("서울특별시");
                     String magnitude = row.path("MAGNTD_1").asText("");
                     String intensity = row.path("INTENSITY").asText("");
 
@@ -82,7 +90,7 @@ public class SeoulEarthquakeNormalizer implements Normalizer {
                     alert.setRawType("지진");
                     alert.setDisasterType(DISASTER_TYPE);
                     alert.setSourceRegion(sourceRegion);
-                    alert.setRegion(sourceRegion);
+                    alert.setRegion(REGION);
                     alert.setRawLevel("기본");
                     alert.setRawLevelTokens(toJsonArray(List.of("기본")));
                     alert.setLevel("INTEREST");
@@ -125,10 +133,11 @@ public class SeoulEarthquakeNormalizer implements Normalizer {
             DisasterDataCollectedEvent event = new DisasterDataCollectedEvent(
                 traceId, DISASTER_TYPE, REGION, affectedAlertIds, false, completedAt);
             cacheEventPublisher.publish(event, QUEUE);
-            metrics.incrementSqsPublish(getSourceCode());
+            metrics.incrementSqsPublish(getSourceCode(), QUEUE, EVENT_TYPE);
         } catch (Exception e) {
-            metrics.incrementSqsPublishFailure(getSourceCode());
-            log.error("[SEOUL_EARTHQUAKE] event publish failed alertIds={}", affectedAlertIds, e);
+            metrics.incrementSqsPublishFailure(getSourceCode(), QUEUE, EVENT_TYPE);
+            log.error("[SEOUL_EARTHQUAKE] event publish failed — traceId={} collectionType={} region={} alertIds={} completedAt={}",
+                traceId, DISASTER_TYPE, REGION, affectedAlertIds, completedAt, e);
         }
     }
 
