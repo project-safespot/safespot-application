@@ -33,6 +33,8 @@ class EnvironmentControllerTest {
         lenient().when(regionToGridResolver.isSupported("서울특별시")).thenReturn(true);
         lenient().when(regionToGridResolver.isSupported("서울")).thenReturn(true);
         lenient().when(regionToGridResolver.isSupported("부산광역시")).thenReturn(false);
+        lenient().when(regionToGridResolver.isSupported("종로구")).thenReturn(true);
+        lenient().when(regionToGridResolver.isSupported("해운대구")).thenReturn(false);
         lenient().when(regionToGridResolver.isSupportedGrid(60, 127)).thenReturn(true);
         lenient().when(regionToGridResolver.isSupportedGrid(10, 10)).thenReturn(false);
     }
@@ -111,5 +113,19 @@ class EnvironmentControllerTest {
         mockMvc.perform(get("/air-quality"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"));
+    }
+
+    @Test
+    void getAirQuality_nonSeoulRegion_returns400() throws Exception {
+        mockMvc.perform(get("/air-quality").param("region", "부산광역시"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("UNSUPPORTED_REGION"));
+    }
+
+    @Test
+    void getAirQuality_nonSeoulStationName_returns400() throws Exception {
+        mockMvc.perform(get("/air-quality").param("stationName", "해운대구"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("UNSUPPORTED_REGION"));
     }
 }
