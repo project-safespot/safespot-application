@@ -97,7 +97,7 @@ CREATE TABLE disaster_alert (
     -- JSONB: JSON arrays stored as jsonb for indexing and validation
     raw_level_tokens     JSONB,
     level                VARCHAR(10),
-    level_rank           INT,
+    level_rank           SMALLINT,
     region               VARCHAR(100) NOT NULL,
     source_region        VARCHAR(100),
     message              TEXT         NOT NULL,

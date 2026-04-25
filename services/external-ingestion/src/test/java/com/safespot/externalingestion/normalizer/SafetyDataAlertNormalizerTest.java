@@ -68,7 +68,12 @@ class SafetyDataAlertNormalizerTest {
             Boolean.TRUE.equals(a.getIsInScope()) &&
             "홍수".equals(a.getRawType()) &&
             "seoul".equals(a.getRegion()) &&
-            "서울특별시".equals(a.getSourceRegion())
+            "서울특별시".equals(a.getSourceRegion()) &&
+            // raw token fields must be stored as valid JSON arrays
+            a.getRawCategoryTokens() != null &&
+            a.getRawCategoryTokens().startsWith("[") && a.getRawCategoryTokens().endsWith("]") &&
+            a.getRawLevelTokens() != null &&
+            a.getRawLevelTokens().startsWith("[") && a.getRawLevelTokens().endsWith("]")
         ));
         verify(cacheEventPublisher).publish(any(), eq("disaster-collection"));
     }
