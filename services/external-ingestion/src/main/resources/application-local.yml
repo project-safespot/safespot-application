@@ -8,6 +8,8 @@ spring:
     console:
       enabled: true
       path: /h2-console
+  flyway:
+    enabled: false   # H2 does not support jsonb; schema managed by ddl-auto:update
   jpa:
     hibernate:
       ddl-auto: update
