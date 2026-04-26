@@ -127,17 +127,19 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
             return IngestionResult.success(itemCount);
 
         } catch (ExternalApiException e) {
+            String safeMsg = redactKey(e.getMessage());
             metrics.incrementApiFailure(getSourceCode(), e.getErrorType().name().toLowerCase());
             transactionTemplate.executeWithoutResult(
-                tx -> finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, e.getErrorType().name(), e.getMessage(), e.getHttpStatus()));
-            log.error("[{}] traceId={} api error type={} msg={}", getSourceCode(), traceId, e.getErrorType(), e.getMessage());
-            return IngestionResult.failed(e.getMessage());
+                tx -> finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, e.getErrorType().name(), safeMsg, e.getHttpStatus()));
+            log.error("[{}] traceId={} api error type={} msg={}", getSourceCode(), traceId, e.getErrorType(), safeMsg);
+            return IngestionResult.failed(safeMsg);
         } catch (Exception e) {
+            String safeMsg = redactKey(e.getMessage());
             metrics.incrementSkipped(getSourceCode(), "error");
             transactionTemplate.executeWithoutResult(
-                tx -> finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, "INTERNAL_ERROR", e.getMessage(), null));
+                tx -> finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, "INTERNAL_ERROR", safeMsg, null));
             log.error("[{}] traceId={} internal error", getSourceCode(), traceId, e);
-            return IngestionResult.failed(e.getMessage());
+            return IngestionResult.failed(safeMsg);
         }
     }
 
@@ -156,7 +158,7 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
                 if (e.getErrorType() == ExternalApiException.ErrorType.CLIENT_ERROR) {
                     throw e; // no retry on 4xx
                 }
-                log.warn("[{}] traceId={} attempt={} error={}", getSourceCode(), traceId, attempt + 1, e.getMessage());
+                log.warn("[{}] traceId={} attempt={} error={}", getSourceCode(), traceId, attempt + 1, redactKey(e.getMessage()));
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
                 throw new ExternalApiException("interrupted", ExternalApiException.ErrorType.NETWORK, null, ie);
@@ -255,6 +257,17 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
                 }
             }
         }
+    }
+
+    /**
+     * 예외 메시지에서 이 핸들러의 API 인증키를 마스킹한다.
+     * path key / query key 모두 치환한다. key가 null이거나 비어 있으면 원본을 반환한다.
+     */
+    protected String redactKey(String message) {
+        if (message == null) return null;
+        String key = getProviderApiKey();
+        if (key == null || key.isBlank()) return message;
+        return message.replace(key, "***");
     }
 
     protected static String sha256(String input) {

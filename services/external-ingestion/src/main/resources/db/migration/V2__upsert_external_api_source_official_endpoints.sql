@@ -11,7 +11,7 @@ VALUES
     ('AIR_KOREA_AIR_QUALITY',   '대기질',                '에어코리아',  'ENVIRONMENT', 'API_KEY', 'https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty',                TRUE, NOW(), NOW()),
     ('SEOUL_SHELTER_EARTHQUAKE','서울시 지진옥외대피소',    '서울시',     'SHELTER',     'API_KEY', 'http://openapi.seoul.go.kr:8088/{KEY}/json/TlEtqkP/1/1000/',                                   TRUE, NOW(), NOW()),
     ('SEOUL_SHELTER_LANDSLIDE', '서울시 산사태 대피소',    'odcloud',   'SHELTER',     'API_KEY', 'https://api.odcloud.kr/api/15118898/v1/uddi:19815091-0f2c-4d7a-a77f-96cec77038ad',             TRUE, NOW(), NOW()),
-    ('SEOUL_SHELTER_FLOOD',     '서울시 수해 대피소',      '서울시',     'SHELTER',     'FILE',    NULL,                                                                                           TRUE, NOW(), NOW())
+    ('SEOUL_SHELTER_FLOOD',     '서울시 수해 대피소',      '서울시',     'SHELTER',     'FILE',    NULL,                                                                                           FALSE, NOW(), NOW())
 ON CONFLICT (source_code) DO UPDATE SET
     source_name = EXCLUDED.source_name,
     provider    = EXCLUDED.provider,

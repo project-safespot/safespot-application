@@ -1,5 +1,6 @@
 package com.safespot.externalingestion.scheduler;
 
+import com.safespot.externalingestion.handler.groupa1.SeoulEarthquakeHandler;
 import com.safespot.externalingestion.handler.groupa2.AirKoreaAirQualityHandler;
 import com.safespot.externalingestion.handler.groupa2.KmaWeatherHandler;
 import com.safespot.externalingestion.handler.groupb.SeoulShelterEarthquakeHandler;
@@ -25,6 +26,7 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class CronJobScheduler {
 
+    private final SeoulEarthquakeHandler seoulEarthquakeHandler;
     private final KmaWeatherHandler kmaWeatherHandler;
     private final AirKoreaAirQualityHandler airKoreaAirQualityHandler;
     private final SeoulShelterEarthquakeHandler seoulShelterEarthquakeHandler;
@@ -32,6 +34,14 @@ public class CronJobScheduler {
     private final NormalizationQueue normalizationQueue;
     private final NormalizationService normalizationService;
     private final IngestionMetrics metrics;
+
+    /** SEOUL_EARTHQUAKE: 매일 06:00 (cron: 0 6 * * *) */
+    @Scheduled(cron = "${ingestion.schedule.seoul-earthquake-cron:0 0 6 * * *}")
+    public void collectSeoulEarthquake() {
+        log.info("[CronJob] SEOUL_EARTHQUAKE start");
+        seoulEarthquakeHandler.execute();
+        drainQueue();
+    }
 
     /** KMA_WEATHER: 매시 정각 (cron: 0 * * * *) */
     @Scheduled(cron = "${ingestion.schedule.kma-weather-cron:0 0 * * * *}")

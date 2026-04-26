@@ -39,7 +39,7 @@ public class DataInitializer implements ApplicationRunner {
             new SourceSeed("AIR_KOREA_AIR_QUALITY",   "대기질",            "에어코리아","ENVIRONMENT", "API_KEY", true,  "https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty"),
             new SourceSeed("SEOUL_SHELTER_EARTHQUAKE","서울시 지진옥외대피소","서울시",  "SHELTER",     "API_KEY", true,  "http://openapi.seoul.go.kr:8088/{KEY}/json/TlEtqkP/1/1000/"),
             new SourceSeed("SEOUL_SHELTER_LANDSLIDE", "서울시 산사태 대피소","odcloud",  "SHELTER",     "API_KEY", true,  "https://api.odcloud.kr/api/15118898/v1/uddi:19815091-0f2c-4d7a-a77f-96cec77038ad"),
-            new SourceSeed("SEOUL_SHELTER_FLOOD",     "서울시 수해 대피소", "서울시",    "SHELTER",     "FILE",    true,  null)
+            new SourceSeed("SEOUL_SHELTER_FLOOD",     "서울시 수해 대피소", "서울시",    "SHELTER",     "FILE",    false, null)
         );
 
         for (SourceSeed s : seeds) {

@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -40,19 +41,27 @@ public class KmaWeatherHandler extends AbstractIngestionHandler {
         return apiKey;
     }
 
+    /**
+     * 초단기실황 base_date/base_time 결정 정책:
+     * - minute < 45 → 1시간 전 HH:00 (데이터 미발표 구간 회피)
+     * - minute >= 45 → 현재 HH:00
+     * - 00:00~00:44 → 전날 23:00 자동 처리 (minusHours(1))
+     */
+    static LocalDateTime resolveBaseDateTime(LocalDateTime now) {
+        LocalDateTime truncated = now.truncatedTo(ChronoUnit.HOURS);
+        return now.getMinute() < 45 ? truncated.minusHours(1) : truncated;
+    }
+
     @Override
     protected Map<String, String> buildRequestParams() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime base = resolveBaseDateTime(LocalDateTime.now());
         Map<String, String> params = new HashMap<>();
         params.put("ServiceKey", apiKey);
         params.put("pageNo", "1");
         params.put("numOfRows", "1000");
         params.put("dataType", "JSON");
-        params.put("base_date", now.format(DateTimeFormatter.ofPattern("yyyyMMdd")));
-        // TODO: 초단기실황 base_time은 매시 HHmm 형식. 현재 0500 고정으로
-        //  polling 시각 기준 최신 실황 회차를 조회하지 못할 수 있음.
-        //  운영 전 polling 시각 기준으로 직전 정시를 동적 선택하는 로직 추가 필요.
-        params.put("base_time", "0500");
+        params.put("base_date", base.format(DateTimeFormatter.ofPattern("yyyyMMdd")));
+        params.put("base_time", base.format(DateTimeFormatter.ofPattern("HHmm")));
         params.put("nx", DEFAULT_NX);
         params.put("ny", DEFAULT_NY);
         return params;

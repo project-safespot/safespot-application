@@ -1,5 +1,8 @@
 package com.safespot.externalingestion.handler;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safespot.externalingestion.client.ExternalApiClient;
 import com.safespot.externalingestion.client.ExternalApiException;
@@ -13,13 +16,15 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -145,6 +150,67 @@ class AbstractIngestionHandlerTest {
         verify(normalizationQueue, never()).publish(any());
     }
 
+    @Test
+    void execute_seoulPathKey_isRedactedFromAllFailurePaths() throws Exception {
+        String dummyKey = "TEST_SEOUL_KEY";
+        String template = "http://openapi.seoul.go.kr:8088/{KEY}/json/TbEqkKenvinfo/1/20/";
+
+        TestSeoulHandler seoulHandler = new TestSeoulHandler(dummyKey);
+        ReflectionTestUtils.setField(seoulHandler, "sourceRepo", sourceRepo);
+        ReflectionTestUtils.setField(seoulHandler, "executionLogRepo", executionLogRepo);
+        ReflectionTestUtils.setField(seoulHandler, "rawPayloadRepo", rawPayloadRepo);
+        ReflectionTestUtils.setField(seoulHandler, "normalizationQueue", normalizationQueue);
+        ReflectionTestUtils.setField(seoulHandler, "externalApiClient", externalApiClient);
+        ReflectionTestUtils.setField(seoulHandler, "metrics", new IngestionMetrics(new SimpleMeterRegistry()));
+        ReflectionTestUtils.setField(seoulHandler, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(seoulHandler, "transactionTemplate", new TransactionTemplate(txManager));
+
+        ExternalApiSource source = new ExternalApiSource();
+        source.setSourceId(1L);
+        source.setSourceCode("SEOUL_TEST");
+        source.setBaseUrl(template);
+        source.setActive(true);
+
+        ExternalApiExecutionLog execLog = new ExternalApiExecutionLog();
+        execLog.setExecutionId(1L);
+
+        given(sourceRepo.findBySourceCode("SEOUL_TEST")).willReturn(Optional.of(source));
+        given(executionLogRepo.save(any())).willReturn(execLog);
+
+        String urlWithKey = template.replace("{KEY}", dummyKey);
+        given(externalApiClient.get(anyString(), any()))
+            .willThrow(new ExternalApiException(
+                "4xx from " + urlWithKey, ExternalApiException.ErrorType.CLIENT_ERROR, 400));
+
+        Logger logger = (Logger) LoggerFactory.getLogger(AbstractIngestionHandler.class);
+        ListAppender<ILoggingEvent> listAppender = new ListAppender<>();
+        listAppender.start();
+        logger.addAppender(listAppender);
+
+        IngestionResult result;
+        try {
+            result = seoulHandler.execute();
+        } finally {
+            logger.detachAppender(listAppender);
+        }
+
+        // IngestionResult.message must not contain the key
+        assertThat(result.getMessage()).doesNotContain(dummyKey);
+
+        // ExternalApiExecutionLog.errorMessage must not contain the key
+        ArgumentCaptor<ExternalApiExecutionLog> captor = ArgumentCaptor.forClass(ExternalApiExecutionLog.class);
+        verify(executionLogRepo, atLeastOnce()).save(captor.capture());
+        captor.getAllValues().stream()
+            .filter(l -> l.getErrorMessage() != null)
+            .forEach(l -> assertThat(l.getErrorMessage()).doesNotContain(dummyKey));
+
+        // Formatted log messages must not contain the key
+        List<String> formatted = listAppender.list.stream()
+            .map(ILoggingEvent::getFormattedMessage)
+            .toList();
+        formatted.forEach(msg -> assertThat(msg).doesNotContain(dummyKey));
+    }
+
     /** 테스트 전용 핸들러 stub */
     static class TestHandler extends AbstractIngestionHandler {
         private final boolean enabled;
@@ -156,5 +222,17 @@ class AbstractIngestionHandlerTest {
         @Override public boolean isEnabled() { return enabled; }
         @Override protected Map<String, String> buildRequestParams() { return Map.of("key", "val"); }
         @Override protected int countItems(String body) { return 1; }
+    }
+
+    static class TestSeoulHandler extends AbstractIngestionHandler {
+        private final String apiKey;
+
+        TestSeoulHandler(String apiKey) { this.apiKey = apiKey; }
+
+        @Override public String getSourceCode() { return "SEOUL_TEST"; }
+        @Override public String getProviderApiKey() { return apiKey; }
+        @Override protected String buildFinalUrl(String sourceUrl) { return sourceUrl.replace("{KEY}", apiKey); }
+        @Override protected Map<String, String> buildRequestParams() { return Map.of(); }
+        @Override protected int countItems(String body) { return 0; }
     }
 }
