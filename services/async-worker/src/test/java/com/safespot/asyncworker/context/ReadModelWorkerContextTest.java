@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 
 @SpringBootTest(classes = ReadModelWorkerApplication.class)
-@ActiveProfiles("readmodel-worker")
+@ActiveProfiles({"readmodel-worker", "test"})
 class ReadModelWorkerContextTest {
 
     @MockitoBean
