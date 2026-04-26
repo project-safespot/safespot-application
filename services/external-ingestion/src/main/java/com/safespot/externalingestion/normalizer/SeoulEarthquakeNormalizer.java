@@ -25,7 +25,7 @@ import java.util.List;
  * 서울시 지진 발생 현황 정규화 (SEOUL_EARTHQUAKE → disaster_alert)
  *
  * 예상 응답 구조:
- * {"ListEqkEq": {"row": [
+ * {"TbEqkKenvinfo": {"row": [
  *   {"OCCR_DT": "2026-04-21 10:05:00", "OCCR_PLC": "서울 서초구",
  *    "MAGNTD_1": "3.2", "DEPTH_KM": "8", "INTENSITY": "진도2"}
  * ]}}
@@ -62,7 +62,7 @@ public class SeoulEarthquakeNormalizer implements Normalizer {
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
-            JsonNode rows = root.path("ListEqkEq").path("row");
+            JsonNode rows = root.path("TbEqkKenvinfo").path("row");
             if (rows.isMissingNode() || rows.isEmpty()) return NormalizationResult.success(0);
 
             for (JsonNode row : rows) {

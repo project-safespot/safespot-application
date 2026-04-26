@@ -10,7 +10,7 @@ import java.util.Map;
 /**
  * 기상청 지진 정보 API (KMA_EARTHQUAKE)
  * 폴링 주기: 1분 | 일일 한도: 10,000회 (개발)
- * 정규화 대상: disaster_alert + disaster_alert_detail
+ * 정규화 대상: disaster_alert
  */
 @Component
 public class KmaEarthquakeHandler extends AbstractIngestionHandler {
@@ -24,6 +24,11 @@ public class KmaEarthquakeHandler extends AbstractIngestionHandler {
     }
 
     @Override
+    public String getProviderApiKey() {
+        return apiKey;
+    }
+
+    @Override
     protected int getRateLimitPerDay() {
         return 10000;
     }
@@ -31,7 +36,7 @@ public class KmaEarthquakeHandler extends AbstractIngestionHandler {
     @Override
     protected Map<String, String> buildRequestParams() {
         Map<String, String> params = new HashMap<>();
-        params.put("serviceKey", apiKey);
+        params.put("ServiceKey", apiKey);
         params.put("pageNo", "1");
         params.put("numOfRows", "10");
         params.put("dataType", "JSON");

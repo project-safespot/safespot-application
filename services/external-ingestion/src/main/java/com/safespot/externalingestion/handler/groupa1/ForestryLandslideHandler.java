@@ -35,6 +35,11 @@ public class ForestryLandslideHandler extends AbstractIngestionHandler {
     }
 
     @Override
+    public String getProviderApiKey() {
+        return apiKey;
+    }
+
+    @Override
     protected int getRateLimitPerDay() {
         return 10000;
     }
@@ -42,10 +47,10 @@ public class ForestryLandslideHandler extends AbstractIngestionHandler {
     @Override
     protected Map<String, String> buildRequestParams() {
         Map<String, String> params = new HashMap<>();
-        params.put("serviceKey", apiKey);
+        params.put("ServiceKey", apiKey);
         params.put("pageNo", "1");
         params.put("numOfRows", "50");
-        params.put("dataType", "JSON");
+        params.put("_type", "json");
         return params;
     }
 

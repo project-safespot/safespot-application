@@ -16,6 +16,7 @@ import com.safespot.externalingestion.repository.ExternalApiRawPayloadRepository
 import com.safespot.externalingestion.repository.ExternalApiSourceRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
@@ -39,6 +40,9 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
     @Autowired protected IngestionMetrics metrics;
     @Autowired protected ObjectMapper objectMapper;
     @Autowired protected TransactionTemplate transactionTemplate;
+
+    @Value("${ingestion.http.max-retries:3}")
+    private int maxRetries;
 
     private static final Set<String> SENSITIVE_PARAM_KEYS = Set.of(
         "servicekey", "key", "apikey", "authorization", "token"
@@ -87,7 +91,7 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
 
             Map<String, String> params = buildRequestParams();
             // Network call and retry sleep are intentionally outside any DB transaction.
-            String responseBody = callWithRetry(source.getBaseUrl(), params, traceId);
+            String responseBody = callWithRetry(buildFinalUrl(source.getBaseUrl()), params, traceId);
             dailyCallCount.incrementAndGet();
 
             long latency = System.currentTimeMillis() - fetchStart;
@@ -138,7 +142,6 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
     }
 
     private String callWithRetry(String url, Map<String, String> params, String traceId) throws ExternalApiException {
-        int maxRetries = 3;
         ExternalApiException lastEx = null;
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
             try {
@@ -160,6 +163,14 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
             }
         }
         throw lastEx;
+    }
+
+    protected String buildFinalUrl(String sourceUrl) {
+        return sourceUrl;
+    }
+
+    public String getProviderApiKey() {
+        return null;
     }
 
     protected abstract Map<String, String> buildRequestParams();

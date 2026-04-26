@@ -17,11 +17,14 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.*;
 
+// Tests use getUltraSrtNcst (초단기실황) response shape: obsrValue, no fcstDate/fcstTime
 @ExtendWith(MockitoExtension.class)
 class KmaWeatherNormalizerTest {
 
@@ -41,12 +44,12 @@ class KmaWeatherNormalizerTest {
     void normalize_multipleCategories_mergedAndSaved() {
         ExternalApiRawPayload raw = buildRaw("""
             {"response":{"body":{"items":{"item":[
-              {"baseDate":"20260421","baseTime":"0500","category":"TMP",
-               "fcstDate":"20260421","fcstTime":"0600","fcstValue":"15","nx":60,"ny":127},
-              {"baseDate":"20260421","baseTime":"0500","category":"SKY",
-               "fcstDate":"20260421","fcstTime":"0600","fcstValue":"1","nx":60,"ny":127},
-              {"baseDate":"20260421","baseTime":"0500","category":"POP",
-               "fcstDate":"20260421","fcstTime":"0600","fcstValue":"20","nx":60,"ny":127}
+              {"baseDate":"20260421","baseTime":"1000","category":"T1H",
+               "obsrValue":"15","nx":60,"ny":127},
+              {"baseDate":"20260421","baseTime":"1000","category":"REH",
+               "obsrValue":"60","nx":60,"ny":127},
+              {"baseDate":"20260421","baseTime":"1000","category":"WSD",
+               "obsrValue":"3.5","nx":60,"ny":127}
             ]}}}}
             """);
 
@@ -63,18 +66,39 @@ class KmaWeatherNormalizerTest {
         WeatherLog saved = captor.getValue();
         assertThat(saved.getNx()).isEqualTo(60);
         assertThat(saved.getNy()).isEqualTo(127);
-        assertThat(saved.getSky()).isEqualTo("맑음");
-        assertThat(saved.getPop()).isEqualTo(20);
+        assertThat(saved.getBaseTime()).isEqualTo("1000");
+        assertThat(saved.getTmp()).isEqualByComparingTo(new BigDecimal("15"));
+        assertThat(saved.getReh()).isEqualTo(60);
+        assertThat(saved.getWsd()).isEqualByComparingTo(new BigDecimal("3.5"));
 
         verify(cacheEventPublisher).publish(any(), any());
+    }
+
+    @Test
+    void normalize_ptyCategory_mapsToKorean() {
+        ExternalApiRawPayload raw = buildRaw("""
+            {"response":{"body":{"items":{"item":[
+              {"baseDate":"20260421","baseTime":"1000","category":"PTY",
+               "obsrValue":"1","nx":60,"ny":127}
+            ]}}}}
+            """);
+
+        given(weatherLogRepo.existsByNxAndNyAndBaseDateAndBaseTimeAndForecastDt(any(), any(), any(), any(), any()))
+            .willReturn(false);
+
+        normalizer.normalize(raw);
+
+        ArgumentCaptor<WeatherLog> captor = ArgumentCaptor.forClass(WeatherLog.class);
+        verify(weatherLogRepo).save(captor.capture());
+        assertThat(captor.getValue().getPty()).isEqualTo("비");
     }
 
     @Test
     void normalize_duplicateForecast_skipsInsert() {
         ExternalApiRawPayload raw = buildRaw("""
             {"response":{"body":{"items":{"item":[
-              {"baseDate":"20260421","baseTime":"0500","category":"TMP",
-               "fcstDate":"20260421","fcstTime":"0600","fcstValue":"15","nx":60,"ny":127}
+              {"baseDate":"20260421","baseTime":"1000","category":"T1H",
+               "obsrValue":"15","nx":60,"ny":127}
             ]}}}}
             """);
 
@@ -97,6 +121,28 @@ class KmaWeatherNormalizerTest {
 
         assertThat(result.getSucceeded()).isEqualTo(0);
         assertThat(result.getFailed()).isEqualTo(0);
+    }
+
+    @Test
+    void normalize_forecastDtEqualsBaseDateTime() {
+        ExternalApiRawPayload raw = buildRaw("""
+            {"response":{"body":{"items":{"item":[
+              {"baseDate":"20260421","baseTime":"1000","category":"T1H",
+               "obsrValue":"20","nx":60,"ny":127}
+            ]}}}}
+            """);
+
+        given(weatherLogRepo.existsByNxAndNyAndBaseDateAndBaseTimeAndForecastDt(any(), any(), any(), any(), any()))
+            .willReturn(false);
+
+        normalizer.normalize(raw);
+
+        ArgumentCaptor<WeatherLog> captor = ArgumentCaptor.forClass(WeatherLog.class);
+        verify(weatherLogRepo).save(captor.capture());
+        WeatherLog saved = captor.getValue();
+        // forecast_dt = base_date + base_time (same as observation time for 초단기실황)
+        assertThat(saved.getForecastDt().getHour()).isEqualTo(10);
+        assertThat(saved.getBaseTime()).isEqualTo("1000");
     }
 
     private ExternalApiRawPayload buildRaw(String body) {

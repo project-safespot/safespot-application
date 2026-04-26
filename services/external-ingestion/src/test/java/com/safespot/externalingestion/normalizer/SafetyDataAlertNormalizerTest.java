@@ -43,10 +43,10 @@ class SafetyDataAlertNormalizerTest {
     @Test
     void normalize_validPayload_savesDisasterAlert() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"response":{"body":{"items":{"item":[
+            {"body":[
               {"MSG_CN":"서울 홍수 경보 발령","RCPTN_RGN_NM":"서울특별시",
                "EMRG_STEP_NM":"주의","DST_SE_NM":"홍수","CRT_DT":"2026-04-21 10:00:00"}
-            ]}}}}
+            ],"numOfRows":50,"pageNo":1,"totalCount":1}
             """);
 
         given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any(OffsetDateTime.class))).willReturn(false);
@@ -69,7 +69,6 @@ class SafetyDataAlertNormalizerTest {
             "홍수".equals(a.getRawType()) &&
             "seoul".equals(a.getRegion()) &&
             "서울특별시".equals(a.getSourceRegion()) &&
-            // raw token fields must be stored as valid JSON arrays
             a.getRawCategoryTokens() != null &&
             a.getRawCategoryTokens().startsWith("[") && a.getRawCategoryTokens().endsWith("]") &&
             a.getRawLevelTokens() != null &&
@@ -81,10 +80,10 @@ class SafetyDataAlertNormalizerTest {
     @Test
     void normalize_duplicatePayload_skipsInsert() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"response":{"body":{"items":{"item":[
+            {"body":[
               {"MSG_CN":"중복","RCPTN_RGN_NM":"서울특별시",
                "EMRG_STEP_NM":"관심","DST_SE_NM":"지진","CRT_DT":"2026-04-21 09:00:00"}
-            ]}}}}
+            ]}
             """);
 
         given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any(OffsetDateTime.class))).willReturn(true);
@@ -99,7 +98,7 @@ class SafetyDataAlertNormalizerTest {
     @Test
     void normalize_emptyItems_returnsZeroSuccess() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"response":{"body":{"items":{"item":[]}}}}
+            {"body":[],"numOfRows":50,"pageNo":1,"totalCount":0}
             """);
 
         NormalizationResult result = normalizer.normalize(raw);
@@ -123,10 +122,10 @@ class SafetyDataAlertNormalizerTest {
     @Test
     void normalize_disasterTypeMapping() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"response":{"body":{"items":{"item":[
+            {"body":[
               {"MSG_CN":"산사태 경보 발령","RCPTN_RGN_NM":"서울 관악구",
                "EMRG_STEP_NM":"경계","DST_SE_NM":"산사태","CRT_DT":"2026-04-21 11:00:00"}
-            ]}}}}
+            ]}
             """);
 
         given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any())).willReturn(false);
@@ -148,10 +147,10 @@ class SafetyDataAlertNormalizerTest {
     @Test
     void normalize_outOfScopeType_skipsInsert() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"response":{"body":{"items":{"item":[
+            {"body":[
               {"MSG_CN":"폭염 주의","RCPTN_RGN_NM":"서울특별시",
                "EMRG_STEP_NM":"주의","DST_SE_NM":"폭염","CRT_DT":"2026-04-21 12:00:00"}
-            ]}}}}
+            ]}
             """);
 
         NormalizationResult result = normalizer.normalize(raw);
@@ -164,10 +163,10 @@ class SafetyDataAlertNormalizerTest {
     @Test
     void normalize_nonSeoulRegion_skipsInsert() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"response":{"body":{"items":{"item":[
+            {"body":[
               {"MSG_CN":"홍수 경보","RCPTN_RGN_NM":"부산광역시",
                "EMRG_STEP_NM":"경계","DST_SE_NM":"홍수","CRT_DT":"2026-04-21 13:00:00"}
-            ]}}}}
+            ]}
             """);
 
         NormalizationResult result = normalizer.normalize(raw);
@@ -180,12 +179,12 @@ class SafetyDataAlertNormalizerTest {
     @Test
     void normalize_mixedTypes_publishesOneEvent() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"response":{"body":{"items":{"item":[
+            {"body":[
               {"MSG_CN":"지진 발생","RCPTN_RGN_NM":"서울특별시",
                "EMRG_STEP_NM":"주의","DST_SE_NM":"지진","CRT_DT":"2026-04-21 10:00:00"},
               {"MSG_CN":"홍수 경보 발령","RCPTN_RGN_NM":"서울 강남구",
                "EMRG_STEP_NM":"경계","DST_SE_NM":"홍수","CRT_DT":"2026-04-21 10:05:00"}
-            ]}}}}
+            ]}
             """);
 
         given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any(OffsetDateTime.class))).willReturn(false);
@@ -198,8 +197,6 @@ class SafetyDataAlertNormalizerTest {
         NormalizationResult result = normalizer.normalize(raw);
 
         assertThat(result.getSucceeded()).isEqualTo(2);
-        // ONE event per run, not per type
-        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
         verify(cacheEventPublisher, times(1)).publish(any(), eq("disaster-collection"));
         verify(cacheEventPublisher).publish(argThat(e -> {
             DisasterDataCollectedEvent ev = (DisasterDataCollectedEvent) e;
@@ -211,10 +208,10 @@ class SafetyDataAlertNormalizerTest {
     @Test
     void normalize_clearMessage_hasExpiredAlertsTrue() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"response":{"body":{"items":{"item":[
+            {"body":[
               {"MSG_CN":"홍수 경보 해제","RCPTN_RGN_NM":"서울특별시",
                "EMRG_STEP_NM":"주의","DST_SE_NM":"홍수","CRT_DT":"2026-04-21 14:00:00"}
-            ]}}}}
+            ]}
             """);
 
         given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any(OffsetDateTime.class))).willReturn(false);
@@ -234,10 +231,10 @@ class SafetyDataAlertNormalizerTest {
     @Test
     void normalize_alertMessage_hasExpiredAlertsFalse() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"response":{"body":{"items":{"item":[
+            {"body":[
               {"MSG_CN":"지진 발생 위험","RCPTN_RGN_NM":"서울특별시",
                "EMRG_STEP_NM":"경계","DST_SE_NM":"지진","CRT_DT":"2026-04-21 15:00:00"}
-            ]}}}}
+            ]}
             """);
 
         given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any(OffsetDateTime.class))).willReturn(false);

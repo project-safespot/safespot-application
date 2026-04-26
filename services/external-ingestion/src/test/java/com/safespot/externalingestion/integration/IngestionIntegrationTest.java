@@ -61,10 +61,10 @@ class IngestionIntegrationTest {
         raw.setSource(source);
         raw.setExecutionLog(savedLog);
         raw.setResponseBody("""
-            {"response":{"body":{"items":{"item":[
+            {"body":[
               {"MSG_CN":"통합테스트 홍수 경보","RCPTN_RGN_NM":"서울특별시",
                "EMRG_STEP_NM":"경계","DST_SE_NM":"홍수","CRT_DT":"2026-04-21 15:00:00"}
-            ]}}}}
+            ],"numOfRows":50,"pageNo":1,"totalCount":1}
             """);
         raw.setPayloadHash("integration-test-hash-001");
         raw.setCollectedAt(OffsetDateTime.now());
@@ -100,10 +100,10 @@ class IngestionIntegrationTest {
         var savedLog = executionLogRepo.save(execLog);
 
         String responseBody = """
-            {"response":{"body":{"items":{"item":[
+            {"body":[
               {"MSG_CN":"중복 지진","RCPTN_RGN_NM":"서울","EMRG_STEP_NM":"관심",
                "DST_SE_NM":"지진","CRT_DT":"2026-04-21 16:00:00"}
-            ]}}}}
+            ],"numOfRows":50,"pageNo":1,"totalCount":1}
             """;
 
         for (int i = 0; i < 2; i++) {

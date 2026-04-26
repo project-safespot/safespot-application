@@ -26,7 +26,7 @@ import java.util.List;
  * 경계 이상 수위만 재난 알림으로 적재 (주의/경계/심각)
  *
  * 예상 응답:
- * {"ListStnWaterLevelEntry": {"row": [
+ * {"ListRiverStageService": {"row": [
  *   {"STATION":"한강대교","STD_DT":"2026-04-21 10:00:00",
  *    "WATER_LEVEL":"4.5","WRNLEVEL_NM":"경계","GU_NM":"서울특별시"}
  * ]}}
@@ -64,7 +64,7 @@ public class SeoulRiverLevelNormalizer implements Normalizer {
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
-            JsonNode rows = root.path("ListStnWaterLevelEntry").path("row");
+            JsonNode rows = root.path("ListRiverStageService").path("row");
             if (rows.isMissingNode() || rows.isEmpty()) return NormalizationResult.success(0);
 
             for (JsonNode row : rows) {

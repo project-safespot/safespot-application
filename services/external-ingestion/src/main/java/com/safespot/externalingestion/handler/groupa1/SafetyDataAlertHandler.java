@@ -24,6 +24,11 @@ public class SafetyDataAlertHandler extends AbstractIngestionHandler {
     }
 
     @Override
+    public String getProviderApiKey() {
+        return apiKey;
+    }
+
+    @Override
     protected int getRateLimitPerDay() {
         return 1000;
     }
@@ -34,12 +39,12 @@ public class SafetyDataAlertHandler extends AbstractIngestionHandler {
         params.put("serviceKey", apiKey);
         params.put("pageNo", "1");
         params.put("numOfRows", "50");
-        params.put("type", "json");
+        params.put("returnType", "json");
         return params;
     }
 
     @Override
     protected int countItems(String responseBody) {
-        return countItemsInArray(responseBody, "response", "body", "items", "item");
+        return countItemsInArray(responseBody, "body");
     }
 }

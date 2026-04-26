@@ -39,7 +39,7 @@ class SeoulRiverLevelNormalizerTest {
     @Test
     void normalize_seoulAlertLevel_saves() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"ListStnWaterLevelEntry":{"row":[
+            {"ListRiverStageService":{"row":[
               {"STATION":"한강대교","STD_DT":"2026-04-21 10:00:00",
                "WATER_LEVEL":"4.5","WRNLEVEL_NM":"경계","GU_NM":"서울특별시"}
             ]}}
@@ -66,7 +66,7 @@ class SeoulRiverLevelNormalizerTest {
     @Test
     void normalize_belowAlertLevel_skipsInsert() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"ListStnWaterLevelEntry":{"row":[
+            {"ListRiverStageService":{"row":[
               {"STATION":"한강대교","STD_DT":"2026-04-21 10:00:00",
                "WATER_LEVEL":"1.2","WRNLEVEL_NM":"관심","GU_NM":"서울특별시"}
             ]}}
@@ -82,7 +82,7 @@ class SeoulRiverLevelNormalizerTest {
     @Test
     void normalize_nonSeoulRegion_skipsInsert() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"ListStnWaterLevelEntry":{"row":[
+            {"ListRiverStageService":{"row":[
               {"STATION":"한강대교","STD_DT":"2026-04-21 10:00:00",
                "WATER_LEVEL":"4.5","WRNLEVEL_NM":"경계","GU_NM":"경기도 하남시"}
             ]}}

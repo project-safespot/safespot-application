@@ -19,16 +19,22 @@ import java.util.Optional;
  * 허용 컬럼만 갱신: name, shelter_type, disaster_type, address, latitude, longitude, capacity
  * 금지 컬럼: manager, contact, shelter_status, note
  *
+ * 응답 포맷:
+ *  - Seoul OpenAPI (EARTHQUAKE, FLOOD): {SERVICE}.row[]
+ *  - odcloud (LANDSLIDE): {"data": [...]}
+ *
  * TODO: shelter 외부 식별자 미정의 — name+address+disasterType 임시 키 사용.
  *       서울 공공데이터 포털 식별자 확정 후 unique key 변경 필요.
  */
 @Slf4j
 public class ShelterNormalizer implements Normalizer {
 
-    private static final Map<String, String[]> SOURCE_META = Map.of(
-        "SEOUL_SHELTER_EARTHQUAKE", new String[]{"TbEqkShelterInfo", "EARTHQUAKE"},
-        "SEOUL_SHELTER_LANDSLIDE",  new String[]{"TbLdslShelterInfo", "LANDSLIDE"},
-        "SEOUL_SHELTER_FLOOD",      new String[]{"TbFloodShelterInfo", "FLOOD"}
+    private record SourceMeta(String rowRoot, boolean odcloud, String disasterType) {}
+
+    private static final Map<String, SourceMeta> SOURCE_META = Map.of(
+        "SEOUL_SHELTER_EARTHQUAKE", new SourceMeta("TlEtqkP", false, "EARTHQUAKE"),
+        "SEOUL_SHELTER_LANDSLIDE",  new SourceMeta("data", true, "LANDSLIDE"),
+        "SEOUL_SHELTER_FLOOD",      new SourceMeta("TbFloodShelterInfo", false, "FLOOD")
     );
 
     private final String sourceCode;
@@ -51,19 +57,20 @@ public class ShelterNormalizer implements Normalizer {
 
     @Override
     public NormalizationResult normalize(ExternalApiRawPayload raw) {
-        String[] meta = SOURCE_META.get(sourceCode);
+        SourceMeta meta = SOURCE_META.get(sourceCode);
         if (meta == null) {
             return NormalizationResult.failure("unknown shelter source: " + sourceCode);
         }
-        String rootKey = meta[0];
-        String disasterType = meta[1];
 
         List<String> errors = new ArrayList<>();
         int succeeded = 0;
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
-            JsonNode rows = root.path(rootKey).path("row");
+            JsonNode rows = meta.odcloud()
+                ? root.path(meta.rowRoot())
+                : root.path(meta.rowRoot()).path("row");
+
             if (rows.isMissingNode() || rows.isEmpty()) return NormalizationResult.success(0);
 
             for (JsonNode row : rows) {
@@ -81,10 +88,10 @@ public class ShelterNormalizer implements Normalizer {
                     }
 
                     Optional<Shelter> existing =
-                        shelterRepo.findByNameAndAddressAndDisasterType(name, address, disasterType);
+                        shelterRepo.findByNameAndAddressAndDisasterType(name, address, meta.disasterType());
 
                     Shelter shelter = existing.orElseGet(Shelter::new);
-                    shelter.updateFromExternalSource(name, stype, disasterType, address, lat, lon, capacity);
+                    shelter.updateFromExternalSource(name, stype, meta.disasterType(), address, lat, lon, capacity);
                     shelterRepo.save(shelter);
 
                     metrics.incrementNormalizationSuccess(sourceCode);

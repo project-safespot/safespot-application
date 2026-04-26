@@ -10,9 +10,12 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 기상청 단기예보 API (KMA_WEATHER)
+ * 기상청 초단기실황 API (KMA_WEATHER) — getUltraSrtNcst
  * 실행 방식: CronJob (매시 정각) | 일일 한도: 10,000회
  * 정규화 대상: weather_log
+ *
+ * base_time 규칙: 초단기실황 데이터는 관측 후 10분 뒤 제공.
+ * 매시 정각 실행 기준 — 0~9분대에는 직전 시각 데이터를 사용.
  */
 @Component
 public class KmaWeatherHandler extends AbstractIngestionHandler {
@@ -30,6 +33,11 @@ public class KmaWeatherHandler extends AbstractIngestionHandler {
     }
 
     @Override
+    public String getProviderApiKey() {
+        return apiKey;
+    }
+
+    @Override
     protected int getRateLimitPerDay() {
         return 10000;
     }
@@ -37,13 +45,16 @@ public class KmaWeatherHandler extends AbstractIngestionHandler {
     @Override
     protected Map<String, String> buildRequestParams() {
         LocalDateTime now = LocalDateTime.now();
+        // 초단기실황: 관측 후 10분 뒤 제공 — 0~9분대는 직전 시각 사용
+        LocalDateTime baseDateTime = (now.getMinute() < 10) ? now.minusHours(1) : now;
+
         Map<String, String> params = new HashMap<>();
-        params.put("serviceKey", apiKey);
+        params.put("ServiceKey", apiKey);
         params.put("pageNo", "1");
-        params.put("numOfRows", "1000");
+        params.put("numOfRows", "100");
         params.put("dataType", "JSON");
-        params.put("base_date", now.format(DateTimeFormatter.ofPattern("yyyyMMdd")));
-        params.put("base_time", "0500");
+        params.put("base_date", baseDateTime.format(DateTimeFormatter.ofPattern("yyyyMMdd")));
+        params.put("base_time", baseDateTime.format(DateTimeFormatter.ofPattern("HH")) + "00");
         params.put("nx", DEFAULT_NX);
         params.put("ny", DEFAULT_NY);
         return params;

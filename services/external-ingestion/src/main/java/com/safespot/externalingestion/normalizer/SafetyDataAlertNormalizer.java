@@ -23,11 +23,11 @@ import java.util.*;
 /**
  * 행정안전부 재난문자 정규화 (SAFETY_DATA_ALERT → disaster_alert)
  *
- * 예상 응답 구조:
- * {"response": {"body": {"items": {"item": [
+ * 예상 응답 구조 (safetydata.go.kr V2 API):
+ * {"body": [
  *   {"MSG_CN": "...", "RCPTN_RGN_NM": "서울특별시", "EMRG_STEP_NM": "주의",
  *    "DST_SE_NM": "홍수", "CRT_DT": "2026-04-21 10:00:00"}
- * ]}}}}
+ * ], "numOfRows": 50, "pageNo": 1, "totalCount": 5}
  */
 @Slf4j
 @Component
@@ -69,9 +69,9 @@ public class SafetyDataAlertNormalizer implements Normalizer {
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
-            JsonNode items = root.path("response").path("body").path("items").path("item");
+            JsonNode items = root.path("body");
 
-            if (items.isMissingNode() || items.isEmpty()) {
+            if (items.isMissingNode() || !items.isArray() || items.isEmpty()) {
                 return NormalizationResult.success(0);
             }
 

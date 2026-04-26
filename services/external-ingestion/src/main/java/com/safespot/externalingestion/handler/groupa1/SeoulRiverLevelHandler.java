@@ -1,16 +1,17 @@
 package com.safespot.externalingestion.handler.groupa1;
 
 import com.safespot.externalingestion.handler.AbstractIngestionHandler;
+import com.safespot.externalingestion.util.SeoulOpenApiUrlBuilder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-import java.util.HashMap;
 import java.util.Map;
 
 /**
  * 서울시 하천 수위 API (SEOUL_RIVER_LEVEL)
+ * 인증: path-based — {KEY} replaced via buildFinalUrl
  * 폴링 주기: 30초 | 호출 제한 없음
- * 정규화 대상: disaster_alert (detail_json에 수위 정보 저장)
+ * 정규화 대상: disaster_alert
  */
 @Component
 public class SeoulRiverLevelHandler extends AbstractIngestionHandler {
@@ -24,17 +25,22 @@ public class SeoulRiverLevelHandler extends AbstractIngestionHandler {
     }
 
     @Override
+    protected String buildFinalUrl(String sourceUrl) {
+        return SeoulOpenApiUrlBuilder.buildUrl(sourceUrl, apiKey);
+    }
+
+    @Override
+    public String getProviderApiKey() {
+        return apiKey;
+    }
+
+    @Override
     protected Map<String, String> buildRequestParams() {
-        Map<String, String> params = new HashMap<>();
-        params.put("KEY", apiKey);
-        params.put("Type", "json");
-        params.put("pIndex", "1");
-        params.put("pSize", "50");
-        return params;
+        return Map.of();
     }
 
     @Override
     protected int countItems(String responseBody) {
-        return countItemsInArray(responseBody, "ListStnWaterLevelEntry", "row");
+        return countItemsInArray(responseBody, "ListRiverStageService", "row");
     }
 }

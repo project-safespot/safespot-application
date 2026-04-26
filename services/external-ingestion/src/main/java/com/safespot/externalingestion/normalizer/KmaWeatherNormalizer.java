@@ -23,13 +23,15 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
- * 기상청 단기예보 정규화 (KMA_WEATHER → weather_log)
- * 응답의 category별 값을 (nx, ny, base_date, base_time, forecast_dt) 단위로 병합 후 적재
+ * 기상청 초단기실황 정규화 (KMA_WEATHER → weather_log) — getUltraSrtNcst
+ * category별 obsrValue를 (nx, ny, base_date, base_time) 단위로 병합 후 적재.
+ * 초단기실황은 fcstDate/fcstTime 없이 base_date+base_time이 관측 시각이므로
+ * forecast_dt = base_date+base_time 으로 저장.
  *
  * 예상 응답:
  * {"response": {"body": {"items": {"item": [
- *   {"baseDate":"20260421","baseTime":"0500","category":"TMP",
- *    "fcstDate":"20260421","fcstTime":"0600","fcstValue":"15","nx":60,"ny":127}
+ *   {"baseDate":"20260421","baseTime":"1000","category":"T1H",
+ *    "obsrValue":"15","nx":60,"ny":127}
  * ]}}}}
  */
 @Slf4j
@@ -68,7 +70,7 @@ public class KmaWeatherNormalizer implements Normalizer {
             JsonNode items = root.path("response").path("body").path("items").path("item");
             if (items.isMissingNode() || items.isEmpty()) return NormalizationResult.success(0);
 
-            Map<String, Map<String, String>> grouped = groupByForecastKey(items);
+            Map<String, Map<String, String>> grouped = groupByObsrKey(items);
 
             for (Map.Entry<String, Map<String, String>> entry : grouped.entrySet()) {
                 try {
@@ -77,7 +79,8 @@ public class KmaWeatherNormalizer implements Normalizer {
                     int ny = Integer.parseInt(keyParts[1]);
                     LocalDate baseDate = LocalDate.parse(keyParts[2], DATE_FMT);
                     String baseTime = keyParts[3];
-                    OffsetDateTime forecastDt = LocalDateTime.parse(keyParts[4], DATETIME_FMT)
+                    // 초단기실황: 관측 시각 = base_date + base_time (forecast_dt 겸용)
+                    OffsetDateTime forecastDt = LocalDateTime.parse(keyParts[2] + keyParts[3], DATETIME_FMT)
                         .atZone(KST).toOffsetDateTime();
 
                     if (weatherLogRepo.existsByNxAndNyAndBaseDateAndBaseTimeAndForecastDt(
@@ -112,16 +115,15 @@ public class KmaWeatherNormalizer implements Normalizer {
         return NormalizationResult.of(succeeded, errors.size(), errors);
     }
 
-    private Map<String, Map<String, String>> groupByForecastKey(JsonNode items) {
+    private Map<String, Map<String, String>> groupByObsrKey(JsonNode items) {
         Map<String, Map<String, String>> result = new LinkedHashMap<>();
         for (JsonNode item : items) {
             String key = item.path("nx").asText() + "|" +
                 item.path("ny").asText() + "|" +
                 item.path("baseDate").asText() + "|" +
-                item.path("baseTime").asText() + "|" +
-                item.path("fcstDate").asText() + item.path("fcstTime").asText();
+                item.path("baseTime").asText();
             result.computeIfAbsent(key, k -> new HashMap<>())
-                .put(item.path("category").asText(), item.path("fcstValue").asText());
+                .put(item.path("category").asText(), item.path("obsrValue").asText());
         }
         return result;
     }
@@ -134,12 +136,10 @@ public class KmaWeatherNormalizer implements Normalizer {
         wl.setBaseDate(baseDate);
         wl.setBaseTime(baseTime);
         wl.setForecastDt(forecastDt);
-        if (cats.containsKey("TMP")) wl.setTmp(new BigDecimal(cats.get("TMP")));
-        wl.setSky(mapSky(cats.get("SKY")));
+        if (cats.containsKey("T1H")) wl.setTmp(parseBigDecimalSafe(cats.get("T1H")));
         wl.setPty(mapPty(cats.get("PTY")));
-        if (cats.containsKey("POP")) wl.setPop(parseIntSafe(cats.get("POP")));
-        wl.setPcp(cats.get("PCP"));
-        if (cats.containsKey("WSD")) wl.setWsd(new BigDecimal(cats.get("WSD")));
+        wl.setPcp(cats.get("RN1"));
+        if (cats.containsKey("WSD")) wl.setWsd(parseBigDecimalSafe(cats.get("WSD")));
         if (cats.containsKey("REH")) wl.setReh(parseIntSafe(cats.get("REH")));
         return wl;
     }
@@ -157,16 +157,6 @@ public class KmaWeatherNormalizer implements Normalizer {
         }
     }
 
-    private String mapSky(String code) {
-        if (code == null) return null;
-        return switch (code) {
-            case "1" -> "맑음";
-            case "3" -> "구름조금";
-            case "4" -> "흐림";
-            default -> code;
-        };
-    }
-
     private String mapPty(String code) {
         if (code == null) return null;
         return switch (code) {
@@ -174,9 +164,19 @@ public class KmaWeatherNormalizer implements Normalizer {
             case "1" -> "비";
             case "2" -> "비/눈";
             case "3" -> "눈";
-            case "4" -> "소나기";
+            case "5" -> "빗방울";
+            case "6" -> "빗방울/눈날림";
+            case "7" -> "눈날림";
             default -> code;
         };
+    }
+
+    private BigDecimal parseBigDecimalSafe(String val) {
+        try {
+            return (val != null && !val.isBlank()) ? new BigDecimal(val) : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private Integer parseIntSafe(String val) {

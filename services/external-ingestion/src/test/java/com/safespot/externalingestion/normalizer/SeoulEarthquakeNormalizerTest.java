@@ -39,7 +39,7 @@ class SeoulEarthquakeNormalizerTest {
     @Test
     void normalize_seoulAlert_saves() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"ListEqkEq":{"row":[
+            {"TbEqkKenvinfo":{"row":[
               {"OCCR_DT":"2026-04-21 10:05:00","OCCR_PLC":"서울 서초구",
                "MAGNTD_1":"3.2","DEPTH_KM":"8","INTENSITY":"진도2"}
             ]}}
@@ -66,7 +66,7 @@ class SeoulEarthquakeNormalizerTest {
     @Test
     void normalize_nonSeoulLocation_skipsInsert() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"ListEqkEq":{"row":[
+            {"TbEqkKenvinfo":{"row":[
               {"OCCR_DT":"2026-04-21 11:00:00","OCCR_PLC":"경기도 성남시",
                "MAGNTD_1":"2.0","DEPTH_KM":"5","INTENSITY":"진도1"}
             ]}}
