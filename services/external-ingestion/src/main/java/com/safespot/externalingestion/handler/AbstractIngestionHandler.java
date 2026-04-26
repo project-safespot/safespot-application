@@ -138,7 +138,7 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
             metrics.incrementSkipped(getSourceCode(), "error");
             transactionTemplate.executeWithoutResult(
                 tx -> finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, "INTERNAL_ERROR", safeMsg, null));
-            log.error("[{}] traceId={} internal error", getSourceCode(), traceId, e);
+            log.error("[{}] ingestion failed: exceptionType={} message={}", getSourceCode(), e.getClass().getSimpleName(), safeMsg);
             return IngestionResult.failed(safeMsg);
         }
     }
