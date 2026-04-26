@@ -117,14 +117,6 @@ Trigger:
 
 - `environment:weather:seoul`, `environment:air-quality:seoul`, `environment:weather-alert:seoul` 중 하나를 rebuild한다.
 
-weather-alert MVP 제약:
-
-- `weather_alert_log` 테이블이 MVP DB 스키마에 포함되지 않았다.
-- 현재 구현에서 `environment:weather-alert:seoul`는 `{ schemaVersion: 1, status: "no_data", alerts: [] }` placeholder를 SET한다.
-- TTL은 7200초 (cache-ttl.md 기준) 그대로 적용한다.
-- `EnvironmentDataCollected(collectionType=WEATHER_ALERT)` 및 `CacheRegenerationRequested(cacheKey=environment:weather-alert:seoul)` 수신 시 no-op이 아닌 위 placeholder를 SET한다.
-- 향후 `weather_alert_log` 테이블이 추가되면 `EnvironmentLogRepository`에 조회 메서드를 추가하고 placeholder를 실제 데이터로 교체해야 한다.
-
 ## 6. EVENT-007 Handling
 
 현재:
