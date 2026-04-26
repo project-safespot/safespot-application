@@ -9,6 +9,7 @@ import com.safespot.apipublicread.domain.WeatherLog;
 import com.safespot.apipublicread.dto.AirQualityDto;
 import com.safespot.apipublicread.dto.WeatherAlertDto;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
+import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
 import com.safespot.apipublicread.exception.ErrorCode;
 import com.safespot.apipublicread.repository.AirQualityLogRepository;
@@ -54,7 +55,7 @@ public class EnvironmentReadService {
         redisReadCache.recordFallback(ENDPOINT_WEATHER, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_WEATHER);
         if (suppressWindowService.tryPublish(WEATHER_KEY)) {
-            cacheRegenerationPublisher.publish(WEATHER_KEY);
+            cacheRegenerationPublisher.publish(WEATHER_KEY, CacheRegenerationReason.from(cached.fallbackReason()));
         }
 
         WeatherLog log = weatherLogRepository.findLatestByNxAndNy(nx, ny).orElse(null);
@@ -73,7 +74,7 @@ public class EnvironmentReadService {
         redisReadCache.recordFallback(ENDPOINT_WEATHER, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_WEATHER);
         if (suppressWindowService.tryPublish(WEATHER_KEY)) {
-            cacheRegenerationPublisher.publish(WEATHER_KEY);
+            cacheRegenerationPublisher.publish(WEATHER_KEY, CacheRegenerationReason.from(cached.fallbackReason()));
         }
 
         WeatherLog log = weatherLogRepository.findLatestByNxAndNy(grid[0], grid[1]).orElse(null);
@@ -92,7 +93,7 @@ public class EnvironmentReadService {
         redisReadCache.recordFallback(ENDPOINT_AIR, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_AIR);
         if (suppressWindowService.tryPublish(AIR_KEY)) {
-            cacheRegenerationPublisher.publish(AIR_KEY);
+            cacheRegenerationPublisher.publish(AIR_KEY, CacheRegenerationReason.from(cached.fallbackReason()));
         }
 
         AirQualityLog log = airQualityLogRepository.findLatest().orElse(null);

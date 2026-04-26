@@ -9,6 +9,7 @@ import com.safespot.apipublicread.dto.ShelterDetailDto;
 import com.safespot.apipublicread.dto.ShelterNearbyItem;
 import com.safespot.apipublicread.dto.ShelterStatusCache;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
+import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
 import com.safespot.apipublicread.exception.ErrorCode;
 import com.safespot.apipublicread.repository.EvacuationEntryRepository;
@@ -98,7 +99,7 @@ public class ShelterReadService {
                 ? shelter.getUpdatedAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) : null;
 
         if (suppressWindowService.tryPublish(key)) {
-            cacheRegenerationPublisher.publish(key);
+            cacheRegenerationPublisher.publish(key, CacheRegenerationReason.from(reason));
         }
 
         return new ShelterStatusCache((int) occupancy, available, congestion,
