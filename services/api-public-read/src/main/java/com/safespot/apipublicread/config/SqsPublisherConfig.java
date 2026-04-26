@@ -2,6 +2,7 @@ package com.safespot.apipublicread.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safespot.apipublicread.event.CacheKeyFamilyResolver;
+import com.safespot.apipublicread.event.CacheRegenerationPublishFailureRecorder;
 import com.safespot.apipublicread.event.SqsCacheRegenerationPublisher;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -29,11 +30,19 @@ public class SqsPublisherConfig {
     }
 
     @Bean
+    public CacheRegenerationPublishFailureRecorder cacheRegenerationPublishFailureRecorder(
+            @Value("${safespot.cache-regeneration.publish-failure-file:./tmp/cache-regeneration-publish-failures.jsonl}")
+            String failureFilePath) {
+        return new CacheRegenerationPublishFailureRecorder(failureFilePath);
+    }
+
+    @Bean
     public SqsCacheRegenerationPublisher sqsCacheRegenerationPublisher(
             SqsClient sqsClient,
             @Value("${safespot.cache-regeneration.queue-url}") String queueUrl,
             ObjectMapper objectMapper,
-            CacheKeyFamilyResolver resolver) {
-        return new SqsCacheRegenerationPublisher(sqsClient, queueUrl, objectMapper, resolver);
+            CacheKeyFamilyResolver resolver,
+            CacheRegenerationPublishFailureRecorder failureRecorder) {
+        return new SqsCacheRegenerationPublisher(sqsClient, queueUrl, objectMapper, resolver, failureRecorder);
     }
 }

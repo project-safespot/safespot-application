@@ -16,6 +16,8 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -23,6 +25,7 @@ class SqsCacheRegenerationPublisherTest {
 
     @Mock SqsClient sqsClient;
     @Mock CacheKeyFamilyResolver resolver;
+    @Mock CacheRegenerationPublishFailureRecorder failureRecorder;
 
     private SqsCacheRegenerationPublisher publisher;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -30,7 +33,8 @@ class SqsCacheRegenerationPublisherTest {
 
     @BeforeEach
     void setUp() {
-        publisher = new SqsCacheRegenerationPublisher(sqsClient, QUEUE_URL, objectMapper, resolver);
+        publisher = new SqsCacheRegenerationPublisher(
+                sqsClient, QUEUE_URL, objectMapper, resolver, failureRecorder);
     }
 
     @Test
@@ -44,12 +48,44 @@ class SqsCacheRegenerationPublisherTest {
 
         ArgumentCaptor<SendMessageRequest> captor = ArgumentCaptor.forClass(SendMessageRequest.class);
         verify(sqsClient).sendMessage(captor.capture());
-        SendMessageRequest req = captor.getValue();
-        assertThat(req.queueUrl()).isEqualTo(QUEUE_URL);
+        assertThat(captor.getValue().queueUrl()).isEqualTo(QUEUE_URL);
     }
 
     @Test
-    void publish_supportedKey_messageBodyContainsEvent007Fields() throws Exception {
+    void publish_sqsSuccess_failureRecorderNotCalled() {
+        when(resolver.resolve("disaster:messages:list:seoul"))
+                .thenReturn(Optional.of("disaster_messages_list"));
+        when(sqsClient.sendMessage(any(SendMessageRequest.class)))
+                .thenReturn(SendMessageResponse.builder().messageId("msg-ok").build());
+
+        publisher.publish("disaster:messages:list:seoul", CacheRegenerationReason.CACHE_MISS);
+
+        verify(failureRecorder, never()).record(any(), anyString());
+    }
+
+    @Test
+    void publish_sqsFails_failureRecorderCalledWithFullEnvelopeJson() {
+        when(resolver.resolve("disaster:messages:list:seoul"))
+                .thenReturn(Optional.of("disaster_messages_list"));
+        when(sqsClient.sendMessage(any(SendMessageRequest.class)))
+                .thenThrow(new RuntimeException("SQS unavailable"));
+
+        publisher.publish("disaster:messages:list:seoul", CacheRegenerationReason.CACHE_MISS);
+
+        ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
+        verify(failureRecorder).record(any(CacheRegenerationEnvelope.class), jsonCaptor.capture());
+        String recorded = jsonCaptor.getValue();
+        assertThat(recorded).contains("CacheRegenerationRequested");
+        assertThat(recorded).contains("api-public-read");
+        assertThat(recorded).contains("traceId");
+        assertThat(recorded).contains("idempotencyKey");
+        assertThat(recorded).contains("disaster:messages:list:seoul");
+        assertThat(recorded).contains("disaster_messages_list");
+        assertThat(recorded).contains("cache_miss");
+    }
+
+    @Test
+    void publish_supportedKey_messageBodyContainsEvent007Fields() {
         when(resolver.resolve("disaster:messages:list:seoul"))
                 .thenReturn(Optional.of("disaster_messages_list"));
         when(sqsClient.sendMessage(any(SendMessageRequest.class)))
@@ -76,6 +112,7 @@ class SqsCacheRegenerationPublisherTest {
         publisher.publish("unknown:key", CacheRegenerationReason.CACHE_MISS);
 
         verify(sqsClient, never()).sendMessage(any(SendMessageRequest.class));
+        verify(failureRecorder, never()).record(any(), anyString());
     }
 
     @Test
@@ -89,7 +126,7 @@ class SqsCacheRegenerationPublisherTest {
     }
 
     @Test
-    void publish_redisDownReason_includesRedisDownInBody() throws Exception {
+    void publish_redisDownReason_includesRedisDownInBody() {
         when(resolver.resolve("environment:air-quality:seoul"))
                 .thenReturn(Optional.of("environment_air_quality"));
         when(sqsClient.sendMessage(any(SendMessageRequest.class)))

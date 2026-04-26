@@ -32,6 +32,7 @@ server:
 safespot:
   cache-regeneration:
     publisher-mode: log
+    publish-failure-file: ./tmp/cache-regeneration-publish-failures.jsonl
 
 management:
   endpoints:

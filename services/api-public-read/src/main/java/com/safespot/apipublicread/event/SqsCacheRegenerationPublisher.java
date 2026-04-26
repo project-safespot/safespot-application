@@ -16,6 +16,7 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
     private final String queueUrl;
     private final ObjectMapper objectMapper;
     private final CacheKeyFamilyResolver resolver;
+    private final CacheRegenerationPublishFailureRecorder failureRecorder;
 
     @Override
     public void publish(String cacheKey, CacheRegenerationReason reason) {
@@ -25,15 +26,25 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
             return;
         }
         CacheRegenerationEnvelope envelope = CacheRegenerationEnvelope.build(cacheKey, family.get(), reason);
+        String body;
         try {
-            String body = objectMapper.writeValueAsString(envelope);
+            body = objectMapper.writeValueAsString(envelope);
+        } catch (Exception e) {
+            log.error("[CacheRegen] envelope serialization failed idempotencyKey={} cacheKey={}: {}",
+                    envelope.idempotencyKey(), cacheKey, e.getMessage(), e);
+            return;
+        }
+        try {
             sqsClient.sendMessage(SendMessageRequest.builder()
                     .queueUrl(queueUrl)
                     .messageBody(body)
                     .build());
-            log.info("[CacheRegen] sent to SQS idempotencyKey={}", envelope.idempotencyKey());
+            log.info("[CacheRegen] sent to SQS idempotencyKey={} traceId={}",
+                    envelope.idempotencyKey(), envelope.traceId());
         } catch (Exception e) {
-            log.error("[CacheRegen] SQS publish failed for cacheKey={}: {}", cacheKey, e.getMessage(), e);
+            log.error("[CacheRegen] SQS send failed idempotencyKey={} traceId={} cacheKey={}: {}",
+                    envelope.idempotencyKey(), envelope.traceId(), cacheKey, e.getMessage());
+            failureRecorder.record(envelope, body);
         }
     }
 }
