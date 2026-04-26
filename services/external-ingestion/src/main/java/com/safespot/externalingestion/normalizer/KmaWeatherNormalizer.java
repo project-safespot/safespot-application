@@ -23,14 +23,17 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
- * 기상청 단기예보 정규화 (KMA_WEATHER → weather_log)
- * 응답의 category별 값을 (nx, ny, base_date, base_time, forecast_dt) 단위로 병합 후 적재
+ * 기상청 초단기실황 정규화 (KMA_WEATHER → weather_log) — getUltraSrtNcst
+ * 응답의 category별 값을 (nx, ny, base_date, base_time) 단위로 병합 후 적재.
+ * 초단기실황은 관측값(obsrValue)이며 예보 시각(fcstDate/fcstTime)이 없고 base_time이 관측 시각이다.
  *
  * 예상 응답:
  * {"response": {"body": {"items": {"item": [
- *   {"baseDate":"20260421","baseTime":"0500","category":"TMP",
- *    "fcstDate":"20260421","fcstTime":"0600","fcstValue":"15","nx":60,"ny":127}
+ *   {"baseDate":"20260421","baseTime":"1000","category":"T1H",
+ *    "obsrValue":"15.0","nx":60,"ny":127}
  * ]}}}}
+ *
+ * 카테고리 매핑: T1H→tmp, RN1→pcp, PTY→pty, REH→reh, WSD→wsd (SKY/POP 없음)
  */
 @Slf4j
 @Component
@@ -77,7 +80,8 @@ public class KmaWeatherNormalizer implements Normalizer {
                     int ny = Integer.parseInt(keyParts[1]);
                     LocalDate baseDate = LocalDate.parse(keyParts[2], DATE_FMT);
                     String baseTime = keyParts[3];
-                    OffsetDateTime forecastDt = LocalDateTime.parse(keyParts[4], DATETIME_FMT)
+                    // 초단기실황: 관측 시각 = baseDate + baseTime
+                    OffsetDateTime forecastDt = LocalDateTime.parse(keyParts[2] + keyParts[3], DATETIME_FMT)
                         .atZone(KST).toOffsetDateTime();
 
                     if (weatherLogRepo.existsByNxAndNyAndBaseDateAndBaseTimeAndForecastDt(
@@ -115,13 +119,13 @@ public class KmaWeatherNormalizer implements Normalizer {
     private Map<String, Map<String, String>> groupByForecastKey(JsonNode items) {
         Map<String, Map<String, String>> result = new LinkedHashMap<>();
         for (JsonNode item : items) {
+            // 초단기실황: fcstDate/fcstTime 없음 — base_date+base_time이 관측 시각
             String key = item.path("nx").asText() + "|" +
                 item.path("ny").asText() + "|" +
                 item.path("baseDate").asText() + "|" +
-                item.path("baseTime").asText() + "|" +
-                item.path("fcstDate").asText() + item.path("fcstTime").asText();
+                item.path("baseTime").asText();
             result.computeIfAbsent(key, k -> new HashMap<>())
-                .put(item.path("category").asText(), item.path("fcstValue").asText());
+                .put(item.path("category").asText(), item.path("obsrValue").asText());
         }
         return result;
     }
@@ -134,11 +138,11 @@ public class KmaWeatherNormalizer implements Normalizer {
         wl.setBaseDate(baseDate);
         wl.setBaseTime(baseTime);
         wl.setForecastDt(forecastDt);
-        if (cats.containsKey("TMP")) wl.setTmp(new BigDecimal(cats.get("TMP")));
-        wl.setSky(mapSky(cats.get("SKY")));
+        // 초단기실황 카테고리: T1H(기온), RN1(1시간 강수), PTY(강수형태), REH(습도), WSD(풍속)
+        // SKY(하늘상태), POP(강수확률)은 초단기실황에 없음 — null 저장
+        if (cats.containsKey("T1H")) wl.setTmp(new BigDecimal(cats.get("T1H")));
         wl.setPty(mapPty(cats.get("PTY")));
-        if (cats.containsKey("POP")) wl.setPop(parseIntSafe(cats.get("POP")));
-        wl.setPcp(cats.get("PCP"));
+        wl.setPcp(cats.get("RN1"));
         if (cats.containsKey("WSD")) wl.setWsd(new BigDecimal(cats.get("WSD")));
         if (cats.containsKey("REH")) wl.setReh(parseIntSafe(cats.get("REH")));
         return wl;
@@ -155,16 +159,6 @@ public class KmaWeatherNormalizer implements Normalizer {
             log.error("[KMA_WEATHER] event publish failed — traceId={} collectionType={} region={} timeWindow={} completedAt={}",
                 traceId, COLLECTION_TYPE, REGION, timeWindow, completedAt, e);
         }
-    }
-
-    private String mapSky(String code) {
-        if (code == null) return null;
-        return switch (code) {
-            case "1" -> "맑음";
-            case "3" -> "구름조금";
-            case "4" -> "흐림";
-            default -> code;
-        };
     }
 
     private String mapPty(String code) {

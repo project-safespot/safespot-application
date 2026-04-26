@@ -197,7 +197,32 @@ structured log 및 metric label에는 `queue_name`을 포함할 수 있지만:
 - async-worker: normalized DB data에서 Redis read model을 build한다.
 - api-public-read: Redis read model만 읽는다.
 
-## 8. 관련 문서
+## 8. External API Contract
+
+각 source의 URL 계약, 인증 방식, 필수 파라미터를 명시한다.
+실제 인증키 값은 기재하지 않으며 env var명만 사용한다.
+
+| source | provider | URL pattern | auth location | required params / path segments | daily quota | polling interval | enabled default | response root | verification status |
+|---|---|---|---|---|---|---|---|---|---|
+| `SAFETY_DATA_ALERT` | 행정안전부 SafetyData | `https://www.safetydata.go.kr/V2/api/DSSP-IF-00247` | query `serviceKey` (env: `SAFETY_DATA_ALERT_API_KEY`) | `pageNo`, `numOfRows`, `returnType=json` | 1,000/day | 2분 | true | `response.body.items.item[]` | TODO: verification required — V2 응답 구조 실계정 확인 필요 |
+| `KMA_EARTHQUAKE` | 기상청 / data.go.kr | `https://apis.data.go.kr/1360000/EqkInfoService/getEqkMsg` | query `ServiceKey` (env: `KMA_API_KEY`) | `pageNo`, `numOfRows`, `dataType=JSON` | 10,000/day | 1분 | true | `response.body.items.item[]` | code-inferred |
+| `SEOUL_EARTHQUAKE` | 서울 열린데이터 | `http://openapi.seoul.go.kr:8088/{KEY}/json/TbEqkKenvinfo/{start}/{end}` | path segment `{KEY}` (env: `SEOUL_API_KEY`) | start=1, end=20 (path) | 없음 | 30초 | true | `TbEqkKenvinfo.row[]` | TODO: verification required — 필드명 미확인 |
+| `SEOUL_RIVER_LEVEL` | 서울 열린데이터 | `http://openapi.seoul.go.kr:8088/{KEY}/json/ListRiverStageService/{start}/{end}` | path segment `{KEY}` (env: `SEOUL_API_KEY`) | start=1, end=50 (path) | 없음 | 30초 | true | `ListRiverStageService.row[]` | TODO: verification required — 필드명 미확인 |
+| `KMA_WEATHER` | 기상청 초단기실황 / data.go.kr | `https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst` | query `ServiceKey` (env: `KMA_API_KEY`) | `pageNo`, `numOfRows`, `dataType=JSON`, `base_date`, `base_time`, `nx`, `ny` | 10,000/day | 매시 정각 | true | `response.body.items.item[]` | code-inferred |
+| `AIR_KOREA_AIR_QUALITY` | AirKorea / data.go.kr | `https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty` | query `serviceKey` (env: `AIR_KOREA_API_KEY`) | `returnType=json`, `numOfRows`, `pageNo`, `sidoName=서울`, `ver=1.0` | 500/day | 매시 정각 | true | `response.body.items[]` | smoke OK — 정상 동작 확인 |
+| `SEOUL_SHELTER_EARTHQUAKE` | 서울 열린데이터 | `http://openapi.seoul.go.kr:8088/{KEY}/json/TlEtqkP/{start}/{end}` | path segment `{KEY}` (env: `SEOUL_API_KEY`) | start=1, end=1000 (path) | 없음 | 매일 02:00 | true | `TlEtqkP.row[]` | TODO: verification required — 필드명 미확인 |
+| `SEOUL_SHELTER_LANDSLIDE` | odcloud (공공데이터포털) | `https://api.odcloud.kr/api/15118898/v1/uddi:19815091-0f2c-4d7a-a77f-96cec77038ad` | query `serviceKey` (env: `ODCLOUD_API_KEY`) | `page=1`, `perPage=1000`, `returnType=json` | 없음 | 매일 02:00 | true | `data[]` | TODO: verification required — odcloud 실계정 응답 필드명 확인 필요. 현재 normalizer 필드명은 미검증 |
+| `FORESTRY_LANDSLIDE` | 산림청 / data.go.kr | `https://apis.data.go.kr/1400119/slfswarnApi/getSlfswarnDataList` | query `serviceKey` (env: `FORESTRY_API_KEY`) | `pageNo`, `numOfRows`, `dataType=JSON` | 10,000/day | 5분 | **false** (승인 대기 중) | `response.body.items.item[]` | TODO: verification required — 승인 완료 후 실계정으로 검증 |
+| `SEOUL_SHELTER_FLOOD` | 서울 열린데이터 | 파일 데이터 (xlsx) | 해당 없음 | 해당 없음 | 해당 없음 | 배치 전용 | false (batch-only placeholder) | 해당 없음 | TODO: verification required — 파일 파싱 구현 전 |
+
+**참고:**
+- `code-inferred`: 실계정으로 실제 호출 검증을 완료하지 않았으며 코드에서 추론한 계약이다.
+- `SEOUL_API_KEY` 환경변수는 `SEOUL_EARTHQUAKE`, `SEOUL_RIVER_LEVEL`, `SEOUL_SHELTER_EARTHQUAKE` 3개 source가 공유한다.
+- `ODCLOUD_API_KEY` 환경변수는 `SEOUL_SHELTER_LANDSLIDE` 전용이다. odcloud는 서울 열린데이터광장과 별도 provider이며 인증키가 다르다.
+- `KMA_API_KEY` 환경변수는 `KMA_EARTHQUAKE`와 `KMA_WEATHER` 2개 source가 공유한다.
+- 서울 OpenAPI 계열은 query param(`KEY`, `Type`, `pIndex`, `pSize`) 방식이 아닌 **path KEY 방식**으로만 호출한다.
+
+## 9. 관련 문서
 
 - event envelope: `docs/event/event-envelope.md`
 - async worker behavior: `docs/event/async-worker.md`

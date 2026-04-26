@@ -35,3 +35,5 @@ ingestion:
     connect-timeout-seconds: 5
     read-timeout-seconds: 10
     max-retries: 3
+  api-key-validation:
+    fail-on-dummy: false
