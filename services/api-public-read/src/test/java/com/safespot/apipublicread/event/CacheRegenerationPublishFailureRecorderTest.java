@@ -10,6 +10,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -25,6 +26,7 @@ class CacheRegenerationPublishFailureRecorderTest {
         when(envelope.idempotencyKey()).thenReturn("cache-regen:abc:1000");
         when(envelope.payload()).thenReturn(payload);
         when(payload.cacheKey()).thenReturn(cacheKey);
+        lenient().when(payload.cacheKeyFamily()).thenReturn("disaster_messages_list");
         return envelope;
     }
 
@@ -82,5 +84,15 @@ class CacheRegenerationPublishFailureRecorderTest {
             Files.writeString(file, "block");
             recorder.record(stubEnvelope("disaster:messages:list:seoul"), "{\"eventId\":\"id-x\"}");
         }).doesNotThrowAnyException();
+    }
+
+    @Test
+    void record_malformedFilePath_doesNotPropagateException() {
+        // null byte in path triggers InvalidPathException (unchecked) inside Path.of()
+        CacheRegenerationPublishFailureRecorder recorder =
+                new CacheRegenerationPublishFailureRecorder("/tmp/invalid\0path/failures.jsonl");
+
+        assertThatCode(() -> recorder.record(stubEnvelope("disaster:messages:list:seoul"), "{}"))
+                .doesNotThrowAnyException();
     }
 }

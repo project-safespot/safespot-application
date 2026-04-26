@@ -42,8 +42,9 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
             log.info("[CacheRegen] sent to SQS idempotencyKey={} traceId={}",
                     envelope.idempotencyKey(), envelope.traceId());
         } catch (Exception e) {
-            log.error("[CacheRegen] SQS send failed idempotencyKey={} traceId={} cacheKey={}: {}",
-                    envelope.idempotencyKey(), envelope.traceId(), cacheKey, e.getMessage());
+            log.error("[CacheRegen] SQS send failed eventId={} eventType={} idempotencyKey={} traceId={} cacheKeyFamily={}: {}",
+                    envelope.eventId(), envelope.eventType(), envelope.idempotencyKey(),
+                    envelope.traceId(), envelope.payload().cacheKeyFamily(), e.getMessage());
             failureRecorder.record(envelope, body);
         }
     }
