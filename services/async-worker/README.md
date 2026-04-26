@@ -58,41 +58,29 @@ open services/async-worker/build/reports/tests/test/index.html
 
 ---
 
-## cache-worker 로컬 실행
+## Lambda handler
 
-Lambda 핸들러를 직접 실행할 수는 없지만, Spring Boot 컨텍스트는 아래 방식으로 올릴 수 있다.
+Lambda 엔트리포인트는 아래 두 클래스다.
 
-```bash
-DB_URL=jdbc:postgresql://localhost:5432/safespot \
-DB_USERNAME=safespot \
-DB_PASSWORD=password \
-REDIS_HOST=localhost \
-REDIS_PORT=6379 \
-./gradlew :services:async-worker:bootRun \
-  --args='--spring.profiles.active=cache-worker'
-```
+- `com.safespot.asyncworker.lambda.CacheWorkerHandler`
+- `com.safespot.asyncworker.lambda.ReadModelWorkerHandler`
 
-## readmodel-worker 로컬 실행
-
-```bash
-DB_URL=jdbc:postgresql://localhost:5432/safespot \
-DB_USERNAME=safespot \
-DB_PASSWORD=password \
-REDIS_HOST=localhost \
-REDIS_PORT=6379 \
-./gradlew :services:async-worker:bootRun \
-  --args='--spring.profiles.active=readmodel-worker'
-```
+두 핸들러는 `RequestHandler<SQSEvent, SQSBatchResponse>`를 구현하고, 내부에서 Spring 컨텍스트를 초기화한 뒤 `SqsBatchProcessor`로 SQS batch를 전달한다.
 
 ---
 
 ## 빌드
 
 ```bash
-./gradlew :services:async-worker:build
+./gradlew :services:async-worker:build :services:async-worker:lambdaPackage
 ```
 
-Fat JAR 위치: `services/async-worker/build/libs/async-worker-*.jar`
+Lambda ZIP 위치: `services/async-worker/build/distributions/async-worker-lambda-*.zip`
+
+ZIP 구조:
+
+- `lib/async-worker-*.jar`
+- `lib/*.jar` runtime dependency
 
 ---
 

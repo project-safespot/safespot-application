@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 
 @SpringBootTest(classes = CacheWorkerApplication.class)
-@ActiveProfiles("cache-worker")
+@ActiveProfiles({"cache-worker", "test"})
 class CacheWorkerContextTest {
 
     @MockitoBean

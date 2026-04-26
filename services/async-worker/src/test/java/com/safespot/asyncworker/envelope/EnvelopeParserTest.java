@@ -23,7 +23,7 @@ class EnvelopeParserTest {
               "eventId": "evt-001",
               "eventType": "EvacuationEntryCreated",
               "traceId": "trace-001",
-              "idempotencyKey": "entry:301:ENTERED:v1",
+              "idempotencyKey": "entry:301:ENTERED",
               "payload": {"entryId": 301, "shelterId": 101}
             }
             """;

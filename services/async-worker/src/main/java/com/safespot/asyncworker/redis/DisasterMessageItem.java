@@ -1,8 +1,8 @@
 package com.safespot.asyncworker.redis;
 
-// disaster:detail:{alertId} 의 payload 구조
+// disaster:messages:recent:seoul, disaster:message:core:seoul, disaster:messages:list:seoul 의 개별 항목
 // redis-key.md §2.1 공통 Payload 계약 기준
-public record DisasterDetailCacheValue(
+public record DisasterMessageItem(
     int schemaVersion,
     Long alertId,
     String disasterType,

@@ -5,9 +5,9 @@ import java.util.Optional;
 
 public interface DisasterAlertRepository {
 
-    List<DisasterAlertRecord> findActiveByRegion(String region);
-
-    List<DisasterAlertRecord> findByRegionAndDisasterType(String region, String disasterType);
-
     Optional<DisasterAlertRecord> findById(Long alertId);
+
+    List<DisasterAlertRecord> findInScopeOrderByIssuedAtDesc(int limit);
+
+    Optional<DisasterAlertRecord> findCoreMessage();
 }

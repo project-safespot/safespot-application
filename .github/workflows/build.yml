@@ -8,4 +8,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: ./gradlew build
+      - run: ./gradlew :services:async-worker:build :services:async-worker:lambdaPackage
