@@ -100,6 +100,23 @@ public class ApiCoreMetrics {
                 .increment();
     }
 
+    public void incSqsPublishPermanentFailure(String eventType, String queueName) {
+        Counter.builder("api_core_sqs_publish_permanent_failure_total")
+                .tag("service", "api-core")
+                .tag("event_type", eventType)
+                .tag("queue_name", queueName)
+                .register(registry)
+                .increment();
+    }
+
+    public void incSqsPublishFallbackPersist(String result) {
+        Counter.builder("api_core_sqs_publish_fallback_persist_total")
+                .tag("service", "api-core")
+                .tag("result", result)
+                .register(registry)
+                .increment();
+    }
+
     public void updateShelterCounts(long full, long crowded, long open) {
         shelterFullCount.set(full);
         shelterCrowdedCount.set(crowded);
