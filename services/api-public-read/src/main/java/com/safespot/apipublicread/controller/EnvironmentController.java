@@ -53,6 +53,12 @@ public class EnvironmentController {
         if (region == null && stationName == null) {
             throw new ApiException(ErrorCode.MISSING_REQUIRED_FIELD, "region, stationName 중 최소 1개는 필요합니다.");
         }
+        if (region != null && !regionToGridResolver.isSupported(region)) {
+            throw new ApiException(ErrorCode.UNSUPPORTED_REGION, "현재 서울 지역만 지원합니다.");
+        }
+        if (stationName != null && !regionToGridResolver.isSupported(stationName)) {
+            throw new ApiException(ErrorCode.UNSUPPORTED_REGION, "현재 서울 지역만 지원합니다.");
+        }
 
         AirQualityDto dto = environmentReadService.findAirQuality(region, stationName);
         return ResponseEntity.ok(ApiResponse.ok(dto));
