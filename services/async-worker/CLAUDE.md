@@ -52,7 +52,7 @@
 동작을 변경하기 전 관련 문서를 먼저 확인한다.
 
 - 이벤트 envelope / payload / idempotencyKey: `docs/event/event-envelope.md`
-- async-worker 처리 흐름 / retry / DLQ: `docs/async/async-worker.md`
+- async-worker 처리 흐름 / retry / DLQ: `docs/event/async-worker.md`
 - monitoring metric/log: `docs/monitoring/monitoring.md`
 - Redis key / TTL: `docs/redis-key/redis-key.md`, `docs/redis-key/cache-ttl.md`
 - api-public-read cache regeneration 기준: `docs/api/api-public-read.md`
@@ -105,11 +105,12 @@ SQS
 - `EnvironmentDataCollected`
 - `CacheRegenerationRequested` 중 shelter/environment 계열
 
-담당 작업:
+담당 작업 (Redis 출력):
 
-- `shelter:status:{shelterId}` 재계산 후 SET
-- `env:weather:{nx}:{ny}` SET
-- `env:air:{station_name}` SET
+- `shelter:status:{shelterId}` SET (TTL 30s)
+- `environment:weather:seoul` SET (TTL 7200s)
+- `environment:air-quality:seoul` SET (TTL 7200s)
+- `environment:weather-alert:seoul` SET (TTL 7200s)
 - shelter 계열 cache regeneration 처리
 
 ### readmodel-worker
@@ -119,12 +120,12 @@ SQS
 - `DisasterDataCollected`
 - `CacheRegenerationRequested` 중 disaster 계열
 
-담당 작업:
+담당 작업 (Redis 출력):
 
-- `disaster:active:{region}` SET/DEL
-- `disaster:alert:list:{region}:{disasterType}` SET
-- `disaster:detail:{alertId}` SET
-- `disaster:latest:{disasterType}:{region}` SET
+- `disaster:detail:{alertId}` SET (TTL 3600s)
+- `disaster:messages:recent:seoul` SET (TTL 300s)
+- `disaster:message:core:seoul` SET (TTL 300s)
+- `disaster:messages:list:seoul` SET (TTL 300s)
 
 ---
 
@@ -179,14 +180,16 @@ idempotencyKey 기준:
 - Redis 실패 시 재시도 후 DLQ로 이동한다.
 - 다음 조회 요청에서 Cache-Aside로 자연 복구될 수 있어야 한다.
 
-TTL 기준:
+TTL 기준 (cache-ttl.md 기준):
 
 - `shelter:status:{shelterId}`: 30초
-- `disaster:active:{region}`: 2분
-- `disaster:alert:list:{region}:{disasterType}`: 5분
-- `disaster:detail:{alertId}`: 10분
-- `env:weather:{nx}:{ny}`: 120분
-- `env:air:{station_name}`: 120분
+- `disaster:detail:{alertId}`: 3600초 (60분)
+- `disaster:messages:recent:seoul`: 300초 (5분)
+- `disaster:message:core:seoul`: 300초 (5분)
+- `disaster:messages:list:seoul`: 300초 (5분)
+- `environment:weather:seoul`: 7200초 (120분)
+- `environment:air-quality:seoul`: 7200초 (120분)
+- `environment:weather-alert:seoul`: 7200초 (120분)
 
 ---
 
@@ -275,7 +278,7 @@ Redis 작업 로그에는 필요한 경우 다음 필드를 포함한다.
 관련 변경 시 함께 확인:
 
 - `docs/event/event-envelope.md`
-- `docs/async/async-worker.md`
+- `docs/event/async-worker.md`
 - `docs/monitoring/monitoring.md`
 - `docs/redis-key/redis-key.md`
 - `docs/redis-key/cache-ttl.md`

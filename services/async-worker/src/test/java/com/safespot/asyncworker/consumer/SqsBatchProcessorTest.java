@@ -54,6 +54,18 @@ class SqsBatchProcessorTest {
     }
 
     @Test
+    void 처리_성공시_markCompleted_호출() {
+        when(idempotencyService.tryAcquire(any(), any())).thenReturn(true);
+        SQSEvent event = buildEvent("msg-001", validEnvelopeBody("EvacuationEntryCreated"), 1);
+
+        SQSBatchResponse response = processor.process(event);
+
+        assertThat(response.getBatchItemFailures()).isEmpty();
+        verify(idempotencyService).markCompleted(eq("key-001"), any());
+        verify(idempotencyService, never()).release(any());
+    }
+
+    @Test
     void idempotency_중복시_no_op_성공처리() {
         when(idempotencyService.tryAcquire(any(), any())).thenReturn(false);
         SQSEvent event = buildEvent("msg-001", validEnvelopeBody("EvacuationEntryCreated"), 1);
@@ -143,6 +155,28 @@ class SqsBatchProcessorTest {
         // release 실패해도 원래 실패 결과 반환 (예외 전파 안 됨)
         assertThat(response.getBatchItemFailures()).hasSize(1);
         assertThat(response.getBatchItemFailures().get(0).getItemIdentifier()).isEqualTo("msg-001");
+    }
+
+    @Test
+    void dispatch_실패_release_실패_후_재배달시_duplicate_ACK_아님() {
+        // 1차 시도: dispatch 실패, release 실패 (키가 PROCESSING으로 잔존)
+        when(idempotencyService.tryAcquire(any(), any())).thenReturn(true);
+        doThrow(new EventProcessingException("dispatch failed")).when(eventDispatcher).dispatch(any());
+        doThrow(new RedisCacheException("DEL failed")).when(idempotencyService).release(any());
+
+        SQSEvent first = buildEvent("msg-001", validEnvelopeBody("EvacuationEntryCreated"), 1);
+        assertThat(processor.process(first).getBatchItemFailures()).hasSize(1);
+
+        // 2차 시도: PROCESSING 키를 본 tryAcquire는 true 반환 (duplicate 아님 — 재시도 허용)
+        reset(eventDispatcher, idempotencyService);
+        when(idempotencyService.tryAcquire(any(), any())).thenReturn(true);  // PROCESSING → retry allowed
+
+        SQSEvent retry = buildEvent("msg-001", validEnvelopeBody("EvacuationEntryCreated"), 2);
+        SQSBatchResponse retryResponse = processor.process(retry);
+
+        assertThat(retryResponse.getBatchItemFailures()).isEmpty();
+        verify(eventDispatcher).dispatch(any());
+        verify(idempotencyService).markCompleted(any(), any());
     }
 
     // ── idempotency 자체 실패 ─────────────────────────────────────────────────

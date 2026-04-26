@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -99,16 +100,15 @@ public class SqsBatchProcessor {
                 workerMetrics.incrementFailures(eventTypeName, queueName, "APP_RETRY_LIMIT_EXCEEDED");
                 workerMetrics.incrementProcessed(eventTypeName, "failure", queueName);
                 workerMetrics.recordProcessingDuration(eventTypeName, queueName, durationMs);
+                workerMetrics.incrementDlqPublish(eventTypeName, "app_retry_limit_exceeded");
                 return MessageProcessingResult.failure(messageId, "AppRetryLimitExceeded", eventTypeName);
             }
 
-            acquired = idempotencyService.tryAcquire(
-                idempotencyKey,
-                IdempotencyTtl.forEventType(eventType)
-            );
+            Duration idempotencyTtl = IdempotencyTtl.forEventType(eventType);
+            acquired = idempotencyService.tryAcquire(idempotencyKey, idempotencyTtl);
             if (!acquired) {
                 long durationMs = System.currentTimeMillis() - startMs;
-                log.info("Duplicate event, no-op: eventId={}, eventType={}, traceId={}, awsRequestId={}, messageId={}, queueName={}, idempotencyKey={}",
+                log.info("Duplicate event (COMPLETED), no-op: eventId={}, eventType={}, traceId={}, awsRequestId={}, messageId={}, queueName={}, idempotencyKey={}",
                     eventId, eventTypeName, traceId, awsRequestId, messageId, queueName, idempotencyKey);
                 workerMetrics.incrementIdempotencySkipped(eventTypeName, queueName);
                 workerMetrics.incrementProcessed(eventTypeName, "skipped", queueName);
@@ -119,6 +119,8 @@ public class SqsBatchProcessor {
             try (var ignored = MDC.putCloseable("eventType", eventTypeName)) {
                 eventDispatcher.dispatch(envelope);
             }
+
+            idempotencyService.markCompleted(idempotencyKey, idempotencyTtl);
 
             long durationMs = System.currentTimeMillis() - startMs;
             workerMetrics.incrementSuccess(eventTypeName, queueName);

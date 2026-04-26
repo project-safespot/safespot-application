@@ -28,6 +28,37 @@ dependencies {
     testAnnotationProcessor 'org.projectlombok:lombok'
 }
 
+bootJar {
+    enabled = false
+}
+
+jar {
+    enabled = true
+    archiveClassifier = ''
+}
+
+tasks.register('lambdaPackage', Zip) {
+    group = 'build'
+    description = 'Packages the async-worker Lambda function classes and runtime dependencies as a zip archive.'
+
+    dependsOn tasks.named('jar')
+
+    archiveBaseName = 'async-worker-lambda'
+    destinationDirectory = layout.buildDirectory.dir('distributions')
+
+    from(tasks.named('jar')) {
+        into('lib')
+    }
+
+    from(configurations.runtimeClasspath) {
+        into('lib')
+    }
+}
+
+tasks.named('assemble') {
+    dependsOn tasks.named('lambdaPackage')
+}
+
 test {
     useJUnitPlatform()
 }

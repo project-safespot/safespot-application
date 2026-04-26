@@ -16,7 +16,6 @@ public class WorkerMetrics {
     private final MeterRegistry meterRegistry;
 
     // Prometheus: worker_processed_total{event_type, result, queue_name}
-    // result: success | failure | skipped
     public void incrementProcessed(String eventType, String result, String queueName) {
         Counter.builder("worker.processed")
             .tag("event_type", eventType)
@@ -46,7 +45,6 @@ public class WorkerMetrics {
     }
 
     // Prometheus: worker_processing_duration_seconds{event_type, queue_name}
-    // 모든 attempt(success/failure/skipped) 기준으로 기록
     public void recordProcessingDuration(String eventType, String queueName, long durationMs) {
         Timer.builder("worker.processing.duration")
             .tag("event_type", eventType)
@@ -65,8 +63,6 @@ public class WorkerMetrics {
     }
 
     // Prometheus: worker_redis_write_total{event_type, operation, result}
-    // event_type: MDC에서 SqsBatchProcessor가 주입 (unknown = 컨텍스트 없음)
-    // operation: SET | DEL
     public void incrementRedisWrite(String eventType, String operation, String result) {
         Counter.builder("worker.redis.write")
             .tag("event_type", eventType)
@@ -85,12 +81,57 @@ public class WorkerMetrics {
     }
 
     // Prometheus: worker_partial_batch_failure_total{queue_name, event_type}
-    // 메시지 단위 기준: process() 에서 실패한 event_type별로 각각 호출
     public void incrementPartialBatchFailure(String queueName, String eventType) {
         Counter.builder("worker.partial.batch.failure")
             .tag("queue_name", queueName)
             .tag("event_type", eventType)
             .register(meterRegistry)
             .increment();
+    }
+
+    // Prometheus: worker_dlq_publish_total{event_type, reason}
+    // app retry limit 초과 시점 — SQS DLQ 이동 직전 근사치
+    public void incrementDlqPublish(String eventType, String reason) {
+        Counter.builder("worker.dlq.publish")
+            .tag("event_type", eventType)
+            .tag("reason", reason)
+            .register(meterRegistry)
+            .increment();
+    }
+
+    // Prometheus: cache_regeneration_requested_total{cache_key_family, event_type, reason, schema_version}
+    public void incrementCacheRegenerationRequested(String cacheKeyFamily, String eventType, String reason, String schemaVersion) {
+        Counter.builder("cache.regeneration.requested")
+            .tag("cache_key_family", cacheKeyFamily != null ? cacheKeyFamily : "unknown")
+            .tag("event_type", eventType)
+            .tag("reason", reason != null ? reason : "unknown")
+            .tag("schema_version", schemaVersion != null ? schemaVersion : "unknown")
+            .register(meterRegistry)
+            .increment();
+    }
+
+    // Prometheus: cache_regeneration_completed_total{cache_key_family}
+    public void incrementCacheRegenerationCompleted(String cacheKeyFamily) {
+        Counter.builder("cache.regeneration.completed")
+            .tag("cache_key_family", cacheKeyFamily != null ? cacheKeyFamily : "unknown")
+            .register(meterRegistry)
+            .increment();
+    }
+
+    // Prometheus: cache_regeneration_failed_total{cache_key_family, reason}
+    public void incrementCacheRegenerationFailed(String cacheKeyFamily, String reason) {
+        Counter.builder("cache.regeneration.failed")
+            .tag("cache_key_family", cacheKeyFamily != null ? cacheKeyFamily : "unknown")
+            .tag("reason", reason)
+            .register(meterRegistry)
+            .increment();
+    }
+
+    // Prometheus: redis_payload_size_bytes{cache_key_family}
+    public void recordRedisPayloadSize(String cacheKeyFamily, long sizeBytes) {
+        DistributionSummary.builder("redis.payload.size.bytes")
+            .tag("cache_key_family", cacheKeyFamily)
+            .register(meterRegistry)
+            .record(sizeBytes);
     }
 }

@@ -6,6 +6,8 @@ import com.safespot.asyncworker.envelope.EventType;
 import com.safespot.asyncworker.exception.EventProcessingException;
 import com.safespot.asyncworker.handler.EventHandler;
 import com.safespot.asyncworker.payload.CacheRegenerationRequestedPayload;
+import com.safespot.asyncworker.metrics.WorkerMetrics;
+import com.safespot.asyncworker.redis.RedisKeyConstants;
 import com.safespot.asyncworker.service.disaster.DisasterReadModelService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,13 +20,11 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class CacheRegenerationReadModelWorkerHandler implements EventHandler {
 
-    private static final String DISASTER_ACTIVE_PREFIX     = "disaster:active:";
-    private static final String DISASTER_ALERT_LIST_PREFIX = "disaster:alert:list:";
-    private static final String DISASTER_DETAIL_PREFIX     = "disaster:detail:";
-    private static final String DISASTER_LATEST_PREFIX     = "disaster:latest:";
+    private static final String DISASTER_DETAIL_PREFIX = "disaster:detail:";
 
     private final DisasterReadModelService disasterReadModelService;
     private final ObjectMapper objectMapper;
+    private final WorkerMetrics workerMetrics;
 
     @Override
     public EventType supportedEventType() {
@@ -35,50 +35,50 @@ public class CacheRegenerationReadModelWorkerHandler implements EventHandler {
     public void handle(EventEnvelope envelope) {
         CacheRegenerationRequestedPayload payload = parsePayload(envelope);
         String cacheKey = payload.cacheKey();
-        log.info("Handling CacheRegenerationRequested (readmodel-worker): cacheKey={}, traceId={}",
-            cacheKey, envelope.getTraceId());
+        String cacheKeyFamily = payload.cacheKeyFamily();
+        String schemaVersion = payload.schemaVersion() != null ? String.valueOf(payload.schemaVersion()) : "unknown";
 
-        if (cacheKey.startsWith(DISASTER_ACTIVE_PREFIX)) {
-            String region = cacheKey.substring(DISASTER_ACTIVE_PREFIX.length());
-            disasterReadModelService.rebuildActiveList(region);
-            return;
-        }
+        log.info("Handling CacheRegenerationRequested (readmodel-worker): cacheKey={}, cacheKeyFamily={}, traceId={}",
+            cacheKey, cacheKeyFamily, envelope.getTraceId());
 
-        if (cacheKey.startsWith(DISASTER_ALERT_LIST_PREFIX)) {
-            String remainder = cacheKey.substring(DISASTER_ALERT_LIST_PREFIX.length());
-            int lastColon = remainder.lastIndexOf(':');
-            if (lastColon < 0) {
-                throw new EventProcessingException(
-                    "CacheRegenerationRequested: invalid disaster:alert:list key format: " + cacheKey);
+        workerMetrics.incrementCacheRegenerationRequested(
+            cacheKeyFamily, EventType.CacheRegenerationRequested.name(),
+            payload.reason(), schemaVersion);
+
+        try {
+            if (RedisKeyConstants.DISASTER_MESSAGES_RECENT.equals(cacheKey)) {
+                disasterReadModelService.rebuildRecent();
+                workerMetrics.incrementCacheRegenerationCompleted(cacheKeyFamily);
+                return;
             }
-            String region = remainder.substring(0, lastColon);
-            String disasterType = remainder.substring(lastColon + 1);
-            disasterReadModelService.rebuildAlertList(region, disasterType);
-            return;
-        }
 
-        if (cacheKey.startsWith(DISASTER_DETAIL_PREFIX)) {
-            String idStr = cacheKey.substring(DISASTER_DETAIL_PREFIX.length());
-            Long alertId = parseId(idStr, cacheKey);
-            disasterReadModelService.rebuildDetail(alertId);
-            return;
-        }
-
-        if (cacheKey.startsWith(DISASTER_LATEST_PREFIX)) {
-            String remainder = cacheKey.substring(DISASTER_LATEST_PREFIX.length());
-            int firstColon = remainder.indexOf(':');
-            if (firstColon < 0) {
-                throw new EventProcessingException(
-                    "CacheRegenerationRequested: invalid disaster:latest key format: " + cacheKey);
+            if (RedisKeyConstants.DISASTER_MESSAGE_CORE.equals(cacheKey)) {
+                disasterReadModelService.rebuildCore();
+                workerMetrics.incrementCacheRegenerationCompleted(cacheKeyFamily);
+                return;
             }
-            String disasterType = remainder.substring(0, firstColon);
-            String region = remainder.substring(firstColon + 1);
-            disasterReadModelService.rebuildLatest(disasterType, region);
-            return;
-        }
 
-        log.warn("CacheRegenerationRequested: unhandled cacheKey prefix for readmodel-worker, no-op: cacheKey={}, traceId={}",
-            cacheKey, envelope.getTraceId());
+            if (RedisKeyConstants.DISASTER_MESSAGES_LIST.equals(cacheKey)) {
+                disasterReadModelService.rebuildList();
+                workerMetrics.incrementCacheRegenerationCompleted(cacheKeyFamily);
+                return;
+            }
+
+            if (cacheKey.startsWith(DISASTER_DETAIL_PREFIX)) {
+                String idStr = cacheKey.substring(DISASTER_DETAIL_PREFIX.length());
+                Long alertId = parseId(idStr, cacheKey);
+                disasterReadModelService.rebuildDetail(alertId);
+                workerMetrics.incrementCacheRegenerationCompleted(cacheKeyFamily);
+                return;
+            }
+
+            log.warn("CacheRegenerationRequested: unhandled cacheKey for readmodel-worker, no-op: cacheKey={}, traceId={}",
+                cacheKey, envelope.getTraceId());
+
+        } catch (Exception e) {
+            workerMetrics.incrementCacheRegenerationFailed(cacheKeyFamily, e.getClass().getSimpleName());
+            throw e;
+        }
     }
 
     private Long parseId(String idStr, String cacheKey) {

@@ -14,7 +14,52 @@ import java.time.Duration;
 @RequiredArgsConstructor
 public class RedisIdempotencyService implements IdempotencyService {
 
+    static final String PROCESSING = "PROCESSING";
+    static final String COMPLETED  = "COMPLETED";
+
     private final StringRedisTemplate redisTemplate;
+
+    @Override
+    public boolean tryAcquire(String idempotencyKey, Duration ttl) {
+        String redisKey = RedisKeyConstants.idempotency(idempotencyKey);
+        try {
+            Boolean acquired = redisTemplate.opsForValue().setIfAbsent(redisKey, PROCESSING, ttl);
+            if (acquired == null) {
+                log.error("Idempotency SETNX returned null (abnormal Redis response): key={}", redisKey);
+                throw new RedisCacheException("Idempotency SETNX null response: key=" + redisKey);
+            }
+            if (acquired) {
+                return true;
+            }
+            // key already exists — check state to distinguish COMPLETED vs PROCESSING
+            String existing = redisTemplate.opsForValue().get(redisKey);
+            if (COMPLETED.equals(existing)) {
+                log.info("Idempotency duplicate (COMPLETED): key={}", redisKey);
+                return false;
+            }
+            // PROCESSING or null (race): previous attempt failed, allow retry
+            log.info("Idempotency key is PROCESSING (previous failed), allowing retry: key={}", redisKey);
+            return true;
+        } catch (RedisCacheException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Idempotency SETNX failed: key={}", redisKey, e);
+            throw new RedisCacheException("Idempotency SETNX failed: key=" + redisKey, e);
+        }
+    }
+
+    @Override
+    public void markCompleted(String idempotencyKey, Duration ttl) {
+        String redisKey = RedisKeyConstants.idempotency(idempotencyKey);
+        try {
+            redisTemplate.opsForValue().set(redisKey, COMPLETED, ttl);
+            log.info("Idempotency key marked COMPLETED: key={}", redisKey);
+        } catch (Exception e) {
+            // markCompleted failure: key stays PROCESSING
+            // if SQS redelivers, tryAcquire sees PROCESSING → returns true → re-processes (idempotent writes)
+            log.warn("Idempotency markCompleted failed, key stays PROCESSING: key={}", redisKey, e);
+        }
+    }
 
     @Override
     public void release(String idempotencyKey) {
@@ -23,29 +68,9 @@ public class RedisIdempotencyService implements IdempotencyService {
             redisTemplate.delete(redisKey);
             log.info("Idempotency key released: key={}", redisKey);
         } catch (Exception e) {
-            // release 실패 시 키가 남음 → 재시도가 duplicate로 차단될 수 있음
-            // 이 경우 TTL 만료 후 자연 복구. 원래 실패 결과를 방해하지 않기 위해 예외 전파 안 함
-            log.warn("Idempotency release failed, key may persist until TTL expiry: key={}", redisKey, e);
-        }
-    }
-
-    @Override
-    public boolean tryAcquire(String idempotencyKey, Duration ttl) {
-        String redisKey = RedisKeyConstants.idempotency(idempotencyKey);
-        try {
-            Boolean acquired = redisTemplate.opsForValue().setIfAbsent(redisKey, "1", ttl);
-            if (acquired == null) {
-                // null = Redis 비정상 응답 — 멱등성 보장 불가 → 실패 처리
-                log.error("Idempotency SETNX returned null (abnormal Redis response): key={}", redisKey);
-                throw new RedisCacheException("Idempotency SETNX null response: key=" + redisKey);
-            }
-            return acquired;
-        } catch (RedisCacheException e) {
-            throw e;
-        } catch (Exception e) {
-            // SETNX I/O 실패 시 상위로 전파 → BatchItemFailure → SQS 재시도
-            log.error("Idempotency SETNX failed: key={}", redisKey, e);
-            throw new RedisCacheException("Idempotency SETNX failed: key=" + redisKey, e);
+            // release failure: key stays PROCESSING
+            // next tryAcquire sees PROCESSING → returns true → retry proceeds — NOT message loss
+            log.warn("Idempotency release failed, key stays PROCESSING (next delivery will retry): key={}", redisKey, e);
         }
     }
 }

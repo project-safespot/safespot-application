@@ -49,7 +49,7 @@
 - API 공통 정책: `docs/api/api-common.md`
 - api-core API: `docs/api/api-core.md`
 - 이벤트 envelope / payload / idempotencyKey: `docs/event/event-envelope.md`
-- worker 기대 동작: `docs/async/async-worker.md`
+- worker 기대 동작: `docs/event/async-worker.md`
 - monitoring metric/log: `docs/monitoring/monitoring.md`
 - RDS schema: `docs/data/db-schema.md`
 - Redis key / TTL: `docs/redis-key/redis-key.md`, `docs/redis-key/cache-ttl.md`
@@ -130,7 +130,7 @@ update 이벤트는 반드시 변경 단위 고유 식별자(eventId)를 포함�
 
 - `docs/api/api-core.md`
 - `docs/event/event-envelope.md`
-- `docs/async/async-worker.md`
+- `docs/event/async-worker.md`
 - `docs/monitoring/monitoring.md`
 
 수정 금지:

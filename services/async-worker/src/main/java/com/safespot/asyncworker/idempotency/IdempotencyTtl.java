@@ -13,7 +13,7 @@ public final class IdempotencyTtl {
     public static final Duration SHELTER             = Duration.ofMinutes(5);
     public static final Duration DISASTER            = Duration.ofMinutes(15);
     public static final Duration ENVIRONMENT         = Duration.ofMinutes(130);
-    // suppress window(10s) + 처리 여유분
+    // cache-ttl.md: suppress:cache-regeneration TTL 30s에 맞춤
     public static final Duration CACHE_REGENERATION  = Duration.ofSeconds(30);
 
     public static Duration forEventType(EventType eventType) {

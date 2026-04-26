@@ -5,5 +5,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record CacheRegenerationRequestedPayload(
     String cacheKey,
-    String requestedAt
+    String cacheKeyFamily,
+    String requestedAt,
+    String reason,
+    Integer schemaVersion
 ) {}
