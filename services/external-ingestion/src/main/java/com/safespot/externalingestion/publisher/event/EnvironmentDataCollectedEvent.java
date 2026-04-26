@@ -1,5 +1,6 @@
 package com.safespot.externalingestion.publisher.event;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Getter;
 
@@ -9,6 +10,7 @@ public class EnvironmentDataCollectedEvent extends IngestionEvent {
     @JsonProperty("payload")
     private final Payload payload;
 
+    @JsonIgnore
     private final String timeWindow;
 
     public EnvironmentDataCollectedEvent(String traceId, String collectionType, String region,

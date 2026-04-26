@@ -5,21 +5,25 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.safespot.externalingestion.domain.entity.*;
 import com.safespot.externalingestion.metrics.IngestionMetrics;
 import com.safespot.externalingestion.publisher.CacheEventPublisher;
+import com.safespot.externalingestion.publisher.event.DisasterDataCollectedEvent;
 import com.safespot.externalingestion.repository.DisasterAlertRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 
 @ExtendWith(MockitoExtension.class)
 class SafetyDataAlertNormalizerTest {
@@ -33,7 +37,7 @@ class SafetyDataAlertNormalizerTest {
     void setUp() {
         ObjectMapper om = new ObjectMapper().registerModule(new JavaTimeModule());
         IngestionMetrics metrics = new IngestionMetrics(new SimpleMeterRegistry());
-        normalizer = new SafetyDataAlertNormalizer(disasterAlertRepo, cacheEventPublisher, metrics, om);
+        normalizer = new SafetyDataAlertNormalizer(disasterAlertRepo, cacheEventPublisher, metrics, om, new SeoulScopePolicy());
     }
 
     @Test
@@ -48,7 +52,7 @@ class SafetyDataAlertNormalizerTest {
         given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any(OffsetDateTime.class))).willReturn(false);
         DisasterAlert saved = new DisasterAlert();
         saved.setAlertId(1L);
-        saved.setRegion("서울특별시");
+        saved.setRegion("seoul");
         saved.setDisasterType("FLOOD");
         given(disasterAlertRepo.save(any(DisasterAlert.class))).willReturn(saved);
 
@@ -62,7 +66,14 @@ class SafetyDataAlertNormalizerTest {
             "CAUTION".equals(a.getLevel()) &&
             Integer.valueOf(2).equals(a.getLevelRank()) &&
             Boolean.TRUE.equals(a.getIsInScope()) &&
-            "홍수".equals(a.getRawType())
+            "홍수".equals(a.getRawType()) &&
+            "seoul".equals(a.getRegion()) &&
+            "서울특별시".equals(a.getSourceRegion()) &&
+            // raw token fields must be stored as valid JSON arrays
+            a.getRawCategoryTokens() != null &&
+            a.getRawCategoryTokens().startsWith("[") && a.getRawCategoryTokens().endsWith("]") &&
+            a.getRawLevelTokens() != null &&
+            a.getRawLevelTokens().startsWith("[") && a.getRawLevelTokens().endsWith("]")
         ));
         verify(cacheEventPublisher).publish(any(), eq("disaster-collection"));
     }
@@ -121,7 +132,7 @@ class SafetyDataAlertNormalizerTest {
         given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any())).willReturn(false);
         DisasterAlert saved = new DisasterAlert();
         saved.setAlertId(2L);
-        saved.setRegion("서울 관악구");
+        saved.setRegion("seoul");
         saved.setDisasterType("LANDSLIDE");
         given(disasterAlertRepo.save(any())).willReturn(saved);
 
@@ -164,6 +175,83 @@ class SafetyDataAlertNormalizerTest {
         assertThat(result.getSucceeded()).isEqualTo(0);
         verify(disasterAlertRepo, never()).save(any());
         verify(cacheEventPublisher, never()).publish(any(), any());
+    }
+
+    @Test
+    void normalize_mixedTypes_publishesOneEvent() {
+        ExternalApiRawPayload raw = buildRaw("""
+            {"response":{"body":{"items":{"item":[
+              {"MSG_CN":"지진 발생","RCPTN_RGN_NM":"서울특별시",
+               "EMRG_STEP_NM":"주의","DST_SE_NM":"지진","CRT_DT":"2026-04-21 10:00:00"},
+              {"MSG_CN":"홍수 경보 발령","RCPTN_RGN_NM":"서울 강남구",
+               "EMRG_STEP_NM":"경계","DST_SE_NM":"홍수","CRT_DT":"2026-04-21 10:05:00"}
+            ]}}}}
+            """);
+
+        given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any(OffsetDateTime.class))).willReturn(false);
+        DisasterAlert eq = new DisasterAlert(); eq.setAlertId(1L); eq.setDisasterType("EARTHQUAKE");
+        DisasterAlert fl = new DisasterAlert(); fl.setAlertId(2L); fl.setDisasterType("FLOOD");
+        given(disasterAlertRepo.save(any(DisasterAlert.class)))
+            .willReturn(eq)
+            .willReturn(fl);
+
+        NormalizationResult result = normalizer.normalize(raw);
+
+        assertThat(result.getSucceeded()).isEqualTo(2);
+        // ONE event per run, not per type
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(cacheEventPublisher, times(1)).publish(any(), eq("disaster-collection"));
+        verify(cacheEventPublisher).publish(argThat(e -> {
+            DisasterDataCollectedEvent ev = (DisasterDataCollectedEvent) e;
+            return "DISASTER".equals(ev.getPayload().getCollectionType()) &&
+                   ev.getPayload().getAffectedAlertIds().containsAll(List.of(1L, 2L));
+        }), any());
+    }
+
+    @Test
+    void normalize_clearMessage_hasExpiredAlertsTrue() {
+        ExternalApiRawPayload raw = buildRaw("""
+            {"response":{"body":{"items":{"item":[
+              {"MSG_CN":"홍수 경보 해제","RCPTN_RGN_NM":"서울특별시",
+               "EMRG_STEP_NM":"주의","DST_SE_NM":"홍수","CRT_DT":"2026-04-21 14:00:00"}
+            ]}}}}
+            """);
+
+        given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any(OffsetDateTime.class))).willReturn(false);
+        DisasterAlert saved = new DisasterAlert();
+        saved.setAlertId(10L);
+        saved.setDisasterType("FLOOD");
+        given(disasterAlertRepo.save(any(DisasterAlert.class))).willReturn(saved);
+
+        normalizer.normalize(raw);
+
+        verify(cacheEventPublisher).publish(argThat(e -> {
+            DisasterDataCollectedEvent ev = (DisasterDataCollectedEvent) e;
+            return ev.getPayload().isHasExpiredAlerts();
+        }), any());
+    }
+
+    @Test
+    void normalize_alertMessage_hasExpiredAlertsFalse() {
+        ExternalApiRawPayload raw = buildRaw("""
+            {"response":{"body":{"items":{"item":[
+              {"MSG_CN":"지진 발생 위험","RCPTN_RGN_NM":"서울특별시",
+               "EMRG_STEP_NM":"경계","DST_SE_NM":"지진","CRT_DT":"2026-04-21 15:00:00"}
+            ]}}}}
+            """);
+
+        given(disasterAlertRepo.existsBySourceAndIssuedAt(anyString(), any(OffsetDateTime.class))).willReturn(false);
+        DisasterAlert saved = new DisasterAlert();
+        saved.setAlertId(11L);
+        saved.setDisasterType("EARTHQUAKE");
+        given(disasterAlertRepo.save(any(DisasterAlert.class))).willReturn(saved);
+
+        normalizer.normalize(raw);
+
+        verify(cacheEventPublisher).publish(argThat(e -> {
+            DisasterDataCollectedEvent ev = (DisasterDataCollectedEvent) e;
+            return !ev.getPayload().isHasExpiredAlerts();
+        }), any());
     }
 
     private ExternalApiRawPayload buildRaw(String body) {

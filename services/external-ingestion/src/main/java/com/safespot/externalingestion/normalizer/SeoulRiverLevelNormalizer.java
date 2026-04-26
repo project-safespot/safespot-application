@@ -37,6 +37,7 @@ import java.util.List;
 public class SeoulRiverLevelNormalizer implements Normalizer {
 
     private static final String QUEUE = "disaster-collection";
+    private static final String EVENT_TYPE = "DisasterDataCollected";
     private static final String REGION = "seoul";
     private static final String DISASTER_TYPE = "FLOOD";
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
@@ -47,6 +48,7 @@ public class SeoulRiverLevelNormalizer implements Normalizer {
     private final CacheEventPublisher cacheEventPublisher;
     private final IngestionMetrics metrics;
     private final ObjectMapper objectMapper;
+    private final SeoulScopePolicy seoulScopePolicy;
 
     @Override
     public String getSourceCode() {
@@ -71,6 +73,13 @@ public class SeoulRiverLevelNormalizer implements Normalizer {
 
                 try {
                     metrics.incrementDisasterAlertReceived(getSourceCode());
+                    String sourceRegion = row.path("GU_NM").asText("서울특별시");
+
+                    if (!seoulScopePolicy.isInScope(sourceRegion)) {
+                        log.debug("[SEOUL_RIVER_LEVEL] non-Seoul region={} — skip", sourceRegion);
+                        continue;
+                    }
+
                     OffsetDateTime issuedAt = parseDateTime(row.path("STD_DT").asText());
 
                     if (disasterAlertRepo.existsBySourceAndIssuedAt(getSourceCode(), issuedAt)) {
@@ -79,14 +88,13 @@ public class SeoulRiverLevelNormalizer implements Normalizer {
 
                     String station = row.path("STATION").asText("미상");
                     String waterLevel = row.path("WATER_LEVEL").asText("");
-                    String sourceRegion = row.path("GU_NM").asText("서울특별시");
 
                     DisasterAlert alert = new DisasterAlert();
                     alert.setSource(getSourceCode());
                     alert.setRawType("하천수위");
                     alert.setDisasterType(DISASTER_TYPE);
                     alert.setSourceRegion(sourceRegion);
-                    alert.setRegion(sourceRegion);
+                    alert.setRegion(REGION);
                     alert.setRawLevel(rawLevelStr);
                     alert.setRawLevelTokens(toJsonArray(List.of(rawLevelStr)));
                     alert.setLevel(mapLevel(rawLevelStr));
@@ -130,10 +138,11 @@ public class SeoulRiverLevelNormalizer implements Normalizer {
             DisasterDataCollectedEvent event = new DisasterDataCollectedEvent(
                 traceId, DISASTER_TYPE, REGION, affectedAlertIds, false, completedAt);
             cacheEventPublisher.publish(event, QUEUE);
-            metrics.incrementSqsPublish(getSourceCode());
+            metrics.incrementSqsPublish(getSourceCode(), QUEUE, EVENT_TYPE);
         } catch (Exception e) {
-            metrics.incrementSqsPublishFailure(getSourceCode());
-            log.error("[SEOUL_RIVER_LEVEL] event publish failed alertIds={}", affectedAlertIds, e);
+            metrics.incrementSqsPublishFailure(getSourceCode(), QUEUE, EVENT_TYPE);
+            log.error("[SEOUL_RIVER_LEVEL] event publish failed — traceId={} collectionType={} region={} alertIds={} completedAt={}",
+                traceId, DISASTER_TYPE, REGION, affectedAlertIds, completedAt, e);
         }
     }
 

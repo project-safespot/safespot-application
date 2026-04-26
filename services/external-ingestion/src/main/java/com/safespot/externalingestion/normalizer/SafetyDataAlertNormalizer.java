@@ -35,6 +35,7 @@ import java.util.*;
 public class SafetyDataAlertNormalizer implements Normalizer {
 
     private static final String QUEUE = "disaster-collection";
+    private static final String EVENT_TYPE = "DisasterDataCollected";
     private static final String REGION = "seoul";
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -50,6 +51,7 @@ public class SafetyDataAlertNormalizer implements Normalizer {
     private final CacheEventPublisher cacheEventPublisher;
     private final IngestionMetrics metrics;
     private final ObjectMapper objectMapper;
+    private final SeoulScopePolicy seoulScopePolicy;
 
     @Override
     public String getSourceCode() {
@@ -61,7 +63,9 @@ public class SafetyDataAlertNormalizer implements Normalizer {
     public NormalizationResult normalize(ExternalApiRawPayload raw) {
         List<String> errors = new ArrayList<>();
         int succeeded = 0;
-        Map<String, List<Long>> alertsByType = new LinkedHashMap<>();
+        List<Long> allAlertIds = new ArrayList<>();
+        boolean hasExpiredAlerts = false;
+        Set<String> typesSeen = new LinkedHashSet<>();
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
@@ -83,7 +87,7 @@ public class SafetyDataAlertNormalizer implements Normalizer {
                     }
 
                     String sourceRegion = item.path("RCPTN_RGN_NM").asText("서울특별시");
-                    if (!sourceRegion.contains("서울")) {
+                    if (!seoulScopePolicy.isInScope(sourceRegion)) {
                         log.debug("[SAFETY_DATA_ALERT] non-Seoul region={} — skip", sourceRegion);
                         continue;
                     }
@@ -97,13 +101,14 @@ public class SafetyDataAlertNormalizer implements Normalizer {
 
                     String rawLevelStr = item.path("EMRG_STEP_NM").asText("");
                     String message = item.path("MSG_CN").asText("");
+                    String category = deriveCategory(message);
 
                     DisasterAlert alert = new DisasterAlert();
                     alert.setSource(getSourceCode());
                     alert.setRawType(rawType);
                     alert.setDisasterType(disasterType);
                     alert.setSourceRegion(sourceRegion);
-                    alert.setRegion(sourceRegion);
+                    alert.setRegion(REGION);
                     alert.setRawLevel(rawLevelStr);
                     alert.setRawLevelTokens(toJsonArray(List.of(rawLevelStr)));
                     alert.setLevel(mapLevel(rawLevelStr));
@@ -114,14 +119,18 @@ public class SafetyDataAlertNormalizer implements Normalizer {
 
                     List<String> catTokens = extractCategoryTokens(message);
                     alert.setRawCategoryTokens(toJsonArray(catTokens));
-                    alert.setMessageCategory(deriveCategory(message));
+                    alert.setMessageCategory(category);
                     alert.setNormalizationReason(
                         "DST_SE_NM=" + rawType + " → " + disasterType +
                         "; EMRG_STEP_NM=" + rawLevelStr + " → " + alert.getLevel());
 
                     DisasterAlert saved = disasterAlertRepo.save(alert);
                     metrics.incrementNormalizationSuccess(getSourceCode());
-                    alertsByType.computeIfAbsent(disasterType, k -> new ArrayList<>()).add(saved.getAlertId());
+                    allAlertIds.add(saved.getAlertId());
+                    typesSeen.add(disasterType);
+                    if ("CLEAR".equals(category)) {
+                        hasExpiredAlerts = true;
+                    }
                     succeeded++;
                 } catch (Exception e) {
                     errors.add(e.getMessage());
@@ -135,29 +144,29 @@ public class SafetyDataAlertNormalizer implements Normalizer {
             log.error("[SAFETY_DATA_ALERT] parse failed raw_id={}", raw.getRawId(), e);
         }
 
-        if (!alertsByType.isEmpty()) {
+        if (!allAlertIds.isEmpty()) {
             String traceId = raw.getExecutionLog().getTraceId();
             String completedAt = OffsetDateTime.now(KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
-            alertsByType.forEach((type, ids) -> {
-                List<Long> capturedIds = List.copyOf(ids);
-                AfterCommit.run(() -> publishEvent(traceId, type, capturedIds, completedAt));
-            });
+            String collectionType = typesSeen.size() == 1 ? typesSeen.iterator().next() : "DISASTER";
+            List<Long> capturedIds = List.copyOf(allAlertIds);
+            boolean capturedExpired = hasExpiredAlerts;
+            AfterCommit.run(() -> publishEvent(traceId, collectionType, capturedIds, capturedExpired, completedAt));
         }
 
         return NormalizationResult.of(succeeded, errors.size(), errors);
     }
 
     private void publishEvent(String traceId, String collectionType,
-                              List<Long> affectedAlertIds, String completedAt) {
+                              List<Long> affectedAlertIds, boolean hasExpiredAlerts, String completedAt) {
         try {
             DisasterDataCollectedEvent event = new DisasterDataCollectedEvent(
-                traceId, collectionType, REGION, affectedAlertIds, false, completedAt);
+                traceId, collectionType, REGION, affectedAlertIds, hasExpiredAlerts, completedAt);
             cacheEventPublisher.publish(event, QUEUE);
-            metrics.incrementSqsPublish(getSourceCode());
+            metrics.incrementSqsPublish(getSourceCode(), QUEUE, EVENT_TYPE);
         } catch (Exception e) {
-            metrics.incrementSqsPublishFailure(getSourceCode());
-            log.error("[SAFETY_DATA_ALERT] event publish failed collectionType={} alertIds={}",
-                collectionType, affectedAlertIds, e);
+            metrics.incrementSqsPublishFailure(getSourceCode(), QUEUE, EVENT_TYPE);
+            log.error("[SAFETY_DATA_ALERT] event publish failed — traceId={} collectionType={} region={} alertIds={} completedAt={}",
+                traceId, collectionType, REGION, affectedAlertIds, completedAt, e);
         }
     }
 
