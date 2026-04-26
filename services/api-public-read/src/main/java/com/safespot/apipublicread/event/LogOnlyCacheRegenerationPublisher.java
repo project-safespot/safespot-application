@@ -1,15 +1,37 @@
 package com.safespot.apipublicread.event;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+
+import java.util.Optional;
 
 @Slf4j
 @Component
+@ConditionalOnProperty(
+        name = "safespot.cache-regeneration.publisher-mode",
+        havingValue = "log",
+        matchIfMissing = true
+)
+@RequiredArgsConstructor
 public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPublisher {
 
+    private final CacheKeyFamilyResolver resolver;
+
     @Override
-    public void publish(String redisKey) {
-        log.info("[CacheRegen] regeneration requested for key={}", redisKey);
-        // TODO: SQS 연동 시 실제 이벤트 발행으로 교체
+    public void publish(String cacheKey, CacheRegenerationReason reason) {
+        Optional<String> family = resolver.resolve(cacheKey);
+        if (family.isEmpty()) {
+            log.warn("[CacheRegen] unsupported cacheKey={}, skipping publish", cacheKey);
+            return;
+        }
+        CacheRegenerationEnvelope e = CacheRegenerationEnvelope.build(cacheKey, family.get(), reason);
+        log.info("[CacheRegen] eventType={} eventId={} occurredAt={} producer={} traceId={} idempotencyKey={} " +
+                        "payload.cacheKey={} payload.cacheKeyFamily={} payload.requestedAt={} " +
+                        "payload.reason={} payload.schemaVersion={}",
+                e.eventType(), e.eventId(), e.occurredAt(), e.producer(), e.traceId(), e.idempotencyKey(),
+                e.payload().cacheKey(), e.payload().cacheKeyFamily(), e.payload().requestedAt(),
+                e.payload().reason(), e.payload().schemaVersion());
     }
 }

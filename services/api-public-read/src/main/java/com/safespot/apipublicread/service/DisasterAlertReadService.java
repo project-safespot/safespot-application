@@ -8,6 +8,7 @@ import com.safespot.apipublicread.domain.DisasterAlertDetail;
 import com.safespot.apipublicread.dto.DisasterAlertItem;
 import com.safespot.apipublicread.dto.DisasterLatestDto;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
+import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
 import com.safespot.apipublicread.exception.ErrorCode;
 import com.safespot.apipublicread.repository.DisasterAlertRepository;
@@ -51,7 +52,7 @@ public class DisasterAlertReadService {
         redisReadCache.recordFallback(ENDPOINT_LIST, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_LIST);
         if (suppressWindowService.tryPublish(LIST_KEY)) {
-            cacheRegenerationPublisher.publish(LIST_KEY);
+            cacheRegenerationPublisher.publish(LIST_KEY, CacheRegenerationReason.from(cached.fallbackReason()));
         }
 
         return disasterAlertRepository.findAlerts(region, disasterType, FALLBACK_PAGE)
@@ -73,7 +74,7 @@ public class DisasterAlertReadService {
         redisReadCache.recordFallback(ENDPOINT_LATEST, listResult.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
         if (suppressWindowService.tryPublish(LIST_KEY)) {
-            cacheRegenerationPublisher.publish(LIST_KEY);
+            cacheRegenerationPublisher.publish(LIST_KEY, CacheRegenerationReason.from(listResult.fallbackReason()));
         }
 
         return disasterAlertRepository.findLatest(disasterType, region)
@@ -91,7 +92,7 @@ public class DisasterAlertReadService {
         redisReadCache.recordFallback(ENDPOINT_LATEST, detailResult.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
         if (suppressWindowService.tryPublish(detailKey)) {
-            cacheRegenerationPublisher.publish(detailKey);
+            cacheRegenerationPublisher.publish(detailKey, CacheRegenerationReason.from(detailResult.fallbackReason()));
         }
 
         return disasterAlertRepository.findLatest(disasterType, region)

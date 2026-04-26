@@ -13,6 +13,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'io.micrometer:micrometer-registry-prometheus'
     implementation 'com.fasterxml.jackson.core:jackson-databind'
+    implementation 'software.amazon.awssdk:sqs'
 
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'

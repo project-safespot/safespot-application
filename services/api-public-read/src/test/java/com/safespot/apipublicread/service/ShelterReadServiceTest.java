@@ -7,6 +7,7 @@ import com.safespot.apipublicread.domain.Shelter;
 import com.safespot.apipublicread.dto.ShelterDetailDto;
 import com.safespot.apipublicread.dto.ShelterStatusCache;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
+import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
 import com.safespot.apipublicread.repository.EvacuationEntryRepository;
 import com.safespot.apipublicread.repository.ShelterRepository;
@@ -81,7 +82,7 @@ class ShelterReadServiceTest {
         assertThat(result.currentOccupancy()).isEqualTo(68);
         verify(redisReadCache).recordFallback(eq("/shelters/{shelterId}"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
         verify(redisReadCache).recordDbFallbackQuery("/shelters/{shelterId}");
-        verify(cacheRegenerationPublisher).publish("shelter:status:101");
+        verify(cacheRegenerationPublisher).publish("shelter:status:101", CacheRegenerationReason.CACHE_MISS);
     }
 
     @Test
@@ -96,6 +97,7 @@ class ShelterReadServiceTest {
 
         assertThat(result.currentOccupancy()).isEqualTo(30);
         verify(redisReadCache).recordFallback(eq("/shelters/{shelterId}"), eq(RedisReadCache.FallbackReason.REDIS_DOWN));
+        verify(cacheRegenerationPublisher).publish("shelter:status:101", CacheRegenerationReason.REDIS_DOWN);
     }
 
     @Test
@@ -108,13 +110,12 @@ class ShelterReadServiceTest {
 
         shelterReadService.findById(101L);
 
-        verify(cacheRegenerationPublisher, never()).publish(anyString());
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any());
     }
 
     @Test
     void findById_notFound_throwsApiException() {
         when(shelterRepository.findById(999L)).thenReturn(Optional.empty());
-        // shelter BeforeEach stubs are lenient for this test case
         assertThatThrownBy(() -> shelterReadService.findById(999L))
                 .isInstanceOf(ApiException.class);
     }
