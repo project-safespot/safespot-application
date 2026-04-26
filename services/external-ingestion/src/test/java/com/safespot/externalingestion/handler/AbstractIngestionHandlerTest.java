@@ -1,5 +1,8 @@
 package com.safespot.externalingestion.handler;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safespot.externalingestion.client.ExternalApiClient;
 import com.safespot.externalingestion.client.ExternalApiException;
@@ -13,15 +16,18 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -145,6 +151,124 @@ class AbstractIngestionHandlerTest {
         verify(normalizationQueue, never()).publish(any());
     }
 
+    @Test
+    void execute_seoulPathKey_isRedactedFromAllFailurePaths() throws Exception {
+        String dummyKey = "TEST_SEOUL_KEY";
+        String template = "http://openapi.seoul.go.kr:8088/{KEY}/json/TbEqkKenvinfo/1/20/";
+        TestSeoulHandler seoulHandler = buildAndWireSeoulHandler(dummyKey);
+        setUpSeoulSource(template);
+
+        String urlWithKey = template.replace("{KEY}", dummyKey);
+        given(externalApiClient.get(anyString(), any()))
+            .willThrow(new ExternalApiException(
+                "4xx from " + urlWithKey, ExternalApiException.ErrorType.CLIENT_ERROR, 400));
+
+        IngestionResult result = executeWithLogCapture(seoulHandler, events -> {
+            events.forEach(e -> assertThat(e.getFormattedMessage()).doesNotContain(dummyKey));
+        });
+
+        assertThat(result.getMessage()).doesNotContain(dummyKey);
+        assertSavedErrorMessageNotContain(dummyKey);
+    }
+
+    @Test
+    void execute_genericException_seoulKeyInMessage_redactedAndThrowableNotLogged() throws Exception {
+        String dummyKey = "TEST_SEOUL_KEY";
+        String template = "http://openapi.seoul.go.kr:8088/{KEY}/json/TbEqkKenvinfo/1/20/";
+        TestSeoulHandler seoulHandler = buildAndWireSeoulHandler(dummyKey);
+        setUpSeoulSource(template);
+
+        String urlWithKey = template.replace("{KEY}", dummyKey);
+        given(externalApiClient.get(anyString(), any()))
+            .willThrow(new RuntimeException("internal error calling " + urlWithKey));
+
+        IngestionResult result = executeWithLogCapture(seoulHandler, events -> {
+            events.forEach(e -> {
+                assertThat(e.getFormattedMessage()).doesNotContain(dummyKey);
+                assertThat(e.getThrowableProxy()).isNull();
+            });
+        });
+
+        assertThat(result.getMessage()).doesNotContain(dummyKey);
+        assertSavedErrorMessageNotContain(dummyKey);
+    }
+
+    @Test
+    void execute_genericException_seoulKeyInCause_throwableNotLogged() throws Exception {
+        String dummyKey = "TEST_SEOUL_KEY";
+        String template = "http://openapi.seoul.go.kr:8088/{KEY}/json/TbEqkKenvinfo/1/20/";
+        TestSeoulHandler seoulHandler = buildAndWireSeoulHandler(dummyKey);
+        setUpSeoulSource(template);
+
+        String urlWithKey = template.replace("{KEY}", dummyKey);
+        // Key only in cause, not in top-level message
+        given(externalApiClient.get(anyString(), any()))
+            .willThrow(new RuntimeException("processing failed",
+                new RuntimeException("cause from " + urlWithKey)));
+
+        IngestionResult result = executeWithLogCapture(seoulHandler, events -> {
+            events.forEach(e -> {
+                assertThat(e.getFormattedMessage()).doesNotContain(dummyKey);
+                assertThat(e.getThrowableProxy()).isNull();
+            });
+        });
+
+        assertThat(result.getMessage()).doesNotContain(dummyKey);
+        assertSavedErrorMessageNotContain(dummyKey);
+    }
+
+    // --- helpers ---
+
+    private TestSeoulHandler buildAndWireSeoulHandler(String apiKey) {
+        TestSeoulHandler h = new TestSeoulHandler(apiKey);
+        ReflectionTestUtils.setField(h, "sourceRepo", sourceRepo);
+        ReflectionTestUtils.setField(h, "executionLogRepo", executionLogRepo);
+        ReflectionTestUtils.setField(h, "rawPayloadRepo", rawPayloadRepo);
+        ReflectionTestUtils.setField(h, "normalizationQueue", normalizationQueue);
+        ReflectionTestUtils.setField(h, "externalApiClient", externalApiClient);
+        ReflectionTestUtils.setField(h, "metrics", new IngestionMetrics(new SimpleMeterRegistry()));
+        ReflectionTestUtils.setField(h, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(h, "transactionTemplate", new TransactionTemplate(txManager));
+        return h;
+    }
+
+    private void setUpSeoulSource(String template) {
+        ExternalApiSource source = new ExternalApiSource();
+        source.setSourceId(1L);
+        source.setSourceCode("SEOUL_TEST");
+        source.setBaseUrl(template);
+        source.setActive(true);
+
+        ExternalApiExecutionLog execLog = new ExternalApiExecutionLog();
+        execLog.setExecutionId(1L);
+
+        given(sourceRepo.findBySourceCode("SEOUL_TEST")).willReturn(Optional.of(source));
+        given(executionLogRepo.save(any())).willReturn(execLog);
+    }
+
+    private IngestionResult executeWithLogCapture(AbstractIngestionHandler h,
+                                                   java.util.function.Consumer<List<ILoggingEvent>> assertions) {
+        Logger logger = (Logger) LoggerFactory.getLogger(AbstractIngestionHandler.class);
+        ListAppender<ILoggingEvent> listAppender = new ListAppender<>();
+        listAppender.start();
+        logger.addAppender(listAppender);
+        try {
+            IngestionResult result = h.execute();
+            assertions.accept(listAppender.list);
+            return result;
+        } finally {
+            logger.detachAppender(listAppender);
+        }
+    }
+
+    private void assertSavedErrorMessageNotContain(String key) {
+        ArgumentCaptor<ExternalApiExecutionLog> captor = ArgumentCaptor.forClass(ExternalApiExecutionLog.class);
+        verify(executionLogRepo, atLeastOnce()).save(captor.capture());
+        captor.getAllValues().stream()
+            .filter(l -> l.getErrorMessage() != null)
+            .forEach(l -> assertThat(l.getErrorMessage()).doesNotContain(key));
+    }
+
     /** 테스트 전용 핸들러 stub */
     static class TestHandler extends AbstractIngestionHandler {
         private final boolean enabled;
@@ -156,5 +280,17 @@ class AbstractIngestionHandlerTest {
         @Override public boolean isEnabled() { return enabled; }
         @Override protected Map<String, String> buildRequestParams() { return Map.of("key", "val"); }
         @Override protected int countItems(String body) { return 1; }
+    }
+
+    static class TestSeoulHandler extends AbstractIngestionHandler {
+        private final String apiKey;
+
+        TestSeoulHandler(String apiKey) { this.apiKey = apiKey; }
+
+        @Override public String getSourceCode() { return "SEOUL_TEST"; }
+        @Override public String getProviderApiKey() { return apiKey; }
+        @Override protected String buildFinalUrl(String sourceUrl) { return sourceUrl.replace("{KEY}", apiKey); }
+        @Override protected Map<String, String> buildRequestParams() { return Map.of(); }
+        @Override protected int countItems(String body) { return 0; }
     }
 }

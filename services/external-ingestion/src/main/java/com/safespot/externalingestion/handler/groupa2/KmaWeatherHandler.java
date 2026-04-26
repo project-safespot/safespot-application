@@ -6,13 +6,15 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 기상청 단기예보 API (KMA_WEATHER)
+ * 기상청 초단기실황 API (KMA_WEATHER) — VilageFcstInfoService_2.0/getUltraSrtNcst
  * 실행 방식: CronJob (매시 정각) | 일일 한도: 10,000회
  * 정규화 대상: weather_log
+ * auth: query param ServiceKey (대소문자 공식 계약 기준)
  */
 @Component
 public class KmaWeatherHandler extends AbstractIngestionHandler {
@@ -35,15 +37,31 @@ public class KmaWeatherHandler extends AbstractIngestionHandler {
     }
 
     @Override
+    public String getProviderApiKey() {
+        return apiKey;
+    }
+
+    /**
+     * 초단기실황 base_date/base_time 결정 정책:
+     * - minute < 45 → 1시간 전 HH:00 (데이터 미발표 구간 회피)
+     * - minute >= 45 → 현재 HH:00
+     * - 00:00~00:44 → 전날 23:00 자동 처리 (minusHours(1))
+     */
+    static LocalDateTime resolveBaseDateTime(LocalDateTime now) {
+        LocalDateTime truncated = now.truncatedTo(ChronoUnit.HOURS);
+        return now.getMinute() < 45 ? truncated.minusHours(1) : truncated;
+    }
+
+    @Override
     protected Map<String, String> buildRequestParams() {
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime base = resolveBaseDateTime(LocalDateTime.now());
         Map<String, String> params = new HashMap<>();
-        params.put("serviceKey", apiKey);
+        params.put("ServiceKey", apiKey);
         params.put("pageNo", "1");
         params.put("numOfRows", "1000");
         params.put("dataType", "JSON");
-        params.put("base_date", now.format(DateTimeFormatter.ofPattern("yyyyMMdd")));
-        params.put("base_time", "0500");
+        params.put("base_date", base.format(DateTimeFormatter.ofPattern("yyyyMMdd")));
+        params.put("base_time", base.format(DateTimeFormatter.ofPattern("HHmm")));
         params.put("nx", DEFAULT_NX);
         params.put("ny", DEFAULT_NY);
         return params;

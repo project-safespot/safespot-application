@@ -3,7 +3,6 @@ package com.safespot.externalingestion.scheduler;
 import com.safespot.externalingestion.handler.groupa1.ForestryLandslideHandler;
 import com.safespot.externalingestion.handler.groupa1.KmaEarthquakeHandler;
 import com.safespot.externalingestion.handler.groupa1.SafetyDataAlertHandler;
-import com.safespot.externalingestion.handler.groupa1.SeoulEarthquakeHandler;
 import com.safespot.externalingestion.handler.groupa1.SeoulRiverLevelHandler;
 import com.safespot.externalingestion.metrics.IngestionMetrics;
 import com.safespot.externalingestion.queue.NormalizationMessage;
@@ -27,7 +26,6 @@ public class PollingScheduler {
 
     private final SafetyDataAlertHandler safetyDataAlertHandler;
     private final KmaEarthquakeHandler kmaEarthquakeHandler;
-    private final SeoulEarthquakeHandler seoulEarthquakeHandler;
     private final ForestryLandslideHandler forestryLandslideHandler;
     private final SeoulRiverLevelHandler seoulRiverLevelHandler;
     private final NormalizationQueue normalizationQueue;
@@ -50,14 +48,6 @@ public class PollingScheduler {
         drainQueue();
     }
 
-    /** SEOUL_EARTHQUAKE: 30초 주기 */
-    @Scheduled(fixedDelayString = "${ingestion.schedule.seoul-earthquake-ms:30000}")
-    public void collectSeoulEarthquake() {
-        metrics.incrementPollingIteration("SEOUL_EARTHQUAKE");
-        seoulEarthquakeHandler.execute();
-        drainQueue();
-    }
-
     /**
      * FORESTRY_LANDSLIDE: 5분 주기
      * isEnabled()=false 이므로 handler 내부에서 SKIP 처리됨 (인증키 승인 대기 중)
@@ -69,8 +59,8 @@ public class PollingScheduler {
         drainQueue();
     }
 
-    /** SEOUL_RIVER_LEVEL: 30초 주기 */
-    @Scheduled(fixedDelayString = "${ingestion.schedule.seoul-river-level-ms:30000}")
+    /** SEOUL_RIVER_LEVEL: 10분 주기 */
+    @Scheduled(fixedDelayString = "${ingestion.schedule.seoul-river-level-ms:600000}")
     public void collectSeoulRiverLevel() {
         metrics.incrementPollingIteration("SEOUL_RIVER_LEVEL");
         seoulRiverLevelHandler.execute();

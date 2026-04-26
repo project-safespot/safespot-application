@@ -30,6 +30,11 @@ public class AirKoreaAirQualityHandler extends AbstractIngestionHandler {
     }
 
     @Override
+    public String getProviderApiKey() {
+        return apiKey;
+    }
+
+    @Override
     protected Map<String, String> buildRequestParams() {
         Map<String, String> params = new HashMap<>();
         params.put("serviceKey", apiKey);

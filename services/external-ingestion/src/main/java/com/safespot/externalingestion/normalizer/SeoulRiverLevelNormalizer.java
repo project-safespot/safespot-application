@@ -22,11 +22,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 서울시 하천 수위 정규화 (SEOUL_RIVER_LEVEL → disaster_alert)
+ * 서울시 하천 수위 정규화 (SEOUL_RIVER_LEVEL → disaster_alert) — ListRiverStageService
  * 경계 이상 수위만 재난 알림으로 적재 (주의/경계/심각)
  *
- * 예상 응답:
- * {"ListStnWaterLevelEntry": {"row": [
+ * TODO: verification required — ListRiverStageService 실계정 응답 필드명 확인 필요.
+ *       현재 STATION/STD_DT/WATER_LEVEL/WRNLEVEL_NM/GU_NM은 구 서비스(ListStnWaterLevelEntry) 기준.
+ *
+ * 예상 응답 구조 (구 서비스 기준, 신규 서비스 필드명 미확인):
+ * {"ListRiverStageService": {"row": [
  *   {"STATION":"한강대교","STD_DT":"2026-04-21 10:00:00",
  *    "WATER_LEVEL":"4.5","WRNLEVEL_NM":"경계","GU_NM":"서울특별시"}
  * ]}}
@@ -64,7 +67,7 @@ public class SeoulRiverLevelNormalizer implements Normalizer {
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
-            JsonNode rows = root.path("ListStnWaterLevelEntry").path("row");
+            JsonNode rows = root.path("ListRiverStageService").path("row");
             if (rows.isMissingNode() || rows.isEmpty()) return NormalizationResult.success(0);
 
             for (JsonNode row : rows) {

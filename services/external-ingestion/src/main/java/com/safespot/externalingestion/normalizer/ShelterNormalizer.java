@@ -19,16 +19,23 @@ import java.util.Optional;
  * 허용 컬럼만 갱신: name, shelter_type, disaster_type, address, latitude, longitude, capacity
  * 금지 컬럼: manager, contact, shelter_status, note
  *
+ * SOURCE_META: {rootKey, disasterType, rowSubPath}
+ *   rowSubPath=null → 서비스 이름 아래에 row 없이 rootKey 배열을 직접 읽음 (odcloud 패턴)
+ *   rowSubPath="row" → rootKey.row 구조 (서울 OpenAPI 패턴)
+ *
  * TODO: shelter 외부 식별자 미정의 — name+address+disasterType 임시 키 사용.
  *       서울 공공데이터 포털 식별자 확정 후 unique key 변경 필요.
+ * TODO: SEOUL_SHELTER_LANDSLIDE odcloud 필드명 미확인.
+ *       SHELTER_NM/RD_ADDR 등은 서울 OpenAPI 기준이며 odcloud 실제 응답 필드와 다를 수 있음.
+ *       odcloud 15118898 실계정 응답 수신 후 필드명 갱신 필요.
  */
 @Slf4j
 public class ShelterNormalizer implements Normalizer {
 
     private static final Map<String, String[]> SOURCE_META = Map.of(
-        "SEOUL_SHELTER_EARTHQUAKE", new String[]{"TbEqkShelterInfo", "EARTHQUAKE"},
-        "SEOUL_SHELTER_LANDSLIDE",  new String[]{"TbLdslShelterInfo", "LANDSLIDE"},
-        "SEOUL_SHELTER_FLOOD",      new String[]{"TbFloodShelterInfo", "FLOOD"}
+        "SEOUL_SHELTER_EARTHQUAKE", new String[]{"TlEtqkP",  "EARTHQUAKE", "row"},
+        "SEOUL_SHELTER_LANDSLIDE",  new String[]{"data",     "LANDSLIDE",  null},
+        "SEOUL_SHELTER_FLOOD",      new String[]{"TbFloodShelterInfo", "FLOOD", "row"}
     );
 
     private final String sourceCode;
@@ -57,13 +64,18 @@ public class ShelterNormalizer implements Normalizer {
         }
         String rootKey = meta[0];
         String disasterType = meta[1];
+        String rowSubPath = meta.length > 2 ? meta[2] : "row";
 
         List<String> errors = new ArrayList<>();
         int succeeded = 0;
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
-            JsonNode rows = root.path(rootKey).path("row");
+            // rowSubPath==null: odcloud 패턴 — rootKey 배열 직접 (예: data[])
+            // rowSubPath=="row": 서울 OpenAPI 패턴 — rootKey.row[]
+            JsonNode rows = (rowSubPath != null)
+                ? root.path(rootKey).path(rowSubPath)
+                : root.path(rootKey);
             if (rows.isMissingNode() || rows.isEmpty()) return NormalizationResult.success(0);
 
             for (JsonNode row : rows) {

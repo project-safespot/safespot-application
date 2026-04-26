@@ -16,6 +16,7 @@ import com.safespot.externalingestion.repository.ExternalApiRawPayloadRepository
 import com.safespot.externalingestion.repository.ExternalApiSourceRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.nio.charset.StandardCharsets;
@@ -39,6 +40,9 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
     @Autowired protected IngestionMetrics metrics;
     @Autowired protected ObjectMapper objectMapper;
     @Autowired protected TransactionTemplate transactionTemplate;
+
+    @Value("${ingestion.http.max-retries:3}")
+    private int maxRetries;
 
     private static final Set<String> SENSITIVE_PARAM_KEYS = Set.of(
         "servicekey", "key", "apikey", "authorization", "token"
@@ -87,7 +91,7 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
 
             Map<String, String> params = buildRequestParams();
             // Network call and retry sleep are intentionally outside any DB transaction.
-            String responseBody = callWithRetry(source.getBaseUrl(), params, traceId);
+            String responseBody = callWithRetry(buildFinalUrl(source.getBaseUrl()), params, traceId);
             dailyCallCount.incrementAndGet();
 
             long latency = System.currentTimeMillis() - fetchStart;
@@ -123,22 +127,23 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
             return IngestionResult.success(itemCount);
 
         } catch (ExternalApiException e) {
+            String safeMsg = redactKey(e.getMessage());
             metrics.incrementApiFailure(getSourceCode(), e.getErrorType().name().toLowerCase());
             transactionTemplate.executeWithoutResult(
-                tx -> finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, e.getErrorType().name(), e.getMessage(), e.getHttpStatus()));
-            log.error("[{}] traceId={} api error type={} msg={}", getSourceCode(), traceId, e.getErrorType(), e.getMessage());
-            return IngestionResult.failed(e.getMessage());
+                tx -> finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, e.getErrorType().name(), safeMsg, e.getHttpStatus()));
+            log.error("[{}] traceId={} api error type={} msg={}", getSourceCode(), traceId, e.getErrorType(), safeMsg);
+            return IngestionResult.failed(safeMsg);
         } catch (Exception e) {
+            String safeMsg = redactKey(e.getMessage());
             metrics.incrementSkipped(getSourceCode(), "error");
             transactionTemplate.executeWithoutResult(
-                tx -> finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, "INTERNAL_ERROR", e.getMessage(), null));
-            log.error("[{}] traceId={} internal error", getSourceCode(), traceId, e);
-            return IngestionResult.failed(e.getMessage());
+                tx -> finishExecutionLog(execLog, ExecutionStatus.FAILED, 0, "INTERNAL_ERROR", safeMsg, null));
+            log.error("[{}] ingestion failed: exceptionType={} message={}", getSourceCode(), e.getClass().getSimpleName(), safeMsg);
+            return IngestionResult.failed(safeMsg);
         }
     }
 
     private String callWithRetry(String url, Map<String, String> params, String traceId) throws ExternalApiException {
-        int maxRetries = 3;
         ExternalApiException lastEx = null;
         for (int attempt = 0; attempt <= maxRetries; attempt++) {
             try {
@@ -153,7 +158,7 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
                 if (e.getErrorType() == ExternalApiException.ErrorType.CLIENT_ERROR) {
                     throw e; // no retry on 4xx
                 }
-                log.warn("[{}] traceId={} attempt={} error={}", getSourceCode(), traceId, attempt + 1, e.getMessage());
+                log.warn("[{}] traceId={} attempt={} error={}", getSourceCode(), traceId, attempt + 1, redactKey(e.getMessage()));
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
                 throw new ExternalApiException("interrupted", ExternalApiException.ErrorType.NETWORK, null, ie);
@@ -165,6 +170,24 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
     protected abstract Map<String, String> buildRequestParams();
 
     protected abstract int countItems(String responseBody);
+
+    /**
+     * source URL에 대한 최종 fetch URL을 반환한다.
+     * 서울 OpenAPI 계열은 이 메서드를 override해 {KEY} placeholder를 실제 인증키로 치환한다.
+     * 기본 구현은 sourceUrl을 그대로 반환한다.
+     */
+    protected String buildFinalUrl(String sourceUrl) {
+        return sourceUrl;
+    }
+
+    /**
+     * 이 핸들러가 사용하는 API 인증키를 반환한다.
+     * 파일 기반 source 또는 키가 없는 핸들러는 null을 반환한다.
+     * {@code IngestionApiKeyValidator}가 dev/prod 기동 시 DUMMY_KEY 검사에 사용한다.
+     */
+    public String getProviderApiKey() {
+        return null;
+    }
 
     private ExternalApiExecutionLog createExecutionLog(ExternalApiSource source, String traceId) {
         ExternalApiExecutionLog execLog = new ExternalApiExecutionLog();
@@ -234,6 +257,17 @@ public abstract class AbstractIngestionHandler implements IngestionHandler {
                 }
             }
         }
+    }
+
+    /**
+     * 예외 메시지에서 이 핸들러의 API 인증키를 마스킹한다.
+     * path key / query key 모두 치환한다. key가 null이거나 비어 있으면 원본을 반환한다.
+     */
+    protected String redactKey(String message) {
+        if (message == null) return null;
+        String key = getProviderApiKey();
+        if (key == null || key.isBlank()) return message;
+        return message.replace(key, "***");
     }
 
     protected static String sha256(String input) {
