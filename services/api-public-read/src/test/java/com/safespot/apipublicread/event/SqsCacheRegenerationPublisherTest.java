@@ -62,6 +62,7 @@ class SqsCacheRegenerationPublisherTest {
         String body = captor.getValue().messageBody();
         assertThat(body).contains("CacheRegenerationRequested");
         assertThat(body).contains("api-public-read");
+        assertThat(body).contains("traceId");
         assertThat(body).contains("disaster:messages:list:seoul");
         assertThat(body).contains("disaster_messages_list");
         assertThat(body).contains("cache_miss");

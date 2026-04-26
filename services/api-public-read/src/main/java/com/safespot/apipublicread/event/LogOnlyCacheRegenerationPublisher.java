@@ -27,10 +27,10 @@ public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPubli
             return;
         }
         CacheRegenerationEnvelope e = CacheRegenerationEnvelope.build(cacheKey, family.get(), reason);
-        log.info("[CacheRegen] eventType={} eventId={} occurredAt={} producer={} idempotencyKey={} " +
+        log.info("[CacheRegen] eventType={} eventId={} occurredAt={} producer={} traceId={} idempotencyKey={} " +
                         "payload.cacheKey={} payload.cacheKeyFamily={} payload.requestedAt={} " +
                         "payload.reason={} payload.schemaVersion={}",
-                e.eventType(), e.eventId(), e.occurredAt(), e.producer(), e.idempotencyKey(),
+                e.eventType(), e.eventId(), e.occurredAt(), e.producer(), e.traceId(), e.idempotencyKey(),
                 e.payload().cacheKey(), e.payload().cacheKeyFamily(), e.payload().requestedAt(),
                 e.payload().reason(), e.payload().schemaVersion());
     }

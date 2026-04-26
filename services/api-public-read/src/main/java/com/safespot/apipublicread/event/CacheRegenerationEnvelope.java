@@ -11,6 +11,7 @@ public record CacheRegenerationEnvelope(
         String eventId,
         String occurredAt,
         String producer,
+        String traceId,
         String idempotencyKey,
         CacheRegenerationPayload payload
 ) {
@@ -38,6 +39,7 @@ public record CacheRegenerationEnvelope(
                 UUID.randomUUID().toString(),
                 now.toString(),
                 PRODUCER,
+                UUID.randomUUID().toString(),
                 idempotencyKey,
                 payload
         );

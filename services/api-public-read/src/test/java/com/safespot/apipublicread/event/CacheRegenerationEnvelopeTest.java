@@ -15,6 +15,7 @@ class CacheRegenerationEnvelopeTest {
         assertThat(e.eventId()).isNotBlank();
         assertThat(e.occurredAt()).isNotBlank();
         assertThat(e.producer()).isEqualTo("api-public-read");
+        assertThat(e.traceId()).isNotBlank();
         assertThat(e.idempotencyKey()).isNotBlank();
         assertThat(e.payload()).isNotNull();
     }
