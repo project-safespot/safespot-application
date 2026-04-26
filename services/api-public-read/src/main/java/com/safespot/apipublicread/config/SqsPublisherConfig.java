@@ -1,0 +1,39 @@
+package com.safespot.apipublicread.config;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.safespot.apipublicread.event.CacheKeyFamilyResolver;
+import com.safespot.apipublicread.event.SqsCacheRegenerationPublisher;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.sqs.SqsClient;
+
+import java.net.URI;
+
+@Configuration
+@ConditionalOnProperty(name = "safespot.cache-regeneration.publisher-mode", havingValue = "sqs")
+public class SqsPublisherConfig {
+
+    @Value("${safespot.aws.sqs.endpoint:}")
+    private String sqsEndpoint;
+
+    @Bean
+    public SqsClient sqsClient() {
+        var builder = SqsClient.builder().region(Region.AP_NORTHEAST_2);
+        if (!sqsEndpoint.isBlank()) {
+            builder.endpointOverride(URI.create(sqsEndpoint));
+        }
+        return builder.build();
+    }
+
+    @Bean
+    public SqsCacheRegenerationPublisher sqsCacheRegenerationPublisher(
+            SqsClient sqsClient,
+            @Value("${safespot.cache-regeneration.queue-url}") String queueUrl,
+            ObjectMapper objectMapper,
+            CacheKeyFamilyResolver resolver) {
+        return new SqsCacheRegenerationPublisher(sqsClient, queueUrl, objectMapper, resolver);
+    }
+}

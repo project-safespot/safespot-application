@@ -29,6 +29,10 @@ spring:
 server:
   port: 8081
 
+safespot:
+  cache-regeneration:
+    publisher-mode: log
+
 management:
   endpoints:
     web:
