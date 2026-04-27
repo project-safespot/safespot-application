@@ -78,7 +78,7 @@ jobs:
       - name: Checkout k8s-manifest
         uses: actions/checkout@v4
         with:
-          repository: project-safespot/k8s-manifest
+          repository: project-safespot/safespot-application-k8s-manifest
           token: ${{ secrets.MANIFEST_REPO_TOKEN }}
           path: k8s-manifest
 
