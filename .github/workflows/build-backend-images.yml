@@ -1,0 +1,107 @@
+name: Build Backend Images
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      short-sha: ${{ steps.sha.outputs.short }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: gradle
+
+      - name: Build bootJars
+        run: |
+          ./gradlew :services:api-core:bootJar \
+                    :services:api-public-read:bootJar \
+                    :services:external-ingestion:bootJar
+
+      - name: Compute short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push api-core
+        uses: docker/build-push-action@v5
+        with:
+          context: services/api-core
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/project-safespot/safespot-api-core:${{ steps.sha.outputs.short }}
+
+      - name: Build and push api-public-read
+        uses: docker/build-push-action@v5
+        with:
+          context: services/api-public-read
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/project-safespot/safespot-api-public-read:${{ steps.sha.outputs.short }}
+
+      - name: Build and push external-ingestion
+        uses: docker/build-push-action@v5
+        with:
+          context: services/external-ingestion
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/project-safespot/safespot-external-ingestion:${{ steps.sha.outputs.short }}
+
+  update-manifest:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout k8s-manifest
+        uses: actions/checkout@v4
+        with:
+          repository: project-safespot/safespot-application-k8s-manifest
+          token: ${{ secrets.MANIFEST_REPO_TOKEN }}
+          path: k8s-manifest
+
+      - name: Update image tags in values-dev.yaml
+        env:
+          SHORT_SHA: ${{ needs.build.outputs.short-sha }}
+        run: |
+          cd k8s-manifest
+          yq e '.apiCore.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.yaml
+          yq e '.apiPublicRead.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.yaml
+          yq e '.externalIngestion.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.yaml
+
+      - name: Commit and push if changed
+        env:
+          SHORT_SHA: ${{ needs.build.outputs.short-sha }}
+        run: |
+          cd k8s-manifest
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No manifest changes detected, skipping commit."
+          else
+            git add charts/safespot/values-dev.yaml
+            git commit -m "chore: update backend image tags to ${SHORT_SHA}"
+            git push
+          fi

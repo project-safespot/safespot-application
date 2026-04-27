@@ -37,8 +37,9 @@ public class ExternalApiRawPayload {
 
     @Column(name = "request_url", columnDefinition = "TEXT")
     private String requestUrl;
-
-    // PostgreSQL: jsonb in live DB (V1 migration documents TEXT — schema drift). columnDefinition="TEXT" for H2 compatibility.
+  
+  // PostgreSQL: jsonb in live DB (V1 migration documents TEXT = schema drift).
+// Keep columnDefinition="TEXT" for H2/local compatibility while binding as JSON for PostgreSQL.
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "request_params_json", columnDefinition = "TEXT")
     private String requestParamsJson;
@@ -46,7 +47,8 @@ public class ExternalApiRawPayload {
     @Column(name = "response_body", nullable = false, columnDefinition = "TEXT")
     private String responseBody;
 
-    // PostgreSQL: jsonb in live DB (V1 migration documents TEXT — schema drift). columnDefinition="TEXT" for H2 compatibility.
+// PostgreSQL: jsonb in live DB (V1 migration documents TEXT = schema drift).
+// Keep columnDefinition="TEXT" for H2/local compatibility while binding as JSON for PostgreSQL.
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "response_meta_json", columnDefinition = "TEXT")
     private String responseMetaJson;
