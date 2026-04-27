@@ -15,7 +15,7 @@ import java.util.Map;
 @Component
 public class SeoulShelterEarthquakeHandler extends AbstractIngestionHandler {
 
-    @Value("${SEOUL_API_KEY:DUMMY_KEY}")
+    @Value("${SEOUL_API_KEY:${SEOUL_SERVICE_KEY:DUMMY_KEY}}")
     private String apiKey;
 
     @Override

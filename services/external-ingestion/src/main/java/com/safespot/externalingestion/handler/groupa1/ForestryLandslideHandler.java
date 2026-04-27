@@ -18,7 +18,7 @@ import java.util.Map;
 @Component
 public class ForestryLandslideHandler extends AbstractIngestionHandler {
 
-    @Value("${FORESTRY_API_KEY:DUMMY_KEY}")
+    @Value("${FORESTRY_API_KEY:${FORESTRY_SERVICE_KEY:DUMMY_KEY}}")
     private String apiKey;
 
     @Value("${FORESTRY_LANDSLIDE_ENABLED:false}")
