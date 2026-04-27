@@ -40,7 +40,6 @@ public class DisasterAlertDetail {
     @Column(name = "intensity", length = 20)
     private String intensity;
 
-    @Lob
     @Column(name = "detail_json", columnDefinition = "TEXT")
     private String detailJson;
 

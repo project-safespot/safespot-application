@@ -61,7 +61,6 @@ public class ExternalApiExecutionLog {
     @Column(name = "error_code", length = 100)
     private String errorCode;
 
-    @Lob
     @Column(name = "error_message", columnDefinition = "TEXT")
     private String errorMessage;
 

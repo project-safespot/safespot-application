@@ -57,7 +57,6 @@ public class Shelter {
     @Column(name = "shelter_status", nullable = false, length = 20)
     private String shelterStatus = "운영중";
 
-    @Lob
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
 

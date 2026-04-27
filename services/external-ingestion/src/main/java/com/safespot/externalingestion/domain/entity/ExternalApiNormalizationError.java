@@ -42,18 +42,15 @@ public class ExternalApiNormalizationError {
     @Column(name = "failed_field", length = 100)
     private String failedField;
 
-    @Lob
     @Column(name = "raw_fragment", columnDefinition = "TEXT")
     private String rawFragment;
 
-    @Lob
     @Column(name = "error_reason", nullable = false, columnDefinition = "TEXT")
     private String errorReason;
 
     @Column(name = "resolved", nullable = false)
     private boolean resolved = false;
 
-    @Lob
     @Column(name = "resolved_note", columnDefinition = "TEXT")
     private String resolvedNote;
 

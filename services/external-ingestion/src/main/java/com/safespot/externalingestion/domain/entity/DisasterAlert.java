@@ -64,7 +64,6 @@ public class DisasterAlert {
     @Column(name = "source_region", length = 100)
     private String sourceRegion;
 
-    @Lob
     @Column(name = "message", nullable = false, columnDefinition = "TEXT")
     private String message;
 
@@ -77,7 +76,6 @@ public class DisasterAlert {
     @Column(name = "is_in_scope")
     private Boolean isInScope;
 
-    @Lob
     @Column(name = "normalization_reason", columnDefinition = "TEXT")
     private String normalizationReason;
 
