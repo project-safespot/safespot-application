@@ -15,7 +15,7 @@ import java.util.Map;
 @Component
 public class SafetyDataAlertHandler extends AbstractIngestionHandler {
 
-    @Value("${SAFETY_DATA_ALERT_API_KEY:DUMMY_KEY}")
+    @Value("${SAFETY_DATA_ALERT_API_KEY:${SAFETY_DATA_API_KEY:${SAFETY_DATA_SERVICE_KEY:DUMMY_KEY}}}")
     private String apiKey;
 
     @Override

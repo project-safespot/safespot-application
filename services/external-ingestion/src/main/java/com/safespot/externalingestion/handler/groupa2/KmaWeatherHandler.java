@@ -19,7 +19,7 @@ import java.util.Map;
 @Component
 public class KmaWeatherHandler extends AbstractIngestionHandler {
 
-    @Value("${KMA_API_KEY:DUMMY_KEY}")
+    @Value("${KMA_API_KEY:${KMA_SERVICE_KEY:DUMMY_KEY}}")
     private String apiKey;
 
     // 서울 중심 격자 좌표 (nx=60, ny=127)

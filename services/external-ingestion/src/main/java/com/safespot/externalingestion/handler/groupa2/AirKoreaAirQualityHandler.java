@@ -16,7 +16,7 @@ import java.util.Map;
 @Component
 public class AirKoreaAirQualityHandler extends AbstractIngestionHandler {
 
-    @Value("${AIR_KOREA_API_KEY:DUMMY_KEY}")
+    @Value("${AIR_KOREA_API_KEY:${AIR_KOREA_SERVICE_KEY:DUMMY_KEY}}")
     private String apiKey;
 
     @Override

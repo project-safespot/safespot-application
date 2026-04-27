@@ -16,7 +16,7 @@ import java.util.Map;
 @Component
 public class KmaEarthquakeHandler extends AbstractIngestionHandler {
 
-    @Value("${KMA_API_KEY:DUMMY_KEY}")
+    @Value("${KMA_API_KEY:${KMA_SERVICE_KEY:DUMMY_KEY}}")
     private String apiKey;
 
     @Override
