@@ -34,7 +34,6 @@ public class ExternalApiSource {
     @Column(name = "auth_type", nullable = false, length = 30)
     private String authType;
 
-    @Lob
     @Column(name = "base_url", columnDefinition = "TEXT")
     private String baseUrl;
 

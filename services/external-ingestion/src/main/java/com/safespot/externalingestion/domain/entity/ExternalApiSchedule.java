@@ -37,7 +37,6 @@ public class ExternalApiSchedule {
     @Column(name = "timezone", nullable = false, length = 50)
     private String timezone = "Asia/Seoul";
 
-    @Lob
     @Column(name = "request_params_json", columnDefinition = "TEXT")
     private String requestParamsJson;
 

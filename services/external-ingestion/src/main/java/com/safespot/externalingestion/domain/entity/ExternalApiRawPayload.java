@@ -33,19 +33,15 @@ public class ExternalApiRawPayload {
     @JoinColumn(name = "source_id", nullable = false)
     private ExternalApiSource source;
 
-    @Lob
     @Column(name = "request_url", columnDefinition = "TEXT")
     private String requestUrl;
 
-    @Lob
     @Column(name = "request_params_json", columnDefinition = "TEXT")
     private String requestParamsJson;
 
-    @Lob
     @Column(name = "response_body", nullable = false, columnDefinition = "TEXT")
     private String responseBody;
 
-    @Lob
     @Column(name = "response_meta_json", columnDefinition = "TEXT")
     private String responseMetaJson;
 
