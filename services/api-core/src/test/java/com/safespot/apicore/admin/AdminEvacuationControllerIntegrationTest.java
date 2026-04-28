@@ -1,9 +1,11 @@
 package com.safespot.apicore.admin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.safespot.apicore.domain.entity.AdminAuditLog;
 import com.safespot.apicore.domain.entity.AppUser;
 import com.safespot.apicore.domain.entity.Shelter;
 import com.safespot.apicore.domain.enums.Role;
+import com.safespot.apicore.repository.AdminAuditLogRepository;
 import com.safespot.apicore.repository.AppUserRepository;
 import com.safespot.apicore.repository.EvacuationEntryRepository;
 import com.safespot.apicore.repository.ShelterRepository;
@@ -21,6 +23,9 @@ import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.Map;
 
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -34,6 +39,7 @@ class AdminEvacuationControllerIntegrationTest {
     @Autowired AppUserRepository appUserRepository;
     @Autowired ShelterRepository shelterRepository;
     @Autowired EvacuationEntryRepository entryRepository;
+    @Autowired AdminAuditLogRepository auditLogRepository;
     @Autowired PasswordEncoder passwordEncoder;
 
     private String adminToken;
@@ -41,6 +47,7 @@ class AdminEvacuationControllerIntegrationTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        auditLogRepository.deleteAll();
         entryRepository.deleteAll();
         shelterRepository.deleteAll();
         appUserRepository.deleteAll();
@@ -240,5 +247,32 @@ class AdminEvacuationControllerIntegrationTest {
                         .content(objectMapper.writeValueAsString(body)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.entryStatus").value("ENTERED"));
+    }
+
+    // Regression: payload_after (jsonb) must bind as JSON type, not varchar.
+    // SQLState 42804 occurred when Hibernate bound String as character varying to a jsonb column.
+    @Test
+    void createEntry_auditLog_persistsJsonbPayloadWithoutTypeError() throws Exception {
+        Map<String, Object> body = Map.of(
+                "shelterId", shelterId,
+                "name", "jsonb test",
+                "phoneNumber", "01099998888",
+                "healthStatus", "정상",
+                "specialProtectionFlag", false);
+
+        mockMvc.perform(post("/admin/evacuation-entries")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isCreated());
+
+        List<AdminAuditLog> logs = auditLogRepository.findAll();
+        assertThat(logs).isNotEmpty();
+        AdminAuditLog log = logs.get(0);
+        // payload_after must be non-null JSON string (jsonb binding succeeded)
+        assertThat(log.getPayloadAfter()).isNotNull();
+        assertThat(log.getPayloadAfter()).contains("entryId");
+        // payload_before is null for create — null jsonb must also be accepted
+        assertThat(log.getPayloadBefore()).isNull();
     }
 }

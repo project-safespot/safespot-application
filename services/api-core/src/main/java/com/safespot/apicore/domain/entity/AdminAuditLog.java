@@ -5,6 +5,8 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
 
@@ -33,10 +35,12 @@ public class AdminAuditLog {
     @Column(name = "target_id")
     private Long targetId;
 
-    @Column(name = "payload_before", columnDefinition = "TEXT")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "payload_before", columnDefinition = "jsonb")
     private String payloadBefore;
 
-    @Column(name = "payload_after", columnDefinition = "TEXT")
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "payload_after", columnDefinition = "jsonb")
     private String payloadAfter;
 
     @Column(name = "ip_address", length = 45)
