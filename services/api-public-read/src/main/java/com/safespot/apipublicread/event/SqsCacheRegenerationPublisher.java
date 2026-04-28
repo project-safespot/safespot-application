@@ -1,6 +1,7 @@
 package com.safespot.apipublicread.event;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.sqs.SqsClient;
@@ -17,9 +18,10 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
     private final ObjectMapper objectMapper;
     private final CacheKeyFamilyResolver resolver;
     private final CacheRegenerationPublishFailureRecorder failureRecorder;
+    private final MeterRegistry meterRegistry;
 
     @Override
-    public void publish(String cacheKey, CacheRegenerationReason reason) {
+    public void publish(String cacheKey, CacheRegenerationReason reason, String endpoint) {
         Optional<String> family = resolver.resolve(cacheKey);
         if (family.isEmpty()) {
             log.warn("[CacheRegen] unsupported cacheKey={}, skipping SQS publish", cacheKey);
@@ -32,6 +34,11 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
         } catch (Exception e) {
             log.error("[CacheRegen] envelope serialization failed idempotencyKey={} cacheKey={}: {}",
                     envelope.idempotencyKey(), cacheKey, e.getMessage(), e);
+            meterRegistry.counter("api_read_cache_regen_publish_total",
+                    "service", "api-public-read",
+                    "endpoint", endpoint,
+                    "result", "failure"
+            ).increment();
             return;
         }
         try {
@@ -41,11 +48,21 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
                     .build());
             log.info("[CacheRegen] sent to SQS idempotencyKey={} traceId={}",
                     envelope.idempotencyKey(), envelope.traceId());
+            meterRegistry.counter("api_read_cache_regen_publish_total",
+                    "service", "api-public-read",
+                    "endpoint", endpoint,
+                    "result", "success"
+            ).increment();
         } catch (Exception e) {
             log.error("[CacheRegen] SQS send failed eventId={} eventType={} idempotencyKey={} traceId={} cacheKeyFamily={}: {}",
                     envelope.eventId(), envelope.eventType(), envelope.idempotencyKey(),
                     envelope.traceId(), envelope.payload().cacheKeyFamily(), e.getMessage());
             failureRecorder.record(envelope, body);
+            meterRegistry.counter("api_read_cache_regen_publish_total",
+                    "service", "api-public-read",
+                    "endpoint", endpoint,
+                    "result", "failure"
+            ).increment();
         }
     }
 }

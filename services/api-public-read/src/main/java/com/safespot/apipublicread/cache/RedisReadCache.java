@@ -3,6 +3,7 @@ package com.safespot.apipublicread.cache;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
@@ -12,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
@@ -22,12 +24,22 @@ public class RedisReadCache {
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
 
-    public enum FallbackReason { REDIS_MISS, REDIS_DOWN }
+    public enum FallbackReason { REDIS_MISS, REDIS_DOWN, PARSE_ERROR }
 
     public record CacheResult<T>(T value, FallbackReason fallbackReason) {
         public boolean isHit() { return value != null; }
         public boolean isMiss() { return value == null && fallbackReason == FallbackReason.REDIS_MISS; }
         public boolean isDown() { return value == null && fallbackReason == FallbackReason.REDIS_DOWN; }
+        public boolean isParseError() { return value == null && fallbackReason == FallbackReason.PARSE_ERROR; }
+
+        public String resultLabel() {
+            if (value != null) return "hit";
+            return switch (fallbackReason) {
+                case REDIS_DOWN -> "down";
+                case PARSE_ERROR -> "parse_error";
+                case REDIS_MISS -> "miss";
+            };
+        }
     }
 
     public <T> CacheResult<T> get(String key, TypeReference<T> type) {
@@ -46,7 +58,7 @@ public class RedisReadCache {
             return new CacheResult<>(null, FallbackReason.REDIS_DOWN);
         } catch (Exception e) {
             log.warn("Redis read/parse error for key={}: {}", key, e.getMessage());
-            return new CacheResult<>(null, FallbackReason.REDIS_MISS);
+            return new CacheResult<>(null, FallbackReason.PARSE_ERROR);
         }
     }
 
@@ -63,8 +75,20 @@ public class RedisReadCache {
         }
     }
 
+    public void recordCacheRequest(String endpoint, String result) {
+        meterRegistry.counter("api_read_cache_request_total",
+                "service", "api-public-read",
+                "endpoint", endpoint,
+                "result", result
+        ).increment();
+    }
+
     public void recordFallback(String endpoint, FallbackReason reason) {
-        String reasonLabel = reason == FallbackReason.REDIS_DOWN ? "redis_down" : "redis_miss";
+        String reasonLabel = switch (reason) {
+            case REDIS_DOWN -> "redis_down";
+            case PARSE_ERROR -> "parse_error";
+            case REDIS_MISS -> "redis_miss";
+        };
         meterRegistry.counter("api_read_cache_fallback_total",
                 "service", "api-public-read",
                 "endpoint", endpoint,
@@ -77,5 +101,13 @@ public class RedisReadCache {
                 "service", "api-public-read",
                 "endpoint", endpoint
         ).increment();
+    }
+
+    public void recordDbFallbackLatency(String endpoint, long durationMs) {
+        Timer.builder("api_read_db_fallback_latency_seconds")
+                .tag("service", "api-public-read")
+                .tag("endpoint", endpoint)
+                .register(meterRegistry)
+                .record(durationMs, TimeUnit.MILLISECONDS);
     }
 }

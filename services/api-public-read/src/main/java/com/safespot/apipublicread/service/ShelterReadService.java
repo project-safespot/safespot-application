@@ -14,6 +14,7 @@ import com.safespot.apipublicread.exception.ApiException;
 import com.safespot.apipublicread.exception.ErrorCode;
 import com.safespot.apipublicread.repository.EvacuationEntryRepository;
 import com.safespot.apipublicread.repository.ShelterRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -39,6 +40,7 @@ public class ShelterReadService {
     private final RedisReadCache redisReadCache;
     private final SuppressWindowService suppressWindowService;
     private final CacheRegenerationPublisher cacheRegenerationPublisher;
+    private final MeterRegistry meterRegistry;
 
     public List<ShelterNearbyItem> findNearby(double lat, double lng, int radiusM, String disasterType) {
         double latDelta = CongestionCalculator.metersToDegreeLat(radiusM);
@@ -82,6 +84,8 @@ public class ShelterReadService {
         String key = "shelter:status:" + shelterId;
         RedisReadCache.CacheResult<ShelterStatusCache> cached = redisReadCache.get(key, new TypeReference<>() {});
 
+        redisReadCache.recordCacheRequest(endpoint, cached.resultLabel());
+
         if (cached.isHit()) {
             return cached.value();
         }
@@ -90,6 +94,10 @@ public class ShelterReadService {
         redisReadCache.recordFallback(endpoint, reason);
         redisReadCache.recordDbFallbackQuery(endpoint);
 
+        meterRegistry.counter("api_read_cache_regen_requested_total",
+                "service", "api-public-read", "endpoint", endpoint).increment();
+
+        long start = System.currentTimeMillis();
         long occupancy = evacuationEntryRepository.countCurrentOccupancy(shelterId);
         Shelter shelter = shelterRepository.findById(shelterId).orElse(null);
         int capacity = shelter != null ? shelter.getCapacity() : 0;
@@ -97,9 +105,13 @@ public class ShelterReadService {
         String congestion = CongestionCalculator.calculate(capacity, (int) occupancy);
         String updatedAt = shelter != null && shelter.getUpdatedAt() != null
                 ? shelter.getUpdatedAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) : null;
+        redisReadCache.recordDbFallbackLatency(endpoint, System.currentTimeMillis() - start);
 
         if (suppressWindowService.tryPublish(key)) {
-            cacheRegenerationPublisher.publish(key, CacheRegenerationReason.from(reason));
+            cacheRegenerationPublisher.publish(key, CacheRegenerationReason.from(reason), endpoint);
+        } else {
+            meterRegistry.counter("api_read_cache_regen_suppressed_total",
+                    "service", "api-public-read", "endpoint", endpoint).increment();
         }
 
         return new ShelterStatusCache((int) occupancy, available, congestion,

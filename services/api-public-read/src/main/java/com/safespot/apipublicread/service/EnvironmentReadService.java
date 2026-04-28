@@ -14,6 +14,7 @@ import com.safespot.apipublicread.exception.ApiException;
 import com.safespot.apipublicread.exception.ErrorCode;
 import com.safespot.apipublicread.repository.AirQualityLogRepository;
 import com.safespot.apipublicread.repository.WeatherLogRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +38,7 @@ public class EnvironmentReadService {
     private final RegionToGridResolver regionToGridResolver;
     private final SuppressWindowService suppressWindowService;
     private final CacheRegenerationPublisher cacheRegenerationPublisher;
+    private final MeterRegistry meterRegistry;
 
     public WeatherAlertDto findWeather(String region, Integer nx, Integer ny) {
         if (nx != null && ny != null) {
@@ -50,15 +52,16 @@ public class EnvironmentReadService {
 
     private WeatherAlertDto findWeatherByGrid(String region, int nx, int ny) {
         RedisReadCache.CacheResult<WeatherAlertDto> cached = redisReadCache.get(WEATHER_KEY, new TypeReference<>() {});
+        redisReadCache.recordCacheRequest(ENDPOINT_WEATHER, cached.resultLabel());
         if (cached.isHit()) return cached.value();
 
         redisReadCache.recordFallback(ENDPOINT_WEATHER, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_WEATHER);
-        if (suppressWindowService.tryPublish(WEATHER_KEY)) {
-            cacheRegenerationPublisher.publish(WEATHER_KEY, CacheRegenerationReason.from(cached.fallbackReason()));
-        }
+        requestRegeneration(WEATHER_KEY, ENDPOINT_WEATHER, cached.fallbackReason());
 
+        long start = System.currentTimeMillis();
         WeatherLog log = weatherLogRepository.findLatestByNxAndNy(nx, ny).orElse(null);
+        redisReadCache.recordDbFallbackLatency(ENDPOINT_WEATHER, System.currentTimeMillis() - start);
         if (log == null) return null;
         return toWeatherDto(region, log);
     }
@@ -69,15 +72,16 @@ public class EnvironmentReadService {
                         "현재 지원하지 않는 지역입니다: " + region));
 
         RedisReadCache.CacheResult<WeatherAlertDto> cached = redisReadCache.get(WEATHER_KEY, new TypeReference<>() {});
+        redisReadCache.recordCacheRequest(ENDPOINT_WEATHER, cached.resultLabel());
         if (cached.isHit()) return cached.value();
 
         redisReadCache.recordFallback(ENDPOINT_WEATHER, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_WEATHER);
-        if (suppressWindowService.tryPublish(WEATHER_KEY)) {
-            cacheRegenerationPublisher.publish(WEATHER_KEY, CacheRegenerationReason.from(cached.fallbackReason()));
-        }
+        requestRegeneration(WEATHER_KEY, ENDPOINT_WEATHER, cached.fallbackReason());
 
+        long start = System.currentTimeMillis();
         WeatherLog log = weatherLogRepository.findLatestByNxAndNy(grid[0], grid[1]).orElse(null);
+        redisReadCache.recordDbFallbackLatency(ENDPOINT_WEATHER, System.currentTimeMillis() - start);
         if (log == null) return null;
         return toWeatherDto(region, log);
     }
@@ -88,15 +92,16 @@ public class EnvironmentReadService {
         }
 
         RedisReadCache.CacheResult<AirQualityDto> cached = redisReadCache.get(AIR_KEY, new TypeReference<>() {});
+        redisReadCache.recordCacheRequest(ENDPOINT_AIR, cached.resultLabel());
         if (cached.isHit()) return cached.value();
 
         redisReadCache.recordFallback(ENDPOINT_AIR, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_AIR);
-        if (suppressWindowService.tryPublish(AIR_KEY)) {
-            cacheRegenerationPublisher.publish(AIR_KEY, CacheRegenerationReason.from(cached.fallbackReason()));
-        }
+        requestRegeneration(AIR_KEY, ENDPOINT_AIR, cached.fallbackReason());
 
+        long start = System.currentTimeMillis();
         AirQualityLog log = airQualityLogRepository.findLatest().orElse(null);
+        redisReadCache.recordDbFallbackLatency(ENDPOINT_AIR, System.currentTimeMillis() - start);
         if (log == null) return null;
         return new AirQualityDto(
                 log.getStationName(),
@@ -104,6 +109,17 @@ public class EnvironmentReadService {
                 log.getKhaiGrade(),
                 log.getMeasuredAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
         );
+    }
+
+    private void requestRegeneration(String cacheKey, String endpoint, RedisReadCache.FallbackReason fallbackReason) {
+        meterRegistry.counter("api_read_cache_regen_requested_total",
+                "service", "api-public-read", "endpoint", endpoint).increment();
+        if (suppressWindowService.tryPublish(cacheKey)) {
+            cacheRegenerationPublisher.publish(cacheKey, CacheRegenerationReason.from(fallbackReason), endpoint);
+        } else {
+            meterRegistry.counter("api_read_cache_regen_suppressed_total",
+                    "service", "api-public-read", "endpoint", endpoint).increment();
+        }
     }
 
     private WeatherAlertDto toWeatherDto(String region, WeatherLog log) {

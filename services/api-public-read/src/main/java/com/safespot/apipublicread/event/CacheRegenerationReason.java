@@ -18,6 +18,10 @@ public enum CacheRegenerationReason {
     }
 
     public static CacheRegenerationReason from(RedisReadCache.FallbackReason reason) {
-        return reason == RedisReadCache.FallbackReason.REDIS_DOWN ? REDIS_DOWN : CACHE_MISS;
+        return switch (reason) {
+            case REDIS_DOWN -> REDIS_DOWN;
+            case PARSE_ERROR -> PARSE_ERROR;
+            case REDIS_MISS -> CACHE_MISS;
+        };
     }
 }

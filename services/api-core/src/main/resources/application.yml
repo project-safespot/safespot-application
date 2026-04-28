@@ -3,3 +3,17 @@ spring:
     name: api-core
   profiles:
     active: local
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      service: api-core
+      env: ${SPRING_ENV:dev}
+      region: seoul

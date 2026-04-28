@@ -10,10 +10,13 @@ import com.safespot.apipublicread.event.CacheRegenerationPublisher;
 import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
 import com.safespot.apipublicread.repository.DisasterAlertRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.springframework.data.domain.PageRequest;
@@ -37,6 +40,7 @@ class DisasterAlertReadServiceTest {
     @Mock RedisReadCache redisReadCache;
     @Mock SuppressWindowService suppressWindowService;
     @Mock CacheRegenerationPublisher cacheRegenerationPublisher;
+    @Spy MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     @InjectMocks DisasterAlertReadService disasterAlertReadService;
 
@@ -59,7 +63,7 @@ class DisasterAlertReadServiceTest {
         assertThat(result).hasSize(1);
         assertThat(result.get(0).alertId()).isEqualTo(56L);
         verify(disasterAlertRepository, never()).findAlerts(any(), any(), any());
-        verify(cacheRegenerationPublisher, never()).publish(anyString(), any());
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
 
     @Test
@@ -86,7 +90,7 @@ class DisasterAlertReadServiceTest {
 
         assertThat(result).hasSize(1);
         verify(redisReadCache).recordFallback(eq("/disaster-alerts"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
-        verify(cacheRegenerationPublisher).publish(LIST_KEY, CacheRegenerationReason.CACHE_MISS);
+        verify(cacheRegenerationPublisher).publish(LIST_KEY, CacheRegenerationReason.CACHE_MISS, "/disaster-alerts");
     }
 
     @Test
@@ -115,7 +119,7 @@ class DisasterAlertReadServiceTest {
 
         disasterAlertReadService.findAlerts(null, null);
 
-        verify(cacheRegenerationPublisher, never()).publish(anyString(), any());
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
 
     // ── findLatest: list hit ───────────────────────────────────────────────
@@ -134,7 +138,7 @@ class DisasterAlertReadServiceTest {
 
         assertThat(result.alertId()).isEqualTo(55L);
         verify(disasterAlertRepository, never()).findLatest(any(), any());
-        verify(cacheRegenerationPublisher, never()).publish(anyString(), any());
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
 
     @Test
@@ -152,8 +156,8 @@ class DisasterAlertReadServiceTest {
         assertThat(result.alertId()).isEqualTo(55L);
         verify(redisReadCache).recordFallback(eq("/disasters/{disasterType}/latest"),
                 eq(RedisReadCache.FallbackReason.REDIS_MISS));
-        verify(cacheRegenerationPublisher).publish(DETAIL_KEY_55, CacheRegenerationReason.CACHE_MISS);
-        verify(cacheRegenerationPublisher, never()).publish(eq(LIST_KEY), any());
+        verify(cacheRegenerationPublisher).publish(DETAIL_KEY_55, CacheRegenerationReason.CACHE_MISS, "/disasters/{disasterType}/latest");
+        verify(cacheRegenerationPublisher, never()).publish(eq(LIST_KEY), any(), anyString());
     }
 
     @Test
@@ -165,7 +169,7 @@ class DisasterAlertReadServiceTest {
                 .isInstanceOf(ApiException.class);
 
         verify(disasterAlertRepository, never()).findLatest(any(), any());
-        verify(cacheRegenerationPublisher, never()).publish(anyString(), any());
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
 
     // ── findLatest: list miss ──────────────────────────────────────────────
@@ -183,7 +187,7 @@ class DisasterAlertReadServiceTest {
         assertThat(result.alertId()).isEqualTo(55L);
         verify(redisReadCache).recordFallback(eq("/disasters/{disasterType}/latest"),
                 eq(RedisReadCache.FallbackReason.REDIS_MISS));
-        verify(cacheRegenerationPublisher).publish(LIST_KEY, CacheRegenerationReason.CACHE_MISS);
+        verify(cacheRegenerationPublisher).publish(LIST_KEY, CacheRegenerationReason.CACHE_MISS, "/disasters/{disasterType}/latest");
     }
 
     @Test

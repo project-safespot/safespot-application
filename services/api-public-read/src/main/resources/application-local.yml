@@ -34,13 +34,3 @@ safespot:
     publisher-mode: log
     publish-failure-file: ./tmp/cache-regeneration-publish-failures.jsonl
 
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,prometheus
-  metrics:
-    tags:
-      service: api-public-read
-      env: dev
-      region: seoul

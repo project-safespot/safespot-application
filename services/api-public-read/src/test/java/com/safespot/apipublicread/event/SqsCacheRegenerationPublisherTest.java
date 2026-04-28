@@ -1,6 +1,8 @@
 package com.safespot.apipublicread.event;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -17,7 +19,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -27,6 +28,7 @@ class SqsCacheRegenerationPublisherTest {
     @Mock CacheKeyFamilyResolver resolver;
     @Mock CacheRegenerationPublishFailureRecorder failureRecorder;
 
+    private final MeterRegistry meterRegistry = new SimpleMeterRegistry();
     private SqsCacheRegenerationPublisher publisher;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private static final String QUEUE_URL = "http://localhost:4566/000000000000/cache-regen-queue";
@@ -34,7 +36,7 @@ class SqsCacheRegenerationPublisherTest {
     @BeforeEach
     void setUp() {
         publisher = new SqsCacheRegenerationPublisher(
-                sqsClient, QUEUE_URL, objectMapper, resolver, failureRecorder);
+                sqsClient, QUEUE_URL, objectMapper, resolver, failureRecorder, meterRegistry);
     }
 
     @Test
@@ -44,7 +46,7 @@ class SqsCacheRegenerationPublisherTest {
         when(sqsClient.sendMessage(any(SendMessageRequest.class)))
                 .thenReturn(SendMessageResponse.builder().messageId("msg-001").build());
 
-        publisher.publish("disaster:messages:list:seoul", CacheRegenerationReason.CACHE_MISS);
+        publisher.publish("disaster:messages:list:seoul", CacheRegenerationReason.CACHE_MISS, "/disaster-alerts");
 
         ArgumentCaptor<SendMessageRequest> captor = ArgumentCaptor.forClass(SendMessageRequest.class);
         verify(sqsClient).sendMessage(captor.capture());
@@ -58,7 +60,7 @@ class SqsCacheRegenerationPublisherTest {
         when(sqsClient.sendMessage(any(SendMessageRequest.class)))
                 .thenReturn(SendMessageResponse.builder().messageId("msg-ok").build());
 
-        publisher.publish("disaster:messages:list:seoul", CacheRegenerationReason.CACHE_MISS);
+        publisher.publish("disaster:messages:list:seoul", CacheRegenerationReason.CACHE_MISS, "/disaster-alerts");
 
         verify(failureRecorder, never()).record(any(), anyString());
     }
@@ -70,7 +72,7 @@ class SqsCacheRegenerationPublisherTest {
         when(sqsClient.sendMessage(any(SendMessageRequest.class)))
                 .thenThrow(new RuntimeException("SQS unavailable"));
 
-        publisher.publish("disaster:messages:list:seoul", CacheRegenerationReason.CACHE_MISS);
+        publisher.publish("disaster:messages:list:seoul", CacheRegenerationReason.CACHE_MISS, "/disaster-alerts");
 
         ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
         verify(failureRecorder).record(any(CacheRegenerationEnvelope.class), jsonCaptor.capture());
@@ -91,7 +93,7 @@ class SqsCacheRegenerationPublisherTest {
         when(sqsClient.sendMessage(any(SendMessageRequest.class)))
                 .thenReturn(SendMessageResponse.builder().messageId("msg-002").build());
 
-        publisher.publish("disaster:messages:list:seoul", CacheRegenerationReason.CACHE_MISS);
+        publisher.publish("disaster:messages:list:seoul", CacheRegenerationReason.CACHE_MISS, "/disaster-alerts");
 
         ArgumentCaptor<SendMessageRequest> captor = ArgumentCaptor.forClass(SendMessageRequest.class);
         verify(sqsClient).sendMessage(captor.capture());
@@ -109,7 +111,7 @@ class SqsCacheRegenerationPublisherTest {
     void publish_unsupportedKey_doesNotSendToSqs() {
         when(resolver.resolve("unknown:key")).thenReturn(Optional.empty());
 
-        publisher.publish("unknown:key", CacheRegenerationReason.CACHE_MISS);
+        publisher.publish("unknown:key", CacheRegenerationReason.CACHE_MISS, "/disaster-alerts");
 
         verify(sqsClient, never()).sendMessage(any(SendMessageRequest.class));
         verify(failureRecorder, never()).record(any(), anyString());
@@ -121,7 +123,7 @@ class SqsCacheRegenerationPublisherTest {
         when(sqsClient.sendMessage(any(SendMessageRequest.class)))
                 .thenThrow(new RuntimeException("SQS unavailable"));
 
-        assertThatCode(() -> publisher.publish("shelter:status:101", CacheRegenerationReason.REDIS_DOWN))
+        assertThatCode(() -> publisher.publish("shelter:status:101", CacheRegenerationReason.REDIS_DOWN, "/shelters/{shelterId}"))
                 .doesNotThrowAnyException();
     }
 
@@ -132,7 +134,7 @@ class SqsCacheRegenerationPublisherTest {
         when(sqsClient.sendMessage(any(SendMessageRequest.class)))
                 .thenReturn(SendMessageResponse.builder().messageId("msg-003").build());
 
-        publisher.publish("environment:air-quality:seoul", CacheRegenerationReason.REDIS_DOWN);
+        publisher.publish("environment:air-quality:seoul", CacheRegenerationReason.REDIS_DOWN, "/air-quality");
 
         ArgumentCaptor<SendMessageRequest> captor = ArgumentCaptor.forClass(SendMessageRequest.class);
         verify(sqsClient).sendMessage(captor.capture());

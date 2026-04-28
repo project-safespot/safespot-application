@@ -3,3 +3,17 @@ spring:
     name: api-public-read
   profiles:
     active: local
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      service: api-public-read
+      env: ${SPRING_ENV:dev}
+      region: seoul
