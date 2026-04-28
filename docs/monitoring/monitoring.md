@@ -164,6 +164,8 @@ metric에는 `redisKey`를 label로 넣지 않는다. Redis key는 log field로�
 | `api_core_shelter_open_count` | Gauge | 없음 | 운영 중 대피소 수 |
 | `api_core_sqs_publish_total` | Counter | `event_type`, `result`, `queue_name` | SQS event 발행 결과 |
 | `api_core_sqs_publish_retry_total` | Counter | `event_type`, `queue_name` | SQS publish retry |
+| `api_core_sqs_publish_permanent_failure_total` | Counter | `event_type`, `queue_name` | SQS publish retry 소진 후 영구 실패 |
+| `api_core_sqs_publish_fallback_persist_total` | Counter | `result` | SQS 실패 시 fallback 파일 저장 결과 |
 
 > `api_core_shelter_full_count`는 `FULL` 상태를 운영 상태로만 집계한다.
 > `FULL`은 요청 거절을 의미하지 않으며, capacity는 admission control이 아니다.

@@ -13,10 +13,13 @@ import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
 import com.safespot.apipublicread.repository.AirQualityLogRepository;
 import com.safespot.apipublicread.repository.WeatherLogRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -39,6 +42,7 @@ class EnvironmentReadServiceTest {
     @Mock RegionToGridResolver regionToGridResolver;
     @Mock SuppressWindowService suppressWindowService;
     @Mock CacheRegenerationPublisher cacheRegenerationPublisher;
+    @Spy MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     @InjectMocks EnvironmentReadService environmentReadService;
 
@@ -56,7 +60,7 @@ class EnvironmentReadServiceTest {
 
         assertThat(result.temperature()).isEqualTo(18.5);
         verify(weatherLogRepository, never()).findLatestByNxAndNy(anyInt(), anyInt());
-        verify(cacheRegenerationPublisher, never()).publish(anyString(), any());
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
 
     @Test
@@ -78,7 +82,7 @@ class EnvironmentReadServiceTest {
         assertThat(result).isNotNull();
         assertThat(result.temperature()).isEqualTo(18.5);
         verify(redisReadCache).recordFallback(eq("/weather-alerts"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
-        verify(cacheRegenerationPublisher).publish(WEATHER_KEY, CacheRegenerationReason.CACHE_MISS);
+        verify(cacheRegenerationPublisher).publish(WEATHER_KEY, CacheRegenerationReason.CACHE_MISS, "/weather-alerts");
         verify(redisReadCache, never()).set(any(), any(), any());
     }
 
@@ -91,7 +95,7 @@ class EnvironmentReadServiceTest {
 
         environmentReadService.findWeather("서울", 60, 127);
 
-        verify(cacheRegenerationPublisher, never()).publish(anyString(), any());
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
 
     @Test
@@ -143,7 +147,7 @@ class EnvironmentReadServiceTest {
         assertThat(result.region()).isEqualTo("서울특별시");
         assertThat(result.temperature()).isEqualTo(20.0);
         verify(redisReadCache).recordFallback(eq("/weather-alerts"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
-        verify(cacheRegenerationPublisher).publish(WEATHER_KEY, CacheRegenerationReason.CACHE_MISS);
+        verify(cacheRegenerationPublisher).publish(WEATHER_KEY, CacheRegenerationReason.CACHE_MISS, "/weather-alerts");
         verify(redisReadCache, never()).set(any(), any(), any());
     }
 
@@ -189,7 +193,7 @@ class EnvironmentReadServiceTest {
 
         assertThat(result.aqi()).isEqualTo(42);
         verify(airQualityLogRepository, never()).findLatest();
-        verify(cacheRegenerationPublisher, never()).publish(anyString(), any());
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
 
     @Test
@@ -209,7 +213,7 @@ class EnvironmentReadServiceTest {
 
         assertThat(result.stationName()).isEqualTo("종로구");
         verify(redisReadCache).recordFallback(eq("/air-quality"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
-        verify(cacheRegenerationPublisher).publish(AIR_KEY, CacheRegenerationReason.CACHE_MISS);
+        verify(cacheRegenerationPublisher).publish(AIR_KEY, CacheRegenerationReason.CACHE_MISS, "/air-quality");
         verify(redisReadCache, never()).set(any(), any(), any());
     }
 

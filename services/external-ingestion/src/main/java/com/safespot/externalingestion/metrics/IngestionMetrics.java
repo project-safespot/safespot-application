@@ -1,18 +1,52 @@
 package com.safespot.externalingestion.metrics;
 
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Component
 @RequiredArgsConstructor
 public class IngestionMetrics {
 
     private final MeterRegistry registry;
+
+    private final ConcurrentHashMap<String, AtomicLong> lastSuccessTimestamps = new ConcurrentHashMap<>();
+
+    @PostConstruct
+    void initStalenessGauges() {
+        for (String source : new String[]{
+                "SAFETY_DATA_ALERT", "KMA_EARTHQUAKE", "SEOUL_EARTHQUAKE",
+                "FORESTRY_LANDSLIDE", "SEOUL_RIVER_LEVEL", "KMA_WEATHER",
+                "AIR_KOREA_AIR_QUALITY", "SEOUL_SHELTER_EARTHQUAKE",
+                "SEOUL_SHELTER_LANDSLIDE", "SEOUL_SHELTER_FLOOD"}) {
+            AtomicLong ts = new AtomicLong(0);
+            lastSuccessTimestamps.put(source, ts);
+            Gauge.builder("ingestion_last_success_timestamp", ts, AtomicLong::get)
+                    .tag("source", source)
+                    .register(registry);
+        }
+    }
+
+    public void recordLastSuccess(String source) {
+        lastSuccessTimestamps
+                .computeIfAbsent(source, k -> {
+                    AtomicLong ts = new AtomicLong(0);
+                    Gauge.builder("ingestion_last_success_timestamp", ts, AtomicLong::get)
+                            .tag("source", k)
+                            .register(registry);
+                    return ts;
+                })
+                .set(Instant.now().getEpochSecond());
+    }
 
     public void incrementPollingIteration(String source) {
         Counter.builder("ingestion_polling_loop_iteration_total")
@@ -79,6 +113,13 @@ public class IngestionMetrics {
             .increment();
     }
 
+    public void incrementRecordsFetched(String source, int count) {
+        Counter.builder("ingestion_records_fetched_total")
+            .tag("source", source)
+            .register(registry)
+            .increment(count);
+    }
+
     public void recordNormalizationDuration(String source, long millis) {
         Timer.builder("ingestion_normalization_duration_seconds")
             .tag("source", source)
@@ -87,7 +128,7 @@ public class IngestionMetrics {
     }
 
     public void incrementNormalizationSuccess(String source) {
-        Counter.builder("ingestion_normalization_success_total")
+        Counter.builder("ingestion_records_normalized_total")
             .tag("source", source)
             .register(registry)
             .increment();
@@ -97,6 +138,20 @@ public class IngestionMetrics {
         Counter.builder("ingestion_normalization_failure_total")
             .tag("source", source)
             .tag("reason", reason)
+            .register(registry)
+            .increment();
+    }
+
+    public void incrementRecordsFailed(String source) {
+        Counter.builder("ingestion_records_failed_total")
+            .tag("source", source)
+            .register(registry)
+            .increment();
+    }
+
+    public void incrementDuplicatePayload(String source) {
+        Counter.builder("ingestion_duplicate_payload_total")
+            .tag("source", source)
             .register(registry)
             .increment();
     }

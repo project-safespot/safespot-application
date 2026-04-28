@@ -11,11 +11,14 @@ import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
 import com.safespot.apipublicread.repository.EvacuationEntryRepository;
 import com.safespot.apipublicread.repository.ShelterRepository;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -35,6 +38,7 @@ class ShelterReadServiceTest {
     @Mock RedisReadCache redisReadCache;
     @Mock SuppressWindowService suppressWindowService;
     @Mock CacheRegenerationPublisher cacheRegenerationPublisher;
+    @Spy MeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     @InjectMocks ShelterReadService shelterReadService;
 
@@ -82,7 +86,7 @@ class ShelterReadServiceTest {
         assertThat(result.currentOccupancy()).isEqualTo(68);
         verify(redisReadCache).recordFallback(eq("/shelters/{shelterId}"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
         verify(redisReadCache).recordDbFallbackQuery("/shelters/{shelterId}");
-        verify(cacheRegenerationPublisher).publish("shelter:status:101", CacheRegenerationReason.CACHE_MISS);
+        verify(cacheRegenerationPublisher).publish("shelter:status:101", CacheRegenerationReason.CACHE_MISS, "/shelters/{shelterId}");
     }
 
     @Test
@@ -97,7 +101,7 @@ class ShelterReadServiceTest {
 
         assertThat(result.currentOccupancy()).isEqualTo(30);
         verify(redisReadCache).recordFallback(eq("/shelters/{shelterId}"), eq(RedisReadCache.FallbackReason.REDIS_DOWN));
-        verify(cacheRegenerationPublisher).publish("shelter:status:101", CacheRegenerationReason.REDIS_DOWN);
+        verify(cacheRegenerationPublisher).publish("shelter:status:101", CacheRegenerationReason.REDIS_DOWN, "/shelters/{shelterId}");
     }
 
     @Test
@@ -110,7 +114,7 @@ class ShelterReadServiceTest {
 
         shelterReadService.findById(101L);
 
-        verify(cacheRegenerationPublisher, never()).publish(anyString(), any());
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
 
     @Test

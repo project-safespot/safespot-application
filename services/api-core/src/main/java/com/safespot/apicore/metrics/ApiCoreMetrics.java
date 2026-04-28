@@ -50,10 +50,11 @@ public class ApiCoreMetrics {
                 .increment();
     }
 
-    public void incAdminActionFailed(String action) {
+    public void incAdminActionFailed(String action, String reason) {
         Counter.builder("api_core_admin_action_failed_total")
                 .tag("service", "api-core")
                 .tag("action", action)
+                .tag("reason", reason)
                 .register(registry)
                 .increment();
     }

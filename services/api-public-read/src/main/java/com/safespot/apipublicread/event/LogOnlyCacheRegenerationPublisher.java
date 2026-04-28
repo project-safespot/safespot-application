@@ -1,5 +1,6 @@
 package com.safespot.apipublicread.event;
 
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -18,9 +19,10 @@ import java.util.Optional;
 public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPublisher {
 
     private final CacheKeyFamilyResolver resolver;
+    private final MeterRegistry meterRegistry;
 
     @Override
-    public void publish(String cacheKey, CacheRegenerationReason reason) {
+    public void publish(String cacheKey, CacheRegenerationReason reason, String endpoint) {
         Optional<String> family = resolver.resolve(cacheKey);
         if (family.isEmpty()) {
             log.warn("[CacheRegen] unsupported cacheKey={}, skipping publish", cacheKey);
@@ -33,5 +35,10 @@ public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPubli
                 e.eventType(), e.eventId(), e.occurredAt(), e.producer(), e.traceId(), e.idempotencyKey(),
                 e.payload().cacheKey(), e.payload().cacheKeyFamily(), e.payload().requestedAt(),
                 e.payload().reason(), e.payload().schemaVersion());
+        meterRegistry.counter("api_read_cache_regen_publish_total",
+                "service", "api-public-read",
+                "endpoint", endpoint,
+                "result", "success"
+        ).increment();
     }
 }

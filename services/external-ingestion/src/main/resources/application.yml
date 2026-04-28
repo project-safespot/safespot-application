@@ -16,6 +16,7 @@ management:
     tags:
       service: external-ingestion
       env: ${SPRING_ENV:dev}
+      region: seoul
 
 ingestion:
   sqs:

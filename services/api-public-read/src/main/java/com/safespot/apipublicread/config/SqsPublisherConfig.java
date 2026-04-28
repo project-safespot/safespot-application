@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safespot.apipublicread.event.CacheKeyFamilyResolver;
 import com.safespot.apipublicread.event.CacheRegenerationPublishFailureRecorder;
 import com.safespot.apipublicread.event.SqsCacheRegenerationPublisher;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -42,7 +43,8 @@ public class SqsPublisherConfig {
             @Value("${safespot.cache-regeneration.queue-url}") String queueUrl,
             ObjectMapper objectMapper,
             CacheKeyFamilyResolver resolver,
-            CacheRegenerationPublishFailureRecorder failureRecorder) {
-        return new SqsCacheRegenerationPublisher(sqsClient, queueUrl, objectMapper, resolver, failureRecorder);
+            CacheRegenerationPublishFailureRecorder failureRecorder,
+            MeterRegistry meterRegistry) {
+        return new SqsCacheRegenerationPublisher(sqsClient, queueUrl, objectMapper, resolver, failureRecorder, meterRegistry);
     }
 }
