@@ -1,6 +1,5 @@
 package com.safespot.apicore.domain.entity;
 
-import com.safespot.apicore.domain.enums.HealthStatus;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -28,10 +27,9 @@ public class EntryDetail {
     @Column(name = "family_info", columnDefinition = "TEXT")
     private String familyInfo;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "health_status", nullable = false, length = 20)
+    @Column(name = "health_status", nullable = false, length = 100)
     @Builder.Default
-    private HealthStatus healthStatus = HealthStatus.정상;
+    private String healthStatus = "정상";
 
     @Column(name = "health_note", columnDefinition = "TEXT")
     private String healthNote;
@@ -56,7 +54,7 @@ public class EntryDetail {
         if (updatedAt == null) updatedAt = now;
     }
 
-    public void update(String familyInfo, HealthStatus healthStatus, Boolean specialProtectionFlag) {
+    public void update(String familyInfo, String healthStatus, Boolean specialProtectionFlag) {
         if (familyInfo != null) this.familyInfo = familyInfo;
         if (healthStatus != null) this.healthStatus = healthStatus;
         if (specialProtectionFlag != null) this.specialProtectionFlag = specialProtectionFlag;

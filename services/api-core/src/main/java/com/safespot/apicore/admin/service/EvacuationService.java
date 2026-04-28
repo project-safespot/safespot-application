@@ -78,7 +78,7 @@ public class EvacuationService {
                 .build();
         entry = entryRepository.save(entry);
 
-        HealthStatus healthStatus = parseHealthStatus(request.getHealthStatus());
+        String healthStatus = request.getHealthStatus() != null ? request.getHealthStatus() : "정상";
         EntryDetail detail = EntryDetail.builder()
                 .entryId(entry.getEntryId())
                 .familyInfo(request.getFamilyInfo())
@@ -204,7 +204,7 @@ public class EvacuationService {
                 "address", nullToEmpty(entry.getAddress()),
                 "note", nullToEmpty(entry.getNote()),
                 "familyInfo", detail != null ? nullToEmpty(detail.getFamilyInfo()) : "",
-                "healthStatus", detail != null ? detail.getHealthStatus().name() : "",
+                "healthStatus", detail != null ? detail.getHealthStatus() : "",
                 "specialProtectionFlag", detail != null ? detail.getSpecialProtectionFlag() : false));
 
         if (request.getAddress() != null) {
@@ -218,8 +218,8 @@ public class EvacuationService {
         entryRepository.save(entry);
 
         if (detail != null) {
-            HealthStatus hs = request.getHealthStatus() != null
-                    ? parseHealthStatus(request.getHealthStatus())
+            String hs = request.getHealthStatus() != null
+                    ? request.getHealthStatus()
                     : detail.getHealthStatus();
             if (request.getFamilyInfo() != null) changedFields.add("familyInfo");
             if (request.getHealthStatus() != null) changedFields.add("healthStatus");
@@ -277,7 +277,7 @@ public class EvacuationService {
             detailDto = EvacuationEntryItem.Detail.builder()
                     .address(e.getAddress())
                     .familyInfo(detail.getFamilyInfo())
-                    .healthStatus(detail.getHealthStatus().name())
+                    .healthStatus(detail.getHealthStatus())
                     .specialProtectionFlag(detail.getSpecialProtectionFlag())
                     .build();
         }
@@ -301,16 +301,6 @@ public class EvacuationService {
             return EntryStatus.valueOf(status);
         } catch (IllegalArgumentException e) {
             throw ApiException.badRequest("VALIDATION_ERROR", "status 값이 올바르지 않습니다.");
-        }
-    }
-
-    private HealthStatus parseHealthStatus(String value) {
-        if (value == null) return HealthStatus.정상;
-        try {
-            return HealthStatus.valueOf(value);
-        } catch (IllegalArgumentException e) {
-            throw ApiException.badRequest("VALIDATION_ERROR",
-                    "healthStatus 값이 올바르지 않습니다. 허용값: 정상, 부상, 응급, 기타");
         }
     }
 

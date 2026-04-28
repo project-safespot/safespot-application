@@ -219,7 +219,8 @@ class AdminEvacuationControllerIntegrationTest {
     }
 
     @Test
-    void createEntry_invalidHealthStatus_returns400() throws Exception {
+    void createEntry_freeTextHealthStatus_returns201() throws Exception {
+        // healthStatus is free text; previously rejected values must now be accepted
         Map<String, Object> body = Map.of(
                 "shelterId", shelterId,
                 "name", "홍길동",
@@ -229,9 +230,8 @@ class AdminEvacuationControllerIntegrationTest {
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(body)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.entryStatus").value("ENTERED"));
     }
 
     @Test

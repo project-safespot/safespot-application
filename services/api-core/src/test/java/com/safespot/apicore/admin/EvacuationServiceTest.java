@@ -10,7 +10,6 @@ import com.safespot.apicore.common.exception.ApiException;
 import com.safespot.apicore.domain.entity.*;
 import com.safespot.apicore.domain.enums.EntryStatus;
 import com.safespot.apicore.domain.enums.EventHistoryType;
-import com.safespot.apicore.domain.enums.HealthStatus;
 import com.safespot.apicore.metrics.ApiCoreMetrics;
 import com.safespot.apicore.repository.*;
 import org.junit.jupiter.api.BeforeEach;
@@ -159,15 +158,18 @@ class EvacuationServiceTest {
     }
 
     @Test
-    void createEntry_invalidHealthStatus_throws400() {
+    void createEntry_freeTextHealthStatus_succeeds() {
+        // healthStatus is now free text; any value including previously invalid ones must be accepted
         when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelterWithCapacity(10)));
+        when(entryRepository.save(any())).thenReturn(savedEntry(302L));
+        when(entryDetailRepository.save(any())).thenReturn(mock(EntryDetail.class));
+        when(historyRepository.save(any())).thenReturn(mock(EvacuationEventHistory.class));
+        when(auditLogRepository.save(any())).thenReturn(mock(AdminAuditLog.class));
 
         CreateEntryRequest req = buildCreateRequest(101L);
-        setField(req, "healthStatus", "당뇨");
+        setField(req, "healthStatus", "경미한 타박상");
 
-        assertThatThrownBy(() -> evacuationService.createEntry(req, 7L, "127.0.0.1"))
-                .isInstanceOf(ApiException.class)
-                .satisfies(e -> assertThat(((ApiException) e).getCode()).isEqualTo("VALIDATION_ERROR"));
+        assertThat(evacuationService.createEntry(req, 7L, "127.0.0.1").getEntryStatus()).isEqualTo("ENTERED");
     }
 
     @Test
@@ -185,27 +187,30 @@ class EvacuationServiceTest {
     }
 
     @Test
-    void updateEntry_invalidHealthStatus_throws400() {
+    void updateEntry_freeTextHealthStatus_succeeds() {
         EvacuationEntry entry = EvacuationEntry.builder()
                 .entryId(301L).shelterId(101L).entryStatus(EntryStatus.ENTERED)
                 .enteredAt(OffsetDateTime.now()).build();
         when(entryRepository.findById(301L)).thenReturn(Optional.of(entry));
+        when(entryRepository.save(any())).thenReturn(entry);
         when(entryDetailRepository.findByEntryId(301L)).thenReturn(Optional.of(
                 EntryDetail.builder()
                         .detailId(1L).entryId(301L)
-                        .healthStatus(HealthStatus.정상)
+                        .healthStatus("정상")
                         .specialProtectionFlag(false)
                         .createdAt(OffsetDateTime.now())
                         .updatedAt(OffsetDateTime.now())
                         .build()));
+        when(entryDetailRepository.save(any())).thenReturn(mock(EntryDetail.class));
+        when(historyRepository.save(any())).thenReturn(mock(EvacuationEventHistory.class));
+        when(auditLogRepository.save(any())).thenReturn(mock(AdminAuditLog.class));
 
         com.safespot.apicore.admin.dto.UpdateEntryRequest req =
                 new com.safespot.apicore.admin.dto.UpdateEntryRequest();
-        setField(req, "healthStatus", "invalid_value");
+        setField(req, "healthStatus", "의식 없음");
 
-        assertThatThrownBy(() -> evacuationService.updateEntry(301L, req, 7L, "127.0.0.1"))
-                .isInstanceOf(ApiException.class)
-                .satisfies(e -> assertThat(((ApiException) e).getCode()).isEqualTo("VALIDATION_ERROR"));
+        assertThat(evacuationService.updateEntry(301L, req, 7L, "127.0.0.1").getEntryId())
+                .isEqualTo(301L);
     }
 
     @Test
@@ -215,7 +220,7 @@ class EvacuationServiceTest {
                 .enteredAt(OffsetDateTime.now()).build();
         EntryDetail detail = EntryDetail.builder()
                 .detailId(1L).entryId(301L)
-                .healthStatus(HealthStatus.응급)
+                .healthStatus("응급")
                 .specialProtectionFlag(false)
                 .createdAt(OffsetDateTime.now())
                 .updatedAt(OffsetDateTime.now())
@@ -233,7 +238,7 @@ class EvacuationServiceTest {
 
         evacuationService.updateEntry(301L, req, 7L, "127.0.0.1");
 
-        assertThat(detail.getHealthStatus()).isEqualTo(HealthStatus.응급);
+        assertThat(detail.getHealthStatus()).isEqualTo("응급");
     }
 
     private void setField(Object obj, String fieldName, Object value) {
