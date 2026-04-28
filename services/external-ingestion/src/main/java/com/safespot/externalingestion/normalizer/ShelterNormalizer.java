@@ -16,26 +16,31 @@ import java.util.Optional;
 
 /**
  * 대피소 마스터 정규화 — SEOUL_SHELTER_* 소스 공용 (selective upsert)
- * 허용 컬럼만 갱신: name, shelter_type, disaster_type, address, latitude, longitude, capacity
- * 금지 컬럼: manager, contact, shelter_status, note
  *
- * SOURCE_META: {rootKey, disasterType, rowSubPath}
- *   rowSubPath=null → 서비스 이름 아래에 row 없이 rootKey 배열을 직접 읽음 (odcloud 패턴)
- *   rowSubPath="row" → rootKey.row 구조 (서울 OpenAPI 패턴)
+ * SOURCE_META: rowSubPath=null → rootKey 배열 직접 (odcloud 패턴)
+ *              rowSubPath="row" → rootKey.row 구조 (서울 OpenAPI 패턴)
  *
  * TODO: shelter 외부 식별자 미정의 — name+address+disasterType 임시 키 사용.
  *       서울 공공데이터 포털 식별자 확정 후 unique key 변경 필요.
- * TODO: SEOUL_SHELTER_LANDSLIDE odcloud 필드명 미확인.
- *       SHELTER_NM/RD_ADDR 등은 서울 OpenAPI 기준이며 odcloud 실제 응답 필드와 다를 수 있음.
- *       odcloud 15118898 실계정 응답 수신 후 필드명 갱신 필요.
+ * TODO: SEOUL_SHELTER_EARTHQUAKE XCRD/YCRD 는 한국 투영 좌표계(TM/UTM-K 추정).
+ *       CRS 확인 후 proj4j/GeoTools 로 WGS84 변환 및 좌표 backfill 필요.
+ * TODO: SEOUL_SHELTER_EARTHQUAKE LOT 는 WGS84 경도 범위이나 위도(LAT) 필드 미확인.
+ *       위도 확정 후 좌표 backfill 필요.
  */
 @Slf4j
 public class ShelterNormalizer implements Normalizer {
 
-    private static final Map<String, String[]> SOURCE_META = Map.of(
-        "SEOUL_SHELTER_EARTHQUAKE", new String[]{"TlEtqkP",  "EARTHQUAKE", "row"},
-        "SEOUL_SHELTER_LANDSLIDE",  new String[]{"data",     "LANDSLIDE",  null},
-        "SEOUL_SHELTER_FLOOD",      new String[]{"TbFloodShelterInfo", "FLOOD", "row"}
+    private static final BigDecimal LAT_MIN = new BigDecimal("33");
+    private static final BigDecimal LAT_MAX = new BigDecimal("39");
+    private static final BigDecimal LON_MIN = new BigDecimal("124");
+    private static final BigDecimal LON_MAX = new BigDecimal("132");
+
+    private record ShelterSourceMeta(String rootKey, String rowSubPath, String disasterType) {}
+
+    private static final Map<String, ShelterSourceMeta> SOURCE_META = Map.of(
+        "SEOUL_SHELTER_EARTHQUAKE", new ShelterSourceMeta("TlEtqkP",           "row", "EARTHQUAKE"),
+        "SEOUL_SHELTER_LANDSLIDE",  new ShelterSourceMeta("data",               null,  "LANDSLIDE"),
+        "SEOUL_SHELTER_FLOOD",      new ShelterSourceMeta("TbFloodShelterInfo", "row", "FLOOD")
     );
 
     private final String sourceCode;
@@ -58,45 +63,64 @@ public class ShelterNormalizer implements Normalizer {
 
     @Override
     public NormalizationResult normalize(ExternalApiRawPayload raw) {
-        String[] meta = SOURCE_META.get(sourceCode);
+        ShelterSourceMeta meta = SOURCE_META.get(sourceCode);
         if (meta == null) {
             return NormalizationResult.failure("unknown shelter source: " + sourceCode);
         }
-        String rootKey = meta[0];
-        String disasterType = meta[1];
-        String rowSubPath = meta.length > 2 ? meta[2] : "row";
 
         List<String> errors = new ArrayList<>();
         int succeeded = 0;
+        int skippedRequired = 0;
+        int nullCoords = 0;
+        int nullCapacity = 0;
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
-            // rowSubPath==null: odcloud 패턴 — rootKey 배열 직접 (예: data[])
-            // rowSubPath=="row": 서울 OpenAPI 패턴 — rootKey.row[]
-            JsonNode rows = (rowSubPath != null)
-                ? root.path(rootKey).path(rowSubPath)
-                : root.path(rootKey);
-            if (rows.isMissingNode() || rows.isEmpty()) return NormalizationResult.success(0);
+            JsonNode rows = meta.rowSubPath() != null
+                ? root.path(meta.rootKey()).path(meta.rowSubPath())
+                : root.path(meta.rootKey());
 
+            if (rows.isMissingNode() || rows.isEmpty()) {
+                log.info("[{}] no rows at path {}{}", sourceCode, meta.rootKey(),
+                    meta.rowSubPath() != null ? "." + meta.rowSubPath() : "");
+                return NormalizationResult.success(0);
+            }
+            log.info("[{}] extracted {} rows from source", sourceCode, rows.size());
+
+            int debugSampled = 0;
             for (JsonNode row : rows) {
                 try {
-                    String name    = row.path("SHELTER_NM").asText("").trim();
-                    String address = row.path("RD_ADDR").asText("").trim();
-                    String stype   = row.path("SHELT_TP").asText("").trim();
-                    BigDecimal lat = parseDecimal(row.path("LAT").asText("0"));
-                    BigDecimal lon = parseDecimal(row.path("LOT").asText("0"));
-                    int capacity   = parseIntSafe(row.path("MAN_CNT").asText("0"));
+                    String name    = extractName(row);
+                    String address = extractAddress(row);
 
-                    if (name.isBlank() || address.isBlank()) {
+                    if (name == null || address == null) {
+                        skippedRequired++;
                         log.debug("[{}] skip row — missing name or address", sourceCode);
                         continue;
                     }
 
-                    Optional<Shelter> existing =
-                        shelterRepo.findByNameAndAddressAndDisasterType(name, address, disasterType);
+                    BigDecimal[] coords  = extractCoords(row);
+                    BigDecimal   lat     = coords[0];
+                    BigDecimal   lon     = coords[1];
+                    Integer      capacity = extractCapacity(row);
+                    String       manager  = extractManager(row);
+                    String       contact  = extractContact(row);
+                    String       note     = extractNote(row);
 
+                    if (lat == null || lon == null) nullCoords++;
+                    if (capacity == null) nullCapacity++;
+
+                    if (debugSampled < 3) {
+                        log.debug("[{}] sample name={} address={} capacity={} lat={} lon={}",
+                            sourceCode, name, address, capacity, lat, lon);
+                        debugSampled++;
+                    }
+
+                    Optional<Shelter> existing = shelterRepo.findByNameAndAddressAndDisasterType(
+                        name, address, meta.disasterType());
                     Shelter shelter = existing.orElseGet(Shelter::new);
-                    shelter.updateFromExternalSource(name, stype, disasterType, address, lat, lon, capacity);
+                    shelter.updateFromExternalSource(name, meta.disasterType(), meta.disasterType(),
+                        address, lat, lon, capacity, manager, contact, note);
                     shelterRepo.save(shelter);
 
                     metrics.incrementNormalizationSuccess(sourceCode);
@@ -107,6 +131,9 @@ public class ShelterNormalizer implements Normalizer {
                     log.warn("[{}] shelter upsert failed raw_id={}", sourceCode, raw.getRawId(), e);
                 }
             }
+            log.info("[{}] done saved={} skipped_required={} null_coords={} null_capacity={}",
+                sourceCode, succeeded, skippedRequired, nullCoords, nullCapacity);
+
         } catch (Exception e) {
             errors.add(e.getMessage());
             metrics.incrementNormalizationFailure(sourceCode, "parse_error");
@@ -116,11 +143,121 @@ public class ShelterNormalizer implements Normalizer {
         return NormalizationResult.of(succeeded, errors.size(), errors);
     }
 
-    private BigDecimal parseDecimal(String val) {
-        try { return new BigDecimal(val.trim()); } catch (Exception e) { return BigDecimal.ZERO; }
+    private String extractName(JsonNode row) {
+        return switch (sourceCode) {
+            case "SEOUL_SHELTER_LANDSLIDE"  -> text(row, "대피장소내용");
+            case "SEOUL_SHELTER_EARTHQUAKE" -> text(row, "ACTC_FCLT_NM");
+            default -> text(row, "SHELTER_NM", "ACTC_FCLT_NM", "대피장소내용");
+        };
     }
 
-    private int parseIntSafe(String val) {
-        try { return Integer.parseInt(val.trim()); } catch (Exception e) { return 0; }
+    private String extractAddress(JsonNode row) {
+        return switch (sourceCode) {
+            case "SEOUL_SHELTER_LANDSLIDE"  -> text(row, "대피소주소");
+            case "SEOUL_SHELTER_EARTHQUAKE" -> text(row, "DADDR");
+            default -> text(row, "RD_ADDR", "DADDR", "대피소주소");
+        };
+    }
+
+    /**
+     * Returns [latitude, longitude]. Both null when no valid WGS84 pair is available.
+     *
+     * EARTHQUAKE: XCRD/YCRD are Korean projected coordinates (TM/UTM-K), not WGS84 — never stored
+     *             as lat/lon. LOT is a WGS84 longitude candidate but no LAT field is confirmed, so
+     *             both are stored as null until a valid lat/lon pair can be established.
+     * LANDSLIDE:  no coordinate fields in this source.
+     */
+    private BigDecimal[] extractCoords(JsonNode row) {
+        if ("SEOUL_SHELTER_EARTHQUAKE".equals(sourceCode) || "SEOUL_SHELTER_LANDSLIDE".equals(sourceCode)) {
+            return new BigDecimal[]{null, null};
+        }
+        // Generic fallback: try standard WGS84 field names
+        BigDecimal lat = validLat(decimal(row, "LAT"));
+        BigDecimal lon = validLon(decimal(row, "LOT", "LON"));
+        if (lat == null || lon == null) return new BigDecimal[]{null, null};
+        return new BigDecimal[]{lat, lon};
+    }
+
+    private Integer extractCapacity(JsonNode row) {
+        return switch (sourceCode) {
+            case "SEOUL_SHELTER_LANDSLIDE"  -> integer(row, "대피가능인원수");
+            case "SEOUL_SHELTER_EARTHQUAKE" -> null;
+            default -> integer(row, "MAN_CNT", "대피가능인원수");
+        };
+    }
+
+    private String extractManager(JsonNode row) {
+        return "SEOUL_SHELTER_LANDSLIDE".equals(sourceCode) ? text(row, "담당부서명") : null;
+    }
+
+    private String extractContact(JsonNode row) {
+        return "SEOUL_SHELTER_LANDSLIDE".equals(sourceCode) ? text(row, "담당자전화번호") : null;
+    }
+
+    private String extractNote(JsonNode row) {
+        if (!"SEOUL_SHELTER_LANDSLIDE".equals(sourceCode)) return null;
+        String facility = text(row, "대피장소응급시설내용");
+        String remark   = text(row, "비고");
+        if (facility == null && remark == null) return null;
+        if (facility == null) return remark;
+        if (remark   == null) return facility;
+        return facility + " / " + remark;
+    }
+
+    private BigDecimal validLat(BigDecimal v) {
+        if (v == null) return null;
+        return (v.compareTo(LAT_MIN) >= 0 && v.compareTo(LAT_MAX) <= 0) ? v : null;
+    }
+
+    private BigDecimal validLon(BigDecimal v) {
+        if (v == null) return null;
+        return (v.compareTo(LON_MIN) >= 0 && v.compareTo(LON_MAX) <= 0) ? v : null;
+    }
+
+    // --- safe extraction helpers ---
+
+    /** Returns trimmed non-blank text from the first matching key, or null. */
+    private String text(JsonNode row, String... keys) {
+        for (String key : keys) {
+            JsonNode node = row.path(key);
+            if (!node.isMissingNode() && !node.isNull()) {
+                String val = node.asText("").trim();
+                if (!val.isEmpty()) return val;
+            }
+        }
+        return null;
+    }
+
+    /** Parses an integer from the first matching key. Handles numeric JSON, numeric strings,
+     *  and comma-formatted numbers. Returns null for blank or unparseable values. */
+    private Integer integer(JsonNode row, String... keys) {
+        for (String key : keys) {
+            JsonNode node = row.path(key);
+            if (!node.isMissingNode() && !node.isNull()) {
+                if (node.isInt() || node.isLong()) return node.intValue();
+                String s = node.asText("").trim().replace(",", "");
+                if (!s.isEmpty()) {
+                    try { return Integer.parseInt(s); } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Parses a BigDecimal from the first matching key. Returns null for blank or unparseable values. */
+    private BigDecimal decimal(JsonNode row, String... keys) {
+        for (String key : keys) {
+            JsonNode node = row.path(key);
+            if (!node.isMissingNode() && !node.isNull()) {
+                if (node.isNumber()) {
+                    try { return node.decimalValue(); } catch (Exception ignored) {}
+                }
+                String s = node.asText("").trim();
+                if (!s.isEmpty()) {
+                    try { return new BigDecimal(s); } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        return null;
     }
 }

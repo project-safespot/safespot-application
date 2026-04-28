@@ -39,14 +39,14 @@ public class Shelter {
     @Column(name = "address", nullable = false, length = 255)
     private String address;
 
-    @Column(name = "latitude", nullable = false, precision = 10, scale = 7)
+    @Column(name = "latitude", nullable = true, precision = 10, scale = 7)
     private BigDecimal latitude;
 
-    @Column(name = "longitude", nullable = false, precision = 10, scale = 7)
+    @Column(name = "longitude", nullable = true, precision = 10, scale = 7)
     private BigDecimal longitude;
 
-    @Column(name = "capacity", nullable = false)
-    private int capacity;
+    @Column(name = "capacity", nullable = true)
+    private Integer capacity;
 
     @Column(name = "manager", length = 50)
     private String manager;
@@ -71,10 +71,10 @@ public class Shelter {
         this.updatedAt = OffsetDateTime.now();
     }
 
-    /** 외부 수집이 갱신할 수 있는 컬럼만 업데이트 (manager, contact, shelter_status, note 제외) */
+    /** 외부 수집이 갱신할 수 있는 컬럼 업데이트 (shelter_status 제외) */
     public void updateFromExternalSource(String name, String shelterType, String disasterType,
                                          String address, BigDecimal latitude, BigDecimal longitude,
-                                         int capacity) {
+                                         Integer capacity, String manager, String contact, String note) {
         this.name = name;
         this.shelterType = shelterType;
         this.disasterType = disasterType;
@@ -82,5 +82,8 @@ public class Shelter {
         this.latitude = latitude;
         this.longitude = longitude;
         this.capacity = capacity;
+        this.manager = manager;
+        this.contact = contact;
+        this.note = note;
     }
 }
