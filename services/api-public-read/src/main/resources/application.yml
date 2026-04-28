@@ -17,3 +17,6 @@ management:
       service: api-public-read
       env: ${SPRING_ENV:dev}
       region: seoul
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true

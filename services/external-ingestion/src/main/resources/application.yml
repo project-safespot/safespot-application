@@ -17,6 +17,9 @@ management:
       service: external-ingestion
       env: ${SPRING_ENV:dev}
       region: seoul
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true  
 
 ingestion:
   sqs:
