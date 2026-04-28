@@ -55,7 +55,7 @@ public class Shelter {
     private String contact;
 
     @Column(name = "shelter_status", nullable = false, length = 20)
-    private String shelterStatus = "운영중";
+    private String shelterStatus = "OPERATING";
 
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;
