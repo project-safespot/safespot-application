@@ -74,6 +74,7 @@ class ShelterNormalizerTest {
         // No coordinates in LANDSLIDE source — must be null, not 0,0
         assertThat(saved.getLatitude()).isNull();
         assertThat(saved.getLongitude()).isNull();
+        assertThat(saved.getShelterStatus()).isEqualTo("OPERATING");
     }
 
     @Test
@@ -119,6 +120,7 @@ class ShelterNormalizerTest {
         assertThat(saved.getLongitude()).isNull();
         assertThat(saved.getLatitude()).isNotEqualTo(BigDecimal.ZERO);
         assertThat(saved.getLongitude()).isNotEqualTo(BigDecimal.ZERO);
+        assertThat(saved.getShelterStatus()).isEqualTo("OPERATING");
     }
 
     @Test
