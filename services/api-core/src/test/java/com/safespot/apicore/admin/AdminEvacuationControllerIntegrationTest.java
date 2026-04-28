@@ -275,4 +275,23 @@ class AdminEvacuationControllerIntegrationTest {
         // payload_before is null for create — null jsonb must also be accepted
         assertThat(log.getPayloadBefore()).isNull();
     }
+
+    @Test
+    void listEntries_afterCreate_returnsCreatedEntry() throws Exception {
+        Map<String, Object> body = Map.of("shelterId", shelterId, "name", "목록테스트");
+        mockMvc.perform(post("/admin/evacuation-entries")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/admin/evacuation-entries")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("shelterId", shelterId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items").isArray())
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].entryStatus").value("ENTERED"))
+                .andExpect(jsonPath("$.data.items[0].shelterId").value(shelterId));
+    }
 }

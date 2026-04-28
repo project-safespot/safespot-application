@@ -159,7 +159,57 @@ Cache 책임 분리:
 - `FULL`은 상태 signal이며 거절 규칙이 아니다.
 - Over-capacity admission은 계속 허용된다.
 
-### 5.4 POST /admin/evacuation-entries
+### 5.4 GET /admin/evacuation-entries
+
+역할: `ADMIN`
+
+목적: 대피소별 입소자 목록 조회.
+
+Query params:
+
+| 파라미터 | 필수 | 설명 |
+| --- | --- | --- |
+| `shelterId` | 필수 | 조회할 대피소 ID |
+| `status` | 선택 | `ENTERED` 또는 `EXITED` — 없으면 전체 |
+
+`200` 응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "entryId": 301,
+        "shelterId": 101,
+        "alertId": null,
+        "userId": null,
+        "visitorName": "Kim Safe",
+        "visitorPhone": "01012345678",
+        "entryStatus": "ENTERED",
+        "enteredAt": "2026-04-14T10:20:00+09:00",
+        "exitedAt": null,
+        "note": null,
+        "detail": {
+          "address": "Seoul Mapo-gu ...",
+          "familyInfo": "2 adults, 1 child",
+          "healthStatus": "정상",
+          "specialProtectionFlag": false
+        }
+      }
+    ]
+  }
+}
+```
+
+실패:
+
+| Case | HTTP | Code |
+| --- | --- | --- |
+| 알 수 없는 shelter | 404 | `NOT_FOUND` |
+| 유효하지 않은 status 값 | 400 | `VALIDATION_ERROR` |
+
+### 5.6 POST /admin/evacuation-entries
 
 역할: `ADMIN`
 
@@ -213,7 +263,7 @@ Event publication:
 
 capacity 기반 rejection은 없다.
 
-### 5.5 POST /admin/evacuation-entries/{entryId}/exit
+### 5.7 POST /admin/evacuation-entries/{entryId}/exit
 
 역할: `ADMIN`
 
@@ -243,7 +293,7 @@ Event publication:
 | 알 수 없는 entry | 404 | `NOT_FOUND` |
 | 이미 퇴소한 entry | 409 | `ALREADY_EXITED` |
 
-### 5.6 PATCH /admin/evacuation-entries/{entryId}
+### 5.8 PATCH /admin/evacuation-entries/{entryId}
 
 역할: `ADMIN`
 
@@ -278,7 +328,7 @@ Event publication:
 - durable publish가 필요하다.
 - payload contract: `EVENT-003`
 
-### 5.7 PATCH /admin/shelters/{shelterId}
+### 5.9 PATCH /admin/shelters/{shelterId}
 
 역할: `ADMIN`
 
