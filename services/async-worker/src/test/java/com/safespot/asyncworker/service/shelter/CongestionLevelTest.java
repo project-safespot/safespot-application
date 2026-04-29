@@ -47,7 +47,19 @@ class CongestionLevelTest {
     }
 
     @Test
-    void 수용인원_0_FULL() {
-        assertThat(CongestionLevel.of(0, 0)).isEqualTo(CongestionLevel.FULL);
+    void 수용인원_0_AVAILABLE() {
+        // capacity=0은 api-public-read fallback 경로(capacity<=0 → AVAILABLE)와 일치
+        assertThat(CongestionLevel.of(0, 0)).isEqualTo(CongestionLevel.AVAILABLE);
+    }
+
+    @Test
+    void capacity_null_AVAILABLE() {
+        // capacity=null: api-public-read ShelterStatusCache(int)와 호환되도록 AVAILABLE 반환
+        assertThat(CongestionLevel.of(0, null)).isEqualTo(CongestionLevel.AVAILABLE);
+    }
+
+    @Test
+    void capacity_null_현재인원_있어도_AVAILABLE() {
+        assertThat(CongestionLevel.of(5, null)).isEqualTo(CongestionLevel.AVAILABLE);
     }
 }

@@ -1,34 +1,37 @@
 package com.safespot.asyncworker.context;
 
-import com.safespot.asyncworker.CacheWorkerApplication;
+import com.safespot.asyncworker.config.LambdaConfig;
 import com.safespot.asyncworker.service.disaster.DisasterReadModelService;
 import com.safespot.asyncworker.service.environment.EnvironmentCacheService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
 
 import javax.sql.DataSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 
-@SpringBootTest(classes = CacheWorkerApplication.class)
-@ActiveProfiles({"cache-worker", "test"})
+@ExtendWith(SpringExtension.class)
+@ContextConfiguration(classes = LambdaConfig.class)
+@ActiveProfiles("cache-worker")
 class CacheWorkerContextTest {
 
-    @MockitoBean
-    StringRedisTemplate stringRedisTemplate;
+    // LambdaConfig.dataSource()의 requireEnv("DB_HOST") 호출 차단
+    @MockitoBean DataSource dataSource;
+    // LambdaConfig.redisConnectionFactory()의 requireEnv("REDIS_HOST") 호출 차단
+    @MockitoBean LettuceConnectionFactory redisConnectionFactory;
+    @MockitoBean StringRedisTemplate stringRedisTemplate;
 
-    @MockitoBean
-    DataSource dataSource;
-
-    @Autowired
-    ApplicationContext ctx;
+    @Autowired ApplicationContext ctx;
 
     @Test
     void contextLoads() {

@@ -25,8 +25,9 @@ public class ShelterStatusService {
             .orElseThrow(() -> new ResourceNotFoundException("shelter", shelterId));
 
         int currentOccupancy = entryRepository.countEntered(shelterId);
-        int availableCapacity = Math.max(0, shelter.capacity() - currentOccupancy);
-        CongestionLevel level = CongestionLevel.of(currentOccupancy, shelter.capacity());
+        Integer capacity = shelter.capacity();
+        CongestionLevel level = CongestionLevel.of(currentOccupancy, capacity);
+        int availableCapacity = (capacity == null) ? 0 : Math.max(0, capacity - currentOccupancy);
 
         ShelterStatusValue value = new ShelterStatusValue(
             currentOccupancy,
