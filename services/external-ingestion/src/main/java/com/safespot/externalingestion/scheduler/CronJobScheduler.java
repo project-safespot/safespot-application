@@ -60,7 +60,7 @@ public class CronJobScheduler {
     }
 
     /** SEOUL_SHELTER_EARTHQUAKE: 매일 새벽 2시 (cron: 0 2 * * *) */
-    @Scheduled(cron = "${ingestion.schedule.seoul-shelter-earthquake-cron:0 * * * * *}")
+    @Scheduled(cron = "${ingestion.schedule.seoul-shelter-earthquake-cron:0 0 2 * * *}")
     public void collectSeoulShelterEarthquake() {
         log.info("[CronJob] SEOUL_SHELTER_EARTHQUAKE start");
         seoulShelterEarthquakeHandler.execute();
@@ -68,7 +68,7 @@ public class CronJobScheduler {
     }
 
     /** SEOUL_SHELTER_LANDSLIDE: 매일 새벽 2시 (cron: 0 2 * * *) */
-    @Scheduled(cron = "${ingestion.schedule.seoul-shelter-landslide-cron:30 * * * * *}")
+    @Scheduled(cron = "${ingestion.schedule.seoul-shelter-landslide-cron:0 0 2 * * *}")
     public void collectSeoulShelterLandslide() {
         log.info("[CronJob] SEOUL_SHELTER_LANDSLIDE start");
         seoulShelterLandslideHandler.execute();
