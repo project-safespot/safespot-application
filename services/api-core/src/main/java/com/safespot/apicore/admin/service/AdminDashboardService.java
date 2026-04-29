@@ -26,20 +26,21 @@ public class AdminDashboardService {
         List<Shelter> allShelters = shelterRepository.findAll();
         long totalShelters = allShelters.size();
         long openShelters = allShelters.stream()
-                .filter(s -> s.getShelterStatus() == ShelterStatus.운영중)
+                .filter(s -> s.getShelterStatus() == ShelterStatus.OPERATING)
                 .count();
 
         List<DashboardResponse.ShelterItem> shelterItems = allShelters.stream()
                 .map(s -> {
                     long occupancy = evacuationEntryRepository.countByShelterIdAndEntryStatus(
                             s.getShelterId(), EntryStatus.ENTERED);
-                    long available = Math.max(0, s.getCapacity() - occupancy);
-                    String congestion = computeCongestionLevel(s.getCapacity(), occupancy);
+                    Integer cap = s.getCapacity();
+                    long available = cap != null ? Math.max(0L, cap - occupancy) : 0L;
+                    String congestion = computeCongestionLevel(cap, occupancy);
                     return DashboardResponse.ShelterItem.builder()
                             .shelterId(s.getShelterId())
                             .shelterName(s.getName())
                             .shelterType(s.getShelterType())
-                            .capacityTotal(s.getCapacity())
+                            .capacityTotal(cap != null ? cap : 0)
                             .currentOccupancy(occupancy)
                             .availableCapacity(available)
                             .congestionLevel(congestion)
@@ -67,7 +68,8 @@ public class AdminDashboardService {
                 .build();
     }
 
-    private String computeCongestionLevel(int capacity, long occupancy) {
+    private String computeCongestionLevel(Integer capacity, long occupancy) {
+        if (capacity == null) return "AVAILABLE";
         if (capacity == 0) return "FULL";
         double rate = (double) occupancy / capacity * 100;
         if (rate >= 100) return "FULL";

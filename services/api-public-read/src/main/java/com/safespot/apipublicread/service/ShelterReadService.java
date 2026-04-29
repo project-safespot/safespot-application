@@ -115,7 +115,7 @@ public class ShelterReadService {
         }
 
         return new ShelterStatusCache((int) occupancy, available, congestion,
-                shelter != null ? shelter.getShelterStatus() : "운영중", updatedAt);
+                shelter != null ? shelter.getShelterStatus() : "OPERATING", updatedAt);
     }
 
     private ShelterNearbyItem toNearbyItem(Shelter s, int distanceM, ShelterStatusCache status) {

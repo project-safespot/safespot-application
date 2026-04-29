@@ -61,7 +61,7 @@ class ShelterReadServiceTest {
     @Test
     void findById_cacheHit_returnsFromCache() {
         when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
-        ShelterStatusCache cachedStatus = new ShelterStatusCache(68, 52, "NORMAL", "운영중", "2026-04-15T09:00:00+09:00");
+        ShelterStatusCache cachedStatus = new ShelterStatusCache(68, 52, "NORMAL", "OPERATING", "2026-04-15T09:00:00+09:00");
         when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(cachedStatus, null));
 

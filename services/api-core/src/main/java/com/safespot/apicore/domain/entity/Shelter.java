@@ -55,7 +55,7 @@ public class Shelter {
     @Enumerated(EnumType.STRING)
     @Column(name = "shelter_status", nullable = false, length = 20)
     @Builder.Default
-    private ShelterStatus shelterStatus = ShelterStatus.운영중;
+    private ShelterStatus shelterStatus = ShelterStatus.OPERATING;
 
     @Column(name = "note", columnDefinition = "TEXT")
     private String note;

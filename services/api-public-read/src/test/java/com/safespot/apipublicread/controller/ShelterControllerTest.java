@@ -32,7 +32,7 @@ class ShelterControllerTest {
         ShelterNearbyItem item = new ShelterNearbyItem(
                 101L, "서울시민체육관", "민방위대피소", "EARTHQUAKE",
                 "서울특별시 마포구", 37.5687, 126.9081,
-                420, 120, 68, 52, "NORMAL", "운영중", "2026-04-14T09:10:00+09:00"
+                420, 120, 68, 52, "NORMAL", "OPERATING", "2026-04-14T09:10:00+09:00"
         );
         when(shelterReadService.findNearby(anyDouble(), anyDouble(), anyInt(), any()))
                 .thenReturn(List.of(item));
@@ -94,7 +94,7 @@ class ShelterControllerTest {
         ShelterDetailDto dto = new ShelterDetailDto(
                 101L, "서울시민체육관", "민방위대피소", "EARTHQUAKE",
                 "서울특별시 마포구", 37.5687, 126.9081,
-                120, 68, 52, "NORMAL", "운영중",
+                120, 68, 52, "NORMAL", "OPERATING",
                 "김담당", "02-123-4567", "지하 1층 이용", "2026-04-14T09:10:00+09:00"
         );
         when(shelterReadService.findById(101L)).thenReturn(dto);

@@ -195,7 +195,7 @@ class AdminEvacuationControllerIntegrationTest {
     void patchShelter_withReason_returns200() throws Exception {
         Map<String, Object> body = Map.of(
                 "capacityTotal", 20,
-                "shelterStatus", "운영중",
+                "shelterStatus", "OPERATING",
                 "reason", "현장 재점검");
 
         mockMvc.perform(patch("/admin/shelters/" + shelterId)
