@@ -27,7 +27,7 @@ public class JdbcShelterRepository implements ShelterRepository {
                 Map.of("shelterId", shelterId),
                 (rs, rowNum) -> new ShelterInfo(
                     rs.getLong("shelter_id"),
-                    rs.getInt("capacity"),
+                    rs.getObject("capacity", Integer.class),
                     rs.getString("shelter_status")
                 )
             );

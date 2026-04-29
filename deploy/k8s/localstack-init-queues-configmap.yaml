@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: localstack-init-queues
+  namespace: safespot-localstack
+data:
+  init-queues.sh: |
+    #!/bin/bash
+    set -e
+
+    ENDPOINT="http://localhost:4566"
+    REGION="ap-northeast-2"
+    ACCOUNT="000000000000"
+
+    echo "[init] Creating SQS queues..."
+
+    # DLQ 먼저 생성 (main 큐의 RedrivePolicy가 참조하므로 순서 중요)
+    aws --endpoint-url=$ENDPOINT --region=$REGION sqs create-queue \
+      --queue-name dead-letter-queue
+
+    DLQ_ARN="arn:aws:sqs:${REGION}:${ACCOUNT}:dead-letter-queue"
+
+    # maxReceiveCount=5 (AppRetryPolicy 기준과 일치)
+    REDRIVE='{"deadLetterTargetArn":"'"$DLQ_ARN"'","maxReceiveCount":"5"}'
+
+    for QUEUE in \
+      safespot-core-events \
+      safespot-disaster-events \
+      safespot-environment-events \
+      safespot-cache-regeneration
+    do
+      aws --endpoint-url=$ENDPOINT --region=$REGION sqs create-queue \
+        --queue-name "$QUEUE" \
+        --attributes RedrivePolicy="$REDRIVE"
+      echo "[init] Created: $QUEUE"
+    done
+
+    echo "[init] All SQS queues ready."

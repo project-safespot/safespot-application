@@ -32,7 +32,7 @@ class ShelterStatusServiceTest {
     @Test
     void 정상_재계산_50퍼센트_NORMAL() {
         when(shelterRepository.findById(101L))
-            .thenReturn(Optional.of(new ShelterInfo(101L, 100, "운영중")));
+            .thenReturn(Optional.of(new ShelterInfo(101L, 100, "OPERATING")));
         when(entryRepository.countEntered(101L)).thenReturn(50);
 
         service.recalculate(101L);
@@ -44,13 +44,34 @@ class ShelterStatusServiceTest {
         assertThat(value.currentOccupancy()).isEqualTo(50);
         assertThat(value.availableCapacity()).isEqualTo(50);
         assertThat(value.congestionLevel()).isEqualTo("NORMAL");
-        assertThat(value.shelterStatus()).isEqualTo("운영중");
+        assertThat(value.shelterStatus()).isEqualTo("OPERATING");
+    }
+
+    @Test
+    void capacity_null_availableCapacity_0_congestion_AVAILABLE() {
+        // V3 migration: shelter.capacity is nullable
+        // NULL capacity → availableCapacity=0, congestionLevel=AVAILABLE
+        // api-public-read ShelterStatusCache(int availableCapacity) 역직렬화 호환 보장
+        when(shelterRepository.findById(101L))
+            .thenReturn(Optional.of(new ShelterInfo(101L, null, "OPERATING")));
+        when(entryRepository.countEntered(101L)).thenReturn(5);
+
+        service.recalculate(101L);
+
+        ArgumentCaptor<ShelterStatusValue> captor = ArgumentCaptor.forClass(ShelterStatusValue.class);
+        verify(cacheWriter).setShelterStatus(eq(101L), captor.capture());
+
+        ShelterStatusValue value = captor.getValue();
+        assertThat(value.currentOccupancy()).isEqualTo(5);
+        assertThat(value.availableCapacity()).isZero();
+        assertThat(value.congestionLevel()).isEqualTo("AVAILABLE");
+        assertThat(value.shelterStatus()).isEqualTo("OPERATING");
     }
 
     @Test
     void availableCapacity_음수_방지() {
         when(shelterRepository.findById(101L))
-            .thenReturn(Optional.of(new ShelterInfo(101L, 10, "운영중")));
+            .thenReturn(Optional.of(new ShelterInfo(101L, 10, "OPERATING")));
         when(entryRepository.countEntered(101L)).thenReturn(15);
 
         service.recalculate(101L);
@@ -73,7 +94,7 @@ class ShelterStatusServiceTest {
     @Test
     void Redis_실패시_예외_전파() {
         when(shelterRepository.findById(101L))
-            .thenReturn(Optional.of(new ShelterInfo(101L, 100, "운영중")));
+            .thenReturn(Optional.of(new ShelterInfo(101L, 100, "OPERATING")));
         when(entryRepository.countEntered(101L)).thenReturn(30);
         doThrow(new RedisCacheException("Redis SET failed", new RuntimeException()))
             .when(cacheWriter).setShelterStatus(any(), any());

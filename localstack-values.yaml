@@ -1,0 +1,38 @@
+image:
+  repository: localstack/localstack
+  tag: "3.8"
+
+persistence:
+  enabled: false
+  size: 5Gi
+
+resources:
+  limits:
+    memory: 1Gi
+  requests:
+    memory: 512Mi
+
+service:
+  type: ClusterIP
+
+extraEnvVars:
+  - name: SERVICES
+    value: "sqs,lambda,logs"
+  - name: AWS_DEFAULT_REGION
+    value: "ap-northeast-2"
+  - name: LAMBDA_DOCKER_NETWORK
+    value: "host"
+
+securityContext:
+  runAsUser: 0
+  runAsGroup: 0
+
+volumeMounts:
+  - name: docker-sock
+    mountPath: /var/run/docker.sock
+
+volumes:
+  - name: docker-sock
+    hostPath:
+      path: /var/run/docker.sock
+      type: Socket
