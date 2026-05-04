@@ -2,4 +2,29 @@ spring:
   application:
     name: api-public-read
   profiles:
-    active: local
+    active: ${SPRING_PROFILES_ACTIVE:local}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    prometheus:
+      enabled: true
+    health:
+      probes:
+        enabled: true
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  metrics:
+    tags:
+      service: api-public-read
+      env: ${SPRING_ENV:dev}
+      region: ap-northeast-2
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
