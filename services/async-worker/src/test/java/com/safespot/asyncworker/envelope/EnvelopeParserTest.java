@@ -22,6 +22,8 @@ class EnvelopeParserTest {
             {
               "eventId": "evt-001",
               "eventType": "EvacuationEntryCreated",
+              "occurredAt": "2026-04-15T12:00:00+09:00",
+              "producer": "api-core",
               "traceId": "trace-001",
               "idempotencyKey": "entry:301:ENTERED",
               "payload": {"entryId": 301, "shelterId": 101}
@@ -33,18 +35,37 @@ class EnvelopeParserTest {
     }
 
     @Test
-    void 선택_필드_누락시_정상_파싱() {
-        // occurredAt, producer는 선택 필드
+    void occurredAt_누락시_EnvelopeParseException() {
         String body = """
             {
               "eventId": "evt-001",
               "eventType": "ShelterUpdated",
+              "producer": "api-core",
               "traceId": "trace-001",
               "idempotencyKey": "shelter:101:UPDATED",
               "payload": {"shelterId": 101}
             }
             """;
-        assertThat(parser.parse(body)).isNotNull();
+        assertThatThrownBy(() -> parser.parse(body))
+            .isInstanceOf(EnvelopeParseException.class)
+            .hasMessageContaining("occurredAt");
+    }
+
+    @Test
+    void producer_누락시_EnvelopeParseException() {
+        String body = """
+            {
+              "eventId": "evt-001",
+              "eventType": "ShelterUpdated",
+              "occurredAt": "2026-04-15T12:00:00+09:00",
+              "traceId": "trace-001",
+              "idempotencyKey": "shelter:101:UPDATED",
+              "payload": {"shelterId": 101}
+            }
+            """;
+        assertThatThrownBy(() -> parser.parse(body))
+            .isInstanceOf(EnvelopeParseException.class)
+            .hasMessageContaining("producer");
     }
 
     @Test
@@ -52,6 +73,8 @@ class EnvelopeParserTest {
         String body = """
             {
               "eventType": "ShelterUpdated",
+              "occurredAt": "2026-04-15T12:00:00+09:00",
+              "producer": "api-core",
               "traceId": "trace-001",
               "idempotencyKey": "shelter:101:UPDATED",
               "payload": {}
@@ -68,6 +91,8 @@ class EnvelopeParserTest {
             {
               "eventId": "evt-001",
               "eventType": "ShelterUpdated",
+              "occurredAt": "2026-04-15T12:00:00+09:00",
+              "producer": "api-core",
               "traceId": "trace-001",
               "idempotencyKey": "shelter:101:UPDATED"
             }
@@ -83,6 +108,8 @@ class EnvelopeParserTest {
             {
               "eventId": "evt-001",
               "eventType": "UnknownEvent",
+              "occurredAt": "2026-04-15T12:00:00+09:00",
+              "producer": "api-core",
               "traceId": "trace-001",
               "idempotencyKey": "key-001",
               "payload": {}

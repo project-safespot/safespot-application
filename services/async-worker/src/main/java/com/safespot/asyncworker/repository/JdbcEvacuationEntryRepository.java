@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Map;
 
-@Profile("cache-worker")
+@Profile({"cache-worker", "async-worker"})
 @Repository
 @RequiredArgsConstructor
 public class JdbcEvacuationEntryRepository implements EvacuationEntryRepository {

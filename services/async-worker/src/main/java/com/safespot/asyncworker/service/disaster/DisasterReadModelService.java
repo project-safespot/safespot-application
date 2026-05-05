@@ -14,7 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-@Profile("readmodel-worker")
+@Profile({"readmodel-worker", "async-worker"})
 @Slf4j
 @Service
 @RequiredArgsConstructor

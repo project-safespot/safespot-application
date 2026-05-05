@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-@Profile("cache-worker")
+@Profile({"cache-worker", "async-worker"})
 @Repository
 @RequiredArgsConstructor
 public class JdbcEnvironmentLogRepository implements EnvironmentLogRepository {

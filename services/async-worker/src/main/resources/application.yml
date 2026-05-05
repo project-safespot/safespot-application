@@ -3,9 +3,9 @@ spring:
     web-application-type: none
 
   datasource:
-    url: ${DB_URL}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:safespot}
+    username: ${DB_USER:safespot}
+    password: ${DB_PASSWORD:safespot1234}
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 2

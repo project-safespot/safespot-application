@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.Mockito;
 
 import java.util.List;
 import java.util.Map;
@@ -29,6 +30,7 @@ class SqsBatchProcessorTest {
 
     @Mock private IdempotencyService idempotencyService;
     @Mock private EventDispatcher eventDispatcher;
+    @Mock private DlqPublisher dlqPublisher;
 
     private SqsBatchProcessor processor;
 
@@ -36,7 +38,7 @@ class SqsBatchProcessorTest {
     void setUp() {
         EnvelopeParser parser = new EnvelopeParser(new ObjectMapper());
         WorkerMetrics workerMetrics = new WorkerMetrics(new SimpleMeterRegistry());
-        processor = new SqsBatchProcessor(parser, idempotencyService, eventDispatcher, workerMetrics);
+        processor = new SqsBatchProcessor(parser, idempotencyService, eventDispatcher, workerMetrics, dlqPublisher);
     }
 
     // ── 정상 처리 ──────────────────────────────────────────────────────────────
@@ -77,16 +79,17 @@ class SqsBatchProcessorTest {
         verify(idempotencyService, never()).release(any());
     }
 
-    // ── 파싱 실패 ─────────────────────────────────────────────────────────────
+    // ── 파싱 실패 (permanent failure — 즉시 DLQ) ──────────────────────────────
 
     @Test
-    void Envelope_파싱_실패시_BatchItemFailure() {
+    void Envelope_파싱_실패시_즉시_DLQ_전송_후_ACK() {
+        // invalid payload는 retry해도 성공할 수 없다 — DLQ로 직접 전송 후 BatchItemFailure 제외
         SQSEvent event = buildEvent("msg-bad", "{invalid}", 1);
 
         SQSBatchResponse response = processor.process(event);
 
-        assertThat(response.getBatchItemFailures()).hasSize(1);
-        assertThat(response.getBatchItemFailures().get(0).getItemIdentifier()).isEqualTo("msg-bad");
+        assertThat(response.getBatchItemFailures()).isEmpty();
+        Mockito.verify(dlqPublisher).forward(any(), any());
         verifyNoInteractions(idempotencyService);
     }
 
@@ -306,6 +309,8 @@ class SqsBatchProcessorTest {
             {
               "eventId": "evt-regen-001",
               "eventType": "CacheRegenerationRequested",
+              "occurredAt": "2026-04-15T15:05:00+09:00",
+              "producer": "api-public-read",
               "traceId": "trace-regen",
               "idempotencyKey": "cache-regen:shelter:status:101:1744980300",
               "payload": {"cacheKey": "shelter:status:101", "requestedAt": "2026-04-15T15:05:00+09:00"}
@@ -344,6 +349,8 @@ class SqsBatchProcessorTest {
             {
               "eventId": "%s",
               "eventType": "%s",
+              "occurredAt": "2026-04-15T12:00:00+09:00",
+              "producer": "api-core",
               "traceId": "trace-001",
               "idempotencyKey": "%s",
               "payload": {"entryId": 1, "shelterId": 101, "changedFields": []}

@@ -29,6 +29,7 @@ public class SqsBatchProcessor {
     private final IdempotencyService idempotencyService;
     private final EventDispatcher eventDispatcher;
     private final WorkerMetrics workerMetrics;
+    private final DlqPublisher dlqPublisher;
 
     public SQSBatchResponse process(SQSEvent sqsEvent) {
         return process(sqsEvent, null);
@@ -75,13 +76,16 @@ public class SqsBatchProcessor {
         try {
             envelope = envelopeParser.parse(message.getBody());
         } catch (EnvelopeParseException e) {
+            // invalid payload는 retry해도 성공할 수 없다 — DLQ에 직접 전송 후 ACK
             long durationMs = System.currentTimeMillis() - startMs;
-            log.error("Envelope parse failed: messageId={}, awsRequestId={}, queueName={}, receiveCount={}, reason={}, errorCode={}",
+            log.error("Permanent failure - invalid payload: messageId={}, awsRequestId={}, queueName={}, receiveCount={}, reason={}, errorCode={}",
                 messageId, awsRequestId, queueName, receiveCount, e.getMessage(), "ENVELOPE_PARSE_ERROR");
             workerMetrics.incrementFailures("unknown", queueName, "ENVELOPE_PARSE_ERROR");
             workerMetrics.incrementProcessed("unknown", "failure", queueName);
             workerMetrics.recordProcessingDuration("unknown", queueName, durationMs);
-            return MessageProcessingResult.failure(messageId, "EnvelopeParseFailure: " + e.getMessage(), "unknown");
+            workerMetrics.incrementDlqPublish("unknown", "invalid_payload");
+            dlqPublisher.forward(message.getEventSourceArn(), message.getBody());
+            return MessageProcessingResult.success(messageId, "unknown");
         }
 
         String traceId = envelope.getTraceId();
@@ -185,7 +189,20 @@ public class SqsBatchProcessor {
         String arn = message.getEventSourceArn();
         if (arn == null) return "unknown";
         int lastColon = arn.lastIndexOf(':');
-        return lastColon >= 0 ? arn.substring(lastColon + 1) : "unknown";
+        String awsName = lastColon >= 0 ? arn.substring(lastColon + 1) : "unknown";
+        return toLogicalQueueName(awsName);
+    }
+
+    // monitoring.md 기준 logical name으로 변환
+    // metric/log의 queue_name dimension은 AWS 실제 이름이 아닌 logical name을 사용한다
+    private String toLogicalQueueName(String awsQueueName) {
+        if (awsQueueName.endsWith("-sqs-cache-refresh"))             return "cache-refresh-queue";
+        if (awsQueueName.endsWith("-sqs-readmodel-refresh"))          return "readmodel-refresh-queue";
+        if (awsQueueName.endsWith("-sqs-environment-cache-refresh"))  return "environment-cache-refresh";
+        if (awsQueueName.endsWith("-dlq-cache-refresh"))              return "cache-refresh-dlq";
+        if (awsQueueName.endsWith("-dlq-readmodel-refresh"))          return "readmodel-refresh-dlq";
+        if (awsQueueName.endsWith("-dlq-environment-cache-refresh"))  return "environment-cache-dlq";
+        return awsQueueName;
     }
 
     private String deriveErrorCode(Exception e) {

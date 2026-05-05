@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.List;
 
-@Profile("cache-worker")
+@Profile({"cache-worker", "async-worker"})
 @Slf4j
 @Component
 @RequiredArgsConstructor

@@ -1,6 +1,10 @@
 package com.safespot.asyncworker.context;
 
 import com.safespot.asyncworker.config.LambdaConfig;
+import com.safespot.asyncworker.dispatcher.EventDispatcher;
+import com.safespot.asyncworker.handler.CacheRegenerationAsyncWorkerHandler;
+import com.safespot.asyncworker.handler.cache.CacheRegenerationCacheWorkerHandler;
+import com.safespot.asyncworker.handler.readmodel.CacheRegenerationReadModelWorkerHandler;
 import com.safespot.asyncworker.service.disaster.DisasterReadModelService;
 import com.safespot.asyncworker.service.environment.EnvironmentCacheService;
 import org.junit.jupiter.api.Test;
@@ -24,8 +28,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @ExtendWith(SpringExtension.class)
 @ContextConfiguration(classes = LambdaConfig.class)
-@ActiveProfiles("cache-worker")
-class CacheWorkerContextTest {
+@ActiveProfiles("async-worker")
+class AsyncWorkerContextTest {
 
     // LambdaConfig.dataSource()의 requireEnv("DB_HOST") 호출 차단
     @MockitoBean DataSource dataSource;
@@ -42,13 +46,41 @@ class CacheWorkerContextTest {
     }
 
     @Test
-    void cache_worker_전용_빈_등록됨() {
+    void EventDispatcher_등록됨() {
+        assertThat(ctx.getBean(EventDispatcher.class)).isNotNull();
+    }
+
+    @Test
+    void cache_worker_서비스_빈_등록됨() {
+        // async-worker 프로필은 cache-worker 이벤트를 처리하므로 해당 서비스가 필요
         assertThat(ctx.getBean(EnvironmentCacheService.class)).isNotNull();
     }
 
     @Test
-    void readmodel_worker_전용_빈_미등록() {
-        assertThatThrownBy(() -> ctx.getBean(DisasterReadModelService.class))
+    void readmodel_worker_서비스_빈_등록됨() {
+        // async-worker 프로필은 readmodel-worker 이벤트를 처리하므로 해당 서비스가 필요
+        assertThat(ctx.getBean(DisasterReadModelService.class)).isNotNull();
+    }
+
+    @Test
+    void CacheRegenerationAsyncWorkerHandler_등록됨() {
+        // async-worker 전용 통합 handler가 등록되어야 한다
+        assertThat(ctx.getBean(CacheRegenerationAsyncWorkerHandler.class)).isNotNull();
+    }
+
+    @Test
+    void CacheRegenerationCacheWorkerHandler_미등록() {
+        // cache-worker 전용 handler는 async-worker 프로필에서 비활성화
+        // CacheRegenerationAsyncWorkerHandler가 shelter/env 키 처리를 대신한다
+        assertThatThrownBy(() -> ctx.getBean(CacheRegenerationCacheWorkerHandler.class))
+            .isInstanceOf(NoSuchBeanDefinitionException.class);
+    }
+
+    @Test
+    void CacheRegenerationReadModelWorkerHandler_미등록() {
+        // readmodel-worker 전용 handler는 async-worker 프로필에서 비활성화
+        // CacheRegenerationAsyncWorkerHandler가 disaster 키 처리를 대신한다
+        assertThatThrownBy(() -> ctx.getBean(CacheRegenerationReadModelWorkerHandler.class))
             .isInstanceOf(NoSuchBeanDefinitionException.class);
     }
 }

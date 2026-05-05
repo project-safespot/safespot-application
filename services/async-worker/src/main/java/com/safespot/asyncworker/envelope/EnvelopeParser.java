@@ -36,6 +36,12 @@ public class EnvelopeParser {
         if (!StringUtils.hasText(envelope.getEventType())) {
             throw new EnvelopeParseException("Missing required field: eventType");
         }
+        if (!StringUtils.hasText(envelope.getOccurredAt())) {
+            throw new EnvelopeParseException("Missing required field: occurredAt");
+        }
+        if (!StringUtils.hasText(envelope.getProducer())) {
+            throw new EnvelopeParseException("Missing required field: producer");
+        }
         if (!StringUtils.hasText(envelope.getTraceId())) {
             throw new EnvelopeParseException("Missing required field: traceId");
         }

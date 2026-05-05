@@ -6,12 +6,15 @@ SQS consumer 기반 Redis cache refresh / Read Model worker.
 
 ## 구조
 
-두 개의 독립 Lambda 함수로 배포된다.
+단일 Lambda에서 queue 기반으로 분기 처리한다.
 
-| Lambda | Spring Profile | 소비 큐 | 담당 |
-|--------|---------------|---------|------|
-| `cache-worker` | `cache-worker` | evacuation-events, environment-events | shelter:status, environment read models SET |
-| `readmodel-worker` | `readmodel-worker` | disaster-events | `disaster:detail:{alertId}`, `disaster:messages:recent:seoul`, `disaster:message:core:seoul`, `disaster:messages:list:seoul` SET |
+| Spring Profile | SQS Queue | 처리 Event |
+|---|---|---|
+| `async-worker` | `safespot-{env}-async-worker-sqs-cache-refresh` | `EvacuationEntryCreated`, `EvacuationEntryExited`, `EvacuationEntryUpdated`, `ShelterUpdated`, `CacheRegenerationRequested` (shelter/env keys) |
+| `async-worker` | `safespot-{env}-async-worker-sqs-readmodel-refresh` | `DisasterDataCollected`, `CacheRegenerationRequested` (disaster keys) |
+| `async-worker` | `safespot-{env}-async-worker-sqs-environment-cache-refresh` | `EnvironmentDataCollected`, `CacheRegenerationRequested` (environment keys) |
+
+`CacheRegenerationRequested`는 cacheKey prefix 기준으로 내부 분기 처리한다. Lambda 함수는 3개 queue를 모두 event source mapping으로 구독한다.
 
 ---
 
@@ -19,10 +22,12 @@ SQS consumer 기반 Redis cache refresh / Read Model worker.
 
 | 변수 | 설명 | 예시 |
 |------|------|------|
-| `DB_URL` | PostgreSQL JDBC URL | `jdbc:postgresql://localhost:5432/safespot` |
-| `DB_USERNAME` | DB 사용자 | `safespot` |
+| `DB_HOST` | PostgreSQL 호스트 | `safespot-dev-data-rds-xxx.cluster.ap-northeast-2.rds.amazonaws.com` |
+| `DB_PORT` | PostgreSQL 포트 | `5432` |
+| `DB_NAME` | DB 이름 | `safespot` |
+| `DB_USER` | DB 사용자 | `safespot` |
 | `DB_PASSWORD` | DB 비밀번호 | — |
-| `REDIS_HOST` | Redis 호스트 | `localhost` |
+| `REDIS_HOST` | Redis 호스트 | `safespot-dev-data-redis-main.xxx.0001.apn2.cache.amazonaws.com` |
 | `REDIS_PORT` | Redis 포트 (기본값 6379) | `6379` |
 
 ---
@@ -60,12 +65,13 @@ open services/async-worker/build/reports/tests/test/index.html
 
 ## Lambda handler
 
-Lambda 엔트리포인트는 아래 두 클래스다.
+Lambda 엔트리포인트는 단일 클래스다.
 
-- `com.safespot.asyncworker.lambda.CacheWorkerHandler`
-- `com.safespot.asyncworker.lambda.ReadModelWorkerHandler`
+- `com.safespot.asyncworker.handler.AsyncWorkerHandler`
 
-두 핸들러는 `RequestHandler<SQSEvent, SQSBatchResponse>`를 구현하고, 내부에서 Spring 컨텍스트를 초기화한 뒤 `SqsBatchProcessor`로 SQS batch를 전달한다.
+`RequestHandler<SQSEvent, SQSBatchResponse>`를 구현하고, Spring 컨텍스트를 "async-worker" 프로필로 초기화한 뒤 `SqsBatchProcessor`로 SQS batch를 전달한다.
+
+기존 `CacheWorkerHandler`와 `ReadModelWorkerHandler`는 profile-specific 내부 서비스로만 유지된다.
 
 ---
 

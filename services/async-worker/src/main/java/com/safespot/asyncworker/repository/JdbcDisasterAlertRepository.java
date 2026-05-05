@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-@Profile("readmodel-worker")
+@Profile({"readmodel-worker", "async-worker"})
 @Repository
 @RequiredArgsConstructor
 public class JdbcDisasterAlertRepository implements DisasterAlertRepository {

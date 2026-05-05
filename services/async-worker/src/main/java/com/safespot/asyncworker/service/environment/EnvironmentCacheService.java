@@ -16,7 +16,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 
-@Profile("cache-worker")
+@Profile({"cache-worker", "async-worker"})
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -32,8 +32,22 @@ public class EnvironmentCacheService {
     public void rebuild(EnvironmentDataCollectedPayload payload) {
         validate(payload);
         switch (payload.collectionType()) {
-            case WEATHER       -> rebuildWeather(payload.timeWindow());
-            case AIR_QUALITY   -> rebuildAirQuality(payload.timeWindow());
+            case WEATHER -> {
+                // timeWindow는 event-envelope 계약상 optional (EVENT-006 기준)
+                // 제공 시 해당 window 데이터 조회, 없으면 최근 데이터로 fallback
+                if (payload.timeWindow() != null && !payload.timeWindow().isBlank()) {
+                    rebuildWeather(payload.timeWindow());
+                } else {
+                    rebuildWeatherCache();
+                }
+            }
+            case AIR_QUALITY -> {
+                if (payload.timeWindow() != null && !payload.timeWindow().isBlank()) {
+                    rebuildAirQuality(payload.timeWindow());
+                } else {
+                    rebuildAirQualityCache();
+                }
+            }
             case WEATHER_ALERT -> rebuildWeatherAlert();
             default -> throw new EventProcessingException(
                 "Unsupported collectionType: " + payload.collectionType());
@@ -44,9 +58,7 @@ public class EnvironmentCacheService {
         if (payload.collectionType() == null || payload.collectionType().isBlank()) {
             throw new EventProcessingException("EnvironmentDataCollected payload missing collectionType");
         }
-        if (payload.timeWindow() == null || payload.timeWindow().isBlank()) {
-            throw new EventProcessingException("EnvironmentDataCollected payload missing timeWindow");
-        }
+        // timeWindow는 optional — event-envelope.md EVENT-006 계약상 미포함
     }
 
     // CacheRegenerationRequested 처리용 — weather_alert_log is not in MVP schema; set no_data placeholder
