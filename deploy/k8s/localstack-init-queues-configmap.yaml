@@ -11,43 +11,28 @@ data:
     ENDPOINT="http://localhost:4566"
     REGION="ap-northeast-2"
     ACCOUNT="000000000000"
-    ENV="dev"
 
-    echo "[init] Creating SQS DLQs (3개, queue별 1:1)..."
+    echo "[init] Creating SQS queues..."
 
     # DLQ 먼저 생성 (main 큐의 RedrivePolicy가 참조하므로 순서 중요)
     aws --endpoint-url=$ENDPOINT --region=$REGION sqs create-queue \
-      --queue-name "safespot-${ENV}-async-worker-dlq-cache-refresh"
-    echo "[init] Created DLQ: safespot-${ENV}-async-worker-dlq-cache-refresh"
+      --queue-name dead-letter-queue
 
-    aws --endpoint-url=$ENDPOINT --region=$REGION sqs create-queue \
-      --queue-name "safespot-${ENV}-async-worker-dlq-readmodel-refresh"
-    echo "[init] Created DLQ: safespot-${ENV}-async-worker-dlq-readmodel-refresh"
-
-    aws --endpoint-url=$ENDPOINT --region=$REGION sqs create-queue \
-      --queue-name "safespot-${ENV}-async-worker-dlq-environment-cache-refresh"
-    echo "[init] Created DLQ: safespot-${ENV}-async-worker-dlq-environment-cache-refresh"
+    DLQ_ARN="arn:aws:sqs:${REGION}:${ACCOUNT}:dead-letter-queue"
 
     # maxReceiveCount=5 (AppRetryPolicy 기준과 일치)
-    CACHE_REFRESH_DLQ_ARN="arn:aws:sqs:${REGION}:${ACCOUNT}:safespot-${ENV}-async-worker-dlq-cache-refresh"
-    READMODEL_DLQ_ARN="arn:aws:sqs:${REGION}:${ACCOUNT}:safespot-${ENV}-async-worker-dlq-readmodel-refresh"
-    ENV_CACHE_DLQ_ARN="arn:aws:sqs:${REGION}:${ACCOUNT}:safespot-${ENV}-async-worker-dlq-environment-cache-refresh"
+    REDRIVE='{"deadLetterTargetArn":"'"$DLQ_ARN"'","maxReceiveCount":"5"}'
 
-    echo "[init] Creating main SQS queues with per-queue DLQ redrive..."
+    for QUEUE in \
+      safespot-core-events \
+      safespot-disaster-events \
+      safespot-environment-events \
+      safespot-cache-regeneration
+    do
+      aws --endpoint-url=$ENDPOINT --region=$REGION sqs create-queue \
+        --queue-name "$QUEUE" \
+        --attributes RedrivePolicy="$REDRIVE"
+      echo "[init] Created: $QUEUE"
+    done
 
-    aws --endpoint-url=$ENDPOINT --region=$REGION sqs create-queue \
-      --queue-name "safespot-${ENV}-async-worker-sqs-cache-refresh" \
-      --attributes RedrivePolicy="{\"deadLetterTargetArn\":\"${CACHE_REFRESH_DLQ_ARN}\",\"maxReceiveCount\":\"5\"}"
-    echo "[init] Created: safespot-${ENV}-async-worker-sqs-cache-refresh"
-
-    aws --endpoint-url=$ENDPOINT --region=$REGION sqs create-queue \
-      --queue-name "safespot-${ENV}-async-worker-sqs-readmodel-refresh" \
-      --attributes RedrivePolicy="{\"deadLetterTargetArn\":\"${READMODEL_DLQ_ARN}\",\"maxReceiveCount\":\"5\"}"
-    echo "[init] Created: safespot-${ENV}-async-worker-sqs-readmodel-refresh"
-
-    aws --endpoint-url=$ENDPOINT --region=$REGION sqs create-queue \
-      --queue-name "safespot-${ENV}-async-worker-sqs-environment-cache-refresh" \
-      --attributes RedrivePolicy="{\"deadLetterTargetArn\":\"${ENV_CACHE_DLQ_ARN}\",\"maxReceiveCount\":\"5\"}"
-    echo "[init] Created: safespot-${ENV}-async-worker-sqs-environment-cache-refresh"
-
-    echo "[init] All SQS queues ready. Main: 3, DLQ: 3 (1:1)"
+    echo "[init] All SQS queues ready."
