@@ -4,6 +4,10 @@ spring:
   profiles:
     active: local
 
+server:
+  servlet:
+    context-path: /api/core
+
 management:
   endpoints:
     web:
