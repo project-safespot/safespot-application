@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import io.micrometer.cloudwatch2.CloudWatchConfig;
+import io.micrometer.cloudwatch2.CloudWatchMeterRegistry;
+import io.micrometer.core.instrument.Clock;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.springframework.context.annotation.Bean;
@@ -17,6 +20,8 @@ import org.springframework.data.redis.connection.lettuce.LettuceClientConfigurat
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import software.amazon.awssdk.services.cloudwatch.CloudWatchAsyncClient;
+import software.amazon.awssdk.services.sqs.SqsClient;
 
 import javax.sql.DataSource;
 import java.time.Duration;
@@ -32,7 +37,7 @@ import java.time.Duration;
     "com.safespot.asyncworker.repository",
     "com.safespot.asyncworker.service"
 })
-@Import({CacheWorkerConfig.class, ReadModelWorkerConfig.class})
+@Import({CacheWorkerConfig.class, ReadModelWorkerConfig.class, AsyncWorkerConfig.class})
 public class LambdaConfig {
 
     @Bean
@@ -83,7 +88,20 @@ public class LambdaConfig {
     }
 
     @Bean
+    public SqsClient sqsClient() {
+        return SqsClient.create();
+    }
+
+    @Bean
     public MeterRegistry meterRegistry() {
+        String namespace = System.getenv("METRICS_NAMESPACE");
+        if (namespace != null && !namespace.isBlank()) {
+            CloudWatchConfig config = new CloudWatchConfig() {
+                @Override public String get(String key) { return null; }
+                @Override public String namespace() { return namespace; }
+            };
+            return new CloudWatchMeterRegistry(config, Clock.SYSTEM, CloudWatchAsyncClient.create());
+        }
         return new SimpleMeterRegistry();
     }
 

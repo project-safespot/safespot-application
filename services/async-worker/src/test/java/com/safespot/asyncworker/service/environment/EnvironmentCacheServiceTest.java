@@ -17,6 +17,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -111,11 +112,14 @@ class EnvironmentCacheServiceTest {
     }
 
     @Test
-    void timeWindow_null_EventProcessingException() {
-        assertThatThrownBy(() ->
-            service.rebuild(new EnvironmentDataCollectedPayload("WEATHER", "서울", "2026-04-22T10:00:00", null))
-        ).isInstanceOf(EventProcessingException.class)
-            .hasMessageContaining("timeWindow");
+    void timeWindow_null이면_WEATHER_fallback으로_findMostRecentWeather_호출() {
+        when(envLogRepository.findMostRecentWeather()).thenReturn(Optional.empty());
+
+        service.rebuild(new EnvironmentDataCollectedPayload("WEATHER", "서울", "2026-04-22T10:00:00", null));
+
+        verify(envLogRepository).findMostRecentWeather();
+        verify(cacheWriter, never()).setEnvironmentWeather(any());
+        verify(envLogRepository, never()).findLatestWeatherByTimeWindow(any());
     }
 
     @Test

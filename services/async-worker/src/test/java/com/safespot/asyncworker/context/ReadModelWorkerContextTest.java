@@ -14,6 +14,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.ContextConfiguration;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
+import software.amazon.awssdk.services.sqs.SqsClient;
 
 import javax.sql.DataSource;
 
@@ -28,6 +29,7 @@ class ReadModelWorkerContextTest {
     @MockitoBean DataSource dataSource;
     @MockitoBean LettuceConnectionFactory redisConnectionFactory;
     @MockitoBean StringRedisTemplate stringRedisTemplate;
+    @MockitoBean SqsClient sqsClient;
 
     @Autowired ApplicationContext ctx;
 

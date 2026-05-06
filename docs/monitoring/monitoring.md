@@ -320,10 +320,15 @@ QueueName
 권장 queue 구분:
 
 ```text
-cache-refresh-queue
-readmodel-refresh-queue
-environment-cache-refresh-queue
-dead-letter-queue
+Logical Name                     AWS QueueName
+-------------------------------------------------------------
+cache-refresh-queue        → safespot-dev-async-worker-sqs-cache-refresh
+readmodel-refresh-queue    → safespot-dev-async-worker-sqs-readmodel-refresh
+environment-cache-refresh  → safespot-dev-async-worker-sqs-environment-cache-refresh
+
+cache-refresh-dlq          → safespot-dev-async-worker-dlq-cache-refresh
+readmodel-refresh-dlq      → safespot-dev-async-worker-dlq-readmodel-refresh
+environment-cache-dlq      → safespot-dev-async-worker-dlq-environment-cache-refresh
 ```
 
 ### 4.2 Lambda metric
@@ -348,6 +353,14 @@ dead-letter-queue
 FunctionName
 Resource
 ```
+
+async-worker Lambda FunctionName:
+
+```text
+safespot-{env}-async-worker
+```
+
+예시 (dev): `safespot-dev-async-worker`
 
 ### 4.3 Worker custom metric
 

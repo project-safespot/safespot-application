@@ -12,7 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-@Profile("cache-worker")
+@Profile({"cache-worker", "async-worker"})
 @Slf4j
 @Component
 @RequiredArgsConstructor
