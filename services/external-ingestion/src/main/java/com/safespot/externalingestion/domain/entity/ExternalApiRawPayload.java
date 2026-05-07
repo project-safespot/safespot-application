@@ -44,6 +44,7 @@ public class ExternalApiRawPayload {
     @Column(name = "request_params_json", columnDefinition = "TEXT")
     private String requestParamsJson;
 
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "response_body", nullable = false, columnDefinition = "TEXT")
     private String responseBody;
 
