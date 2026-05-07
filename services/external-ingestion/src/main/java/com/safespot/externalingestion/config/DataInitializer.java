@@ -33,7 +33,7 @@ public class DataInitializer implements ApplicationRunner {
             new SourceSeed("SAFETY_DATA_ALERT",      "재난문자",          "행정안전부", "DISASTER",    "API_KEY", true,  "https://www.safetydata.go.kr/V2/api/DSSP-IF-00247"),
             new SourceSeed("KMA_EARTHQUAKE",          "지진 정보",         "기상청",    "DISASTER",    "API_KEY", true,  "https://apis.data.go.kr/1360000/EqkInfoService/getEqkMsg"),
             new SourceSeed("SEOUL_EARTHQUAKE",        "서울시 지진 발생 현황","서울시",   "DISASTER",    "API_KEY", true,  "http://openapi.seoul.go.kr:8088/{KEY}/json/TbEqkKenvinfo/1/20/"),
-            new SourceSeed("FORESTRY_LANDSLIDE",      "산사태 위험 예측",  "산림청",    "DISASTER",    "API_KEY", false, "https://apis.data.go.kr/1400119/slfswarnApi/getSlfswarnDataList"),
+            new SourceSeed("FORESTRY_LANDSLIDE",      "산사태 위험 예측",  "산림청",    "DISASTER",    "API_KEY", true,  "https://apis.data.go.kr/1400119/slfswarnApi/getSlfswarnDataList"),
             new SourceSeed("SEOUL_RIVER_LEVEL",       "하천 수위",         "서울시",    "DISASTER",    "API_KEY", true,  "http://openapi.seoul.go.kr:8088/{KEY}/json/ListRiverStageService/1/50/"),
             new SourceSeed("KMA_WEATHER",             "날씨 초단기실황",    "기상청",    "ENVIRONMENT", "API_KEY", true,  "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst"),
             new SourceSeed("AIR_KOREA_AIR_QUALITY",   "대기질",            "에어코리아","ENVIRONMENT", "API_KEY", true,  "https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty"),

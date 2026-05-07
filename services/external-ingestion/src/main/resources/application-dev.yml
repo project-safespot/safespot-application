@@ -5,7 +5,7 @@ spring:
     password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: org.postgresql.Driver
   flyway:
-    enabled: true
+    enabled: false
   jpa:
     hibernate:
       ddl-auto: none

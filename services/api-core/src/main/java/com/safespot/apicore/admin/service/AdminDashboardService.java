@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -24,6 +26,15 @@ public class AdminDashboardService {
     @Transactional(readOnly = true)
     public DashboardResponse getDashboard() {
         List<Shelter> allShelters = shelterRepository.findAll();
+
+        Map<Long, Long> occupancyByShelter = evacuationEntryRepository
+                .countByEntryStatusGroupByShelterId(EntryStatus.ENTERED)
+                .stream()
+                .collect(Collectors.toMap(
+                        row -> (Long) row[0],
+                        row -> (Long) row[1]
+                ));
+
         long totalShelters = allShelters.size();
         long openShelters = allShelters.stream()
                 .filter(s -> s.getShelterStatus() == ShelterStatus.OPERATING)
@@ -31,11 +42,10 @@ public class AdminDashboardService {
 
         List<DashboardResponse.ShelterItem> shelterItems = allShelters.stream()
                 .map(s -> {
-                    long occupancy = evacuationEntryRepository.countByShelterIdAndEntryStatus(
-                            s.getShelterId(), EntryStatus.ENTERED);
+                    long occupancy = occupancyByShelter.getOrDefault(s.getShelterId(), 0L);
                     Integer cap = s.getCapacity();
                     long available = cap != null ? Math.max(0L, cap - occupancy) : 0L;
-                    String congestion = computeCongestionLevel(cap, occupancy);
+                    double rate = computeOccupancyRate(cap, occupancy);
                     return DashboardResponse.ShelterItem.builder()
                             .shelterId(s.getShelterId())
                             .shelterName(s.getName())
@@ -43,18 +53,34 @@ public class AdminDashboardService {
                             .capacityTotal(cap != null ? cap : 0)
                             .currentOccupancy(occupancy)
                             .availableCapacity(available)
-                            .congestionLevel(congestion)
+                            .congestionLevel(computeCongestionLevel(cap, occupancy))
                             .shelterStatus(s.getShelterStatus().name())
+                            .name(s.getName())
+                            .address(s.getAddress())
+                            .disasterType(s.getDisasterType().name())
+                            .currentOccupants(occupancy)
+                            .occupancyRate(rate)
+                            .crowdingLevel(computeCrowdingLevel(rate))
+                            .manager(s.getManager())
                             .build();
                 })
                 .toList();
 
         long fullShelters = shelterItems.stream()
-                .filter(s -> "FULL".equals(s.getCongestionLevel()))
+                .filter(s -> "FULL".equals(s.getCrowdingLevel()))
                 .count();
         long crowdedShelters = shelterItems.stream()
-                .filter(s -> "CROWDED".equals(s.getCongestionLevel()))
+                .filter(s -> "CROWDED".equals(s.getCrowdingLevel()))
                 .count();
+        long normalShelters = shelterItems.stream()
+                .filter(s -> "NORMAL".equals(s.getCrowdingLevel()))
+                .count();
+        long availableShelters = shelterItems.stream()
+                .filter(s -> "AVAILABLE".equals(s.getCrowdingLevel()))
+                .count();
+        long totalOccupants = shelterItems.stream()
+                .mapToLong(DashboardResponse.ShelterItem::getCurrentOccupants)
+                .sum();
 
         metrics.updateShelterCounts(fullShelters, crowdedShelters, openShelters);
 
@@ -63,9 +89,25 @@ public class AdminDashboardService {
                         .totalShelters(totalShelters)
                         .openShelters(openShelters)
                         .fullShelters(fullShelters)
+                        .availableShelters(availableShelters)
+                        .normalShelters(normalShelters)
+                        .crowdedShelters(crowdedShelters)
+                        .totalOccupants(totalOccupants)
                         .build())
                 .shelters(shelterItems)
                 .build();
+    }
+
+    private double computeOccupancyRate(Integer capacity, long occupancy) {
+        if (capacity == null || capacity == 0) return occupancy > 0 ? 100.0 : 0.0;
+        return (double) occupancy / capacity * 100;
+    }
+
+    private String computeCrowdingLevel(double rate) {
+        if (rate >= 100) return "FULL";
+        if (rate >= 80) return "CROWDED";
+        if (rate >= 50) return "NORMAL";
+        return "AVAILABLE";
     }
 
     private String computeCongestionLevel(Integer capacity, long occupancy) {

@@ -18,6 +18,10 @@ public class DashboardResponse {
         private final long totalShelters;
         private final long openShelters;
         private final long fullShelters;
+        private final long availableShelters;
+        private final long normalShelters;
+        private final long crowdedShelters;
+        private final long totalOccupants;
     }
 
     @Getter
@@ -31,5 +35,12 @@ public class DashboardResponse {
         private final long availableCapacity;
         private final String congestionLevel;
         private final String shelterStatus;
+        private final String name;
+        private final String address;
+        private final String disasterType;
+        private final long currentOccupants;
+        private final double occupancyRate;
+        private final String crowdingLevel;
+        private final String manager;
     }
 }
