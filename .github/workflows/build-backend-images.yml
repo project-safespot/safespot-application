@@ -87,9 +87,9 @@ jobs:
           SHORT_SHA: ${{ needs.build.outputs.short-sha }}
         run: |
           cd k8s-manifest
-          yq e '.apiCore.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.yaml
-          yq e '.apiPublicRead.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.yaml
-          yq e '.externalIngestion.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.yaml
+          yq e '.apiCore.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
+          yq e '.apiPublicRead.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
+          yq e '.externalIngestion.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
 
       - name: Commit and push if changed
         env:
@@ -101,7 +101,7 @@ jobs:
           if git diff --quiet; then
             echo "No manifest changes detected, skipping commit."
           else
-            git add charts/safespot/values-dev.yaml
+            git add charts/safespot/values-dev.images.yaml
             git commit -m "chore: update backend image tags to ${SHORT_SHA}"
             git push
           fi
