@@ -80,6 +80,7 @@ jobs:
         with:
           repository: project-safespot/safespot-application-k8s-manifest
           token: ${{ secrets.MANIFEST_REPO_TOKEN }}
+          ref: feat/aws-gitops-cleanup
           path: k8s-manifest
 
       - name: Update image tags in values-dev.yaml
