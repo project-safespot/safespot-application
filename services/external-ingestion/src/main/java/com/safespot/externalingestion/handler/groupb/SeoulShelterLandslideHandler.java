@@ -19,7 +19,7 @@ import java.util.Map;
 @Component
 public class SeoulShelterLandslideHandler extends AbstractIngestionHandler {
 
-    @Value("${ODCLOUD_API_KEY:${SEOUL_SERVICE_KEY:${SEOUL_API_KEY:DUMMY_KEY}}}")
+    @Value("${SEOUL_SHELTER_LANDSLIDE_API_KEY:${DATA_GO_KR_API_KEY:${FORESTRY_API_KEY:DUMMY_KEY}}}")
     private String apiKey;
 
     @Override
