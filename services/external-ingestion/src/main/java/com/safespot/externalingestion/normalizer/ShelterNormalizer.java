@@ -71,8 +71,7 @@ public class ShelterNormalizer implements Normalizer {
         List<String> errors = new ArrayList<>();
         int succeeded = 0;
         int skippedRequired = 0;
-        int nullCoords = 0;
-        int nullCapacity = 0;
+        int skippedIncomplete = 0;
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
@@ -113,16 +112,21 @@ public class ShelterNormalizer implements Normalizer {
                         continue;
                     }
 
-                    BigDecimal[] coords  = extractCoords(row);
-                    BigDecimal   lat     = coords[0];
-                    BigDecimal   lon     = coords[1];
+                    BigDecimal[] coords   = extractCoords(row);
+                    BigDecimal   lat      = coords[0];
+                    BigDecimal   lon      = coords[1];
                     Integer      capacity = extractCapacity(row);
-                    String       manager  = extractManager(row);
-                    String       contact  = extractContact(row);
-                    String       note     = extractNote(row);
 
-                    if (lat == null || lon == null) nullCoords++;
-                    if (capacity == null) nullCapacity++;
+                    if (lat == null || lon == null || capacity == null) {
+                        skippedIncomplete++;
+                        log.debug("[{}] skip row name={} — NOT NULL constraint: lat={} lon={} capacity={}",
+                            sourceCode, name, lat, lon, capacity);
+                        continue;
+                    }
+
+                    String manager = extractManager(row);
+                    String contact = extractContact(row);
+                    String note    = extractNote(row);
 
                     if (debugSampled < 3) {
                         log.debug("[{}] sample name={} address={} capacity={} lat={} lon={}",
@@ -145,8 +149,8 @@ public class ShelterNormalizer implements Normalizer {
                     log.warn("[{}] shelter upsert failed raw_id={}", sourceCode, raw.getRawId(), e);
                 }
             }
-            log.info("[{}] done saved={} skipped_required={} null_coords={} null_capacity={}",
-                sourceCode, succeeded, skippedRequired, nullCoords, nullCapacity);
+            log.info("[{}] done saved={} skipped_required={} skipped_incomplete={}",
+                sourceCode, succeeded, skippedRequired, skippedIncomplete);
 
         } catch (Exception e) {
             errors.add(e.getMessage());

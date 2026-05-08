@@ -12,7 +12,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.math.BigDecimal;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -32,12 +31,11 @@ class ShelterNormalizerTest {
         return new ShelterNormalizer(sourceCode, shelterRepo, metrics, objectMapper);
     }
 
-    @Test
-    void landslide_korean_payload_saves_one_row() {
-        given(shelterRepo.findByNameAndAddressAndDisasterType(anyString(), anyString(), anyString()))
-            .willReturn(Optional.empty());
-        given(shelterRepo.save(any())).willAnswer(inv -> inv.getArgument(0));
+    // ── LANDSLIDE ──────────────────────────────────────────────────────────────
 
+    @Test
+    void landslide_row_without_coords_is_skipped() {
+        // LANDSLIDE source provides no coordinate fields → lat/lon always null → NOT NULL skip
         NormalizationResult result = normalizer("SEOUL_SHELTER_LANDSLIDE").normalize(buildRaw("SEOUL_SHELTER_LANDSLIDE", """
             {
               "currentCount": 1,
@@ -57,70 +55,8 @@ class ShelterNormalizerTest {
             }
             """));
 
-        assertThat(result.getSucceeded()).isEqualTo(1);
-
-        ArgumentCaptor<Shelter> captor = ArgumentCaptor.forClass(Shelter.class);
-        verify(shelterRepo).save(captor.capture());
-        Shelter saved = captor.getValue();
-
-        assertThat(saved.getName()).isEqualTo("경기상업고등학교");
-        assertThat(saved.getAddress()).isEqualTo("종로구 자하문로 136");
-        assertThat(saved.getDisasterType()).isEqualTo("LANDSLIDE");
-        assertThat(saved.getCapacity()).isEqualTo(333);
-        assertThat(saved.getManager()).isEqualTo("도시녹지과");
-        assertThat(saved.getContact()).isEqualTo("02-2148-2855");
-        assertThat(saved.getNote()).contains("임시 구호소");
-        assertThat(saved.getNote()).contains("북악산");
-        // No coordinates in LANDSLIDE source — must be null, not 0,0
-        assertThat(saved.getLatitude()).isNull();
-        assertThat(saved.getLongitude()).isNull();
-        assertThat(saved.getShelterStatus()).isEqualTo("OPERATING");
-    }
-
-    @Test
-    void earthquake_payload_saves_one_row_with_null_coords() {
-        given(shelterRepo.findByNameAndAddressAndDisasterType(anyString(), anyString(), anyString()))
-            .willReturn(Optional.empty());
-        given(shelterRepo.save(any())).willAnswer(inv -> inv.getArgument(0));
-
-        NormalizationResult result = normalizer("SEOUL_SHELTER_EARTHQUAKE").normalize(buildRaw("SEOUL_SHELTER_EARTHQUAKE", """
-            {
-              "TbEqKkenvinfo": {
-                "row": [
-                  {
-                    "FCLT_NO": "188",
-                    "FCLT_SN": "15",
-                    "CTPV_NM": "서울특별시",
-                    "SGG_NM": "광진구",
-                    "ACTC_FCLT_NM": "광양중학교",
-                    "DADDR": "서울특별시 광진구 자양로3길 7",
-                    "STDG_CD": "1121510500",
-                    "DONG_CD": "1121583000",
-                    "LOT": "127.0830000",
-                    "XCRD": "208982.859139",
-                    "YCRD": "548967.597592"
-                  }
-                ]
-              }
-            }
-            """));
-
-        assertThat(result.getSucceeded()).isEqualTo(1);
-
-        ArgumentCaptor<Shelter> captor = ArgumentCaptor.forClass(Shelter.class);
-        verify(shelterRepo).save(captor.capture());
-        Shelter saved = captor.getValue();
-
-        assertThat(saved.getName()).isEqualTo("광양중학교");
-        assertThat(saved.getAddress()).isEqualTo("서울특별시 광진구 자양로3길 7");
-        assertThat(saved.getDisasterType()).isEqualTo("EARTHQUAKE");
-        // XCRD/YCRD are Korean projected coordinates — must not be stored as lat/lon
-        // LOT-only (no LAT) → both must be null per coordinate policy
-        assertThat(saved.getLatitude()).isNull();
-        assertThat(saved.getLongitude()).isNull();
-        assertThat(saved.getLatitude()).isNotEqualTo(BigDecimal.ZERO);
-        assertThat(saved.getLongitude()).isNotEqualTo(BigDecimal.ZERO);
-        assertThat(saved.getShelterStatus()).isEqualTo("OPERATING");
+        assertThat(result.getSucceeded()).isEqualTo(0);
+        verify(shelterRepo, never()).save(any());
     }
 
     @Test
@@ -140,10 +76,54 @@ class ShelterNormalizerTest {
     }
 
     @Test
+    void missing_capacity_skips_row_without_saving() {
+        // capacity null → NOT NULL constraint → skip, no save
+        NormalizationResult result = normalizer("SEOUL_SHELTER_LANDSLIDE").normalize(buildRaw("SEOUL_SHELTER_LANDSLIDE", """
+            {
+              "data": [
+                {
+                  "대피장소내용": "테스트 대피소",
+                  "대피소주소": "서울 종로구 청운동 1"
+                }
+              ]
+            }
+            """));
+
+        assertThat(result.getSucceeded()).isEqualTo(0);
+        verify(shelterRepo, never()).save(any());
+    }
+
+    // ── EARTHQUAKE ─────────────────────────────────────────────────────────────
+
+    @Test
+    void earthquake_row_without_coords_is_skipped() {
+        // EARTHQUAKE source: XCRD/YCRD are TM/UTM-K (not WGS84), no valid lat/lon → NOT NULL skip
+        NormalizationResult result = normalizer("SEOUL_SHELTER_EARTHQUAKE").normalize(buildRaw("SEOUL_SHELTER_EARTHQUAKE", """
+            {
+              "TbEqKkenvinfo": {
+                "row": [
+                  {
+                    "FCLT_NO": "188",
+                    "ACTC_FCLT_NM": "광양중학교",
+                    "DADDR": "서울특별시 광진구 자양로3길 7",
+                    "LOT": "127.0830000",
+                    "XCRD": "208982.859139",
+                    "YCRD": "548967.597592"
+                  }
+                ]
+              }
+            }
+            """));
+
+        assertThat(result.getSucceeded()).isEqualTo(0);
+        verify(shelterRepo, never()).save(any());
+    }
+
+    @Test
     void missing_address_skips_row_without_saving() {
         NormalizationResult result = normalizer("SEOUL_SHELTER_EARTHQUAKE").normalize(buildRaw("SEOUL_SHELTER_EARTHQUAKE", """
             {
-              "TlEtqkP": {
+              "TbEqKkenvinfo": {
                 "row": [
                   {
                     "ACTC_FCLT_NM": "이름만있는대피소"
@@ -157,20 +137,27 @@ class ShelterNormalizerTest {
         verify(shelterRepo, never()).save(any());
     }
 
+    // ── FLOOD (좌표 + capacity 유효 → 저장 정상 동작) ──────────────────────────
+
     @Test
-    void missing_capacity_becomes_null_not_zero() {
+    void flood_row_with_valid_coords_and_capacity_is_saved() {
         given(shelterRepo.findByNameAndAddressAndDisasterType(anyString(), anyString(), anyString()))
             .willReturn(Optional.empty());
         given(shelterRepo.save(any())).willAnswer(inv -> inv.getArgument(0));
 
-        NormalizationResult result = normalizer("SEOUL_SHELTER_LANDSLIDE").normalize(buildRaw("SEOUL_SHELTER_LANDSLIDE", """
+        NormalizationResult result = normalizer("SEOUL_SHELTER_FLOOD").normalize(buildRaw("SEOUL_SHELTER_FLOOD", """
             {
-              "data": [
-                {
-                  "대피장소내용": "테스트 대피소",
-                  "대피소주소": "서울 종로구 청운동 1"
-                }
-              ]
+              "TbFloodShelterInfo": {
+                "row": [
+                  {
+                    "SHELTER_NM": "한강대교대피소",
+                    "RD_ADDR": "서울 용산구 이촌동 1",
+                    "MAN_CNT": "500",
+                    "LAT": "37.5172",
+                    "LOT": "126.9733"
+                  }
+                ]
+              }
             }
             """));
 
@@ -178,40 +165,72 @@ class ShelterNormalizerTest {
 
         ArgumentCaptor<Shelter> captor = ArgumentCaptor.forClass(Shelter.class);
         verify(shelterRepo).save(captor.capture());
-        assertThat(captor.getValue().getCapacity()).isNull();
+        Shelter saved = captor.getValue();
+
+        assertThat(saved.getName()).isEqualTo("한강대교대피소");
+        assertThat(saved.getAddress()).isEqualTo("서울 용산구 이촌동 1");
+        assertThat(saved.getDisasterType()).isEqualTo("FLOOD");
+        assertThat(saved.getCapacity()).isEqualTo(500);
+        assertThat(saved.getLatitude()).isNotNull();
+        assertThat(saved.getLongitude()).isNotNull();
+        assertThat(saved.getShelterStatus()).isEqualTo("OPERATING");
     }
 
     @Test
-    void duplicate_payload_upserts_existing_row_without_creating_new() {
+    void flood_upserts_existing_row_without_creating_new() {
         Shelter existing = new Shelter();
-        existing.setName("경기상업고등학교");
-        existing.setAddress("종로구 자하문로 136");
-        existing.setDisasterType("LANDSLIDE");
+        existing.setName("한강대교대피소");
+        existing.setAddress("서울 용산구 이촌동 1");
+        existing.setDisasterType("FLOOD");
 
-        given(shelterRepo.findByNameAndAddressAndDisasterType("경기상업고등학교", "종로구 자하문로 136", "LANDSLIDE"))
+        given(shelterRepo.findByNameAndAddressAndDisasterType("한강대교대피소", "서울 용산구 이촌동 1", "FLOOD"))
             .willReturn(Optional.of(existing));
         given(shelterRepo.save(any())).willAnswer(inv -> inv.getArgument(0));
 
         String payload = """
             {
-              "data": [
-                {
-                  "대피장소내용": "경기상업고등학교",
-                  "대피소주소": "종로구 자하문로 136",
-                  "대피가능인원수": 333
-                }
-              ]
+              "TbFloodShelterInfo": {
+                "row": [
+                  {
+                    "SHELTER_NM": "한강대교대피소",
+                    "RD_ADDR": "서울 용산구 이촌동 1",
+                    "MAN_CNT": "500",
+                    "LAT": "37.5172",
+                    "LOT": "126.9733"
+                  }
+                ]
+              }
             }
             """;
 
-        normalizer("SEOUL_SHELTER_LANDSLIDE").normalize(buildRaw("SEOUL_SHELTER_LANDSLIDE", payload));
-        normalizer("SEOUL_SHELTER_LANDSLIDE").normalize(buildRaw("SEOUL_SHELTER_LANDSLIDE", payload));
+        normalizer("SEOUL_SHELTER_FLOOD").normalize(buildRaw("SEOUL_SHELTER_FLOOD", payload));
+        normalizer("SEOUL_SHELTER_FLOOD").normalize(buildRaw("SEOUL_SHELTER_FLOOD", payload));
 
         // Both runs must find-and-update the same row, never create a second one
         verify(shelterRepo, times(2)).findByNameAndAddressAndDisasterType(
-            "경기상업고등학교", "종로구 자하문로 136", "LANDSLIDE");
+            "한강대교대피소", "서울 용산구 이촌동 1", "FLOOD");
         verify(shelterRepo, times(2)).save(same(existing));
     }
+
+    // ── Seoul API RESULT.CODE guard ────────────────────────────────────────────
+
+    @Test
+    void seoul_api_error_result_code_returns_failure() {
+        NormalizationResult result = normalizer("SEOUL_SHELTER_FLOOD").normalize(buildRaw("SEOUL_SHELTER_FLOOD", """
+            {
+              "RESULT": {
+                "CODE": "INFO-100",
+                "MESSAGE": "해당하는 데이터가 없습니다."
+              }
+            }
+            """));
+
+        assertThat(result.getSucceeded()).isEqualTo(0);
+        assertThat(result.getFailed()).isGreaterThan(0);
+        verify(shelterRepo, never()).save(any());
+    }
+
+    // ── helpers ────────────────────────────────────────────────────────────────
 
     private ExternalApiRawPayload buildRaw(String sourceCode, String body) {
         ExternalApiExecutionLog execLog = new ExternalApiExecutionLog();
