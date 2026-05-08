@@ -32,7 +32,7 @@ public class SqsPublisherConfig {
 
     @Bean
     public CacheRegenerationPublishFailureRecorder cacheRegenerationPublishFailureRecorder(
-            @Value("${safespot.cache-regeneration.publish-failure-file:./tmp/cache-regeneration-publish-failures.jsonl}")
+            @Value("${safespot.cache-regeneration.publish-failure-file:/tmp/cache-regeneration-publish-failures.jsonl}")
             String failureFilePath) {
         return new CacheRegenerationPublishFailureRecorder(failureFilePath);
     }

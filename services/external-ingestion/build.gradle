@@ -20,7 +20,8 @@ dependencies {
     runtimeOnly 'com.h2database:h2'
     runtimeOnly 'org.postgresql:postgresql'
 
-    implementation 'software.amazon.awssdk:sqs:2.26.0'
+    implementation 'software.amazon.awssdk:sqs'
+    implementation 'software.amazon.awssdk:sts'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.mockito:mockito-core'

@@ -41,7 +41,7 @@ class IngestionIntegrationTest {
         assertThat(sources).hasSizeGreaterThanOrEqualTo(10);
 
         assertThat(sources).anyMatch(s -> "SAFETY_DATA_ALERT".equals(s.getSourceCode()) && s.isActive());
-        assertThat(sources).anyMatch(s -> "FORESTRY_LANDSLIDE".equals(s.getSourceCode()) && !s.isActive());
+        assertThat(sources).anyMatch(s -> "FORESTRY_LANDSLIDE".equals(s.getSourceCode()) && s.isActive());
         assertThat(sources).anyMatch(s -> "KMA_WEATHER".equals(s.getSourceCode()));
     }
 
