@@ -4,6 +4,8 @@ import com.safespot.externalingestion.handler.groupa1.ForestryLandslideHandler;
 import com.safespot.externalingestion.handler.groupa1.KmaEarthquakeHandler;
 import com.safespot.externalingestion.handler.groupa1.SafetyDataAlertHandler;
 import com.safespot.externalingestion.handler.groupa1.SeoulRiverLevelHandler;
+import com.safespot.externalingestion.handler.groupb.SeoulShelterEarthquakeHandler;
+import com.safespot.externalingestion.handler.groupb.SeoulShelterLandslideHandler;
 import com.safespot.externalingestion.metrics.IngestionMetrics;
 import com.safespot.externalingestion.queue.NormalizationMessage;
 import com.safespot.externalingestion.queue.NormalizationQueue;
@@ -28,6 +30,8 @@ public class PollingScheduler {
     private final KmaEarthquakeHandler kmaEarthquakeHandler;
     private final ForestryLandslideHandler forestryLandslideHandler;
     private final SeoulRiverLevelHandler seoulRiverLevelHandler;
+    private final SeoulShelterEarthquakeHandler seoulShelterEarthquakeHandler;
+    private final SeoulShelterLandslideHandler seoulShelterLandslideHandler;
     private final NormalizationQueue normalizationQueue;
     private final NormalizationService normalizationService;
     private final IngestionMetrics metrics;
@@ -48,10 +52,7 @@ public class PollingScheduler {
         drainQueue();
     }
 
-    /**
-     * FORESTRY_LANDSLIDE: 5분 주기
-     * isEnabled()=false 이므로 handler 내부에서 SKIP 처리됨 (인증키 승인 대기 중)
-     */
+    /** FORESTRY_LANDSLIDE: 5분 주기 */
     @Scheduled(fixedDelayString = "${ingestion.schedule.forestry-landslide-ms:300000}")
     public void collectForestryLandslide() {
         metrics.incrementPollingIteration("FORESTRY_LANDSLIDE");
@@ -64,6 +65,22 @@ public class PollingScheduler {
     public void collectSeoulRiverLevel() {
         metrics.incrementPollingIteration("SEOUL_RIVER_LEVEL");
         seoulRiverLevelHandler.execute();
+        drainQueue();
+    }
+
+    /** SEOUL_SHELTER_EARTHQUAKE: 24시간 주기 (dev: 5분) */
+    @Scheduled(fixedDelayString = "${ingestion.schedule.seoul-shelter-earthquake-ms:86400000}")
+    public void collectSeoulShelterEarthquake() {
+        metrics.incrementPollingIteration("SEOUL_SHELTER_EARTHQUAKE");
+        seoulShelterEarthquakeHandler.execute();
+        drainQueue();
+    }
+
+    /** SEOUL_SHELTER_LANDSLIDE: 24시간 주기 (dev: 5분) */
+    @Scheduled(fixedDelayString = "${ingestion.schedule.seoul-shelter-landslide-ms:86400000}")
+    public void collectSeoulShelterLandslide() {
+        metrics.incrementPollingIteration("SEOUL_SHELTER_LANDSLIDE");
+        seoulShelterLandslideHandler.execute();
         drainQueue();
     }
 

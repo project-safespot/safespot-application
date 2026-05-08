@@ -4,6 +4,9 @@ import com.safespot.externalingestion.handler.AbstractIngestionHandler;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -15,6 +18,9 @@ import java.util.Map;
  */
 @Component
 public class KmaEarthquakeHandler extends AbstractIngestionHandler {
+
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     @Value("${KMA_API_KEY:${KMA_SERVICE_KEY:DUMMY_KEY}}")
     private String apiKey;
@@ -36,11 +42,14 @@ public class KmaEarthquakeHandler extends AbstractIngestionHandler {
 
     @Override
     protected Map<String, String> buildRequestParams() {
+        LocalDate today = LocalDate.now(KST);
         Map<String, String> params = new HashMap<>();
         params.put("ServiceKey", apiKey);
         params.put("pageNo", "1");
         params.put("numOfRows", "10");
         params.put("dataType", "JSON");
+        params.put("startDt", today.minusDays(2).format(DATE_FMT));
+        params.put("endDt", today.format(DATE_FMT));
         return params;
     }
 

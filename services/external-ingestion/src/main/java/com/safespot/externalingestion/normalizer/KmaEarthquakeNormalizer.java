@@ -67,6 +67,14 @@ public class KmaEarthquakeNormalizer implements Normalizer {
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
+
+            String resultCode = root.path("response").path("header").path("resultCode").asText("");
+            if (!resultCode.isBlank() && !"00".equals(resultCode)) {
+                String resultMsg = root.path("response").path("header").path("resultMsg").asText("");
+                log.warn("[KMA_EARTHQUAKE] API error raw_id={} resultCode={} resultMsg={}", raw.getRawId(), resultCode, resultMsg);
+                return NormalizationResult.failure("API resultCode=" + resultCode + " " + resultMsg);
+            }
+
             JsonNode items = root.path("response").path("body").path("items").path("item");
 
             if (items.isMissingNode() || items.isEmpty()) {

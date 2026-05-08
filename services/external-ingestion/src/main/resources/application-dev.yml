@@ -18,3 +18,6 @@ server:
 ingestion:
   api-key-validation:
     fail-on-dummy: true
+  schedule:
+    seoul-shelter-earthquake-ms: 300000
+    seoul-shelter-landslide-ms: 300000
