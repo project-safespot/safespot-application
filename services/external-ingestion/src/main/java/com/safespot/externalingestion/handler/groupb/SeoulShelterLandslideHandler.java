@@ -38,7 +38,7 @@ public class SeoulShelterLandslideHandler extends AbstractIngestionHandler {
         params.put("serviceKey", apiKey);
         params.put("page", "1");
         params.put("perPage", "1000");
-        params.put("returnType", "json");
+        params.put("returnType", "JSON");
         return params;
     }
 

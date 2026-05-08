@@ -38,7 +38,7 @@ public class ShelterNormalizer implements Normalizer {
     private record ShelterSourceMeta(String rootKey, String rowSubPath, String disasterType) {}
 
     private static final Map<String, ShelterSourceMeta> SOURCE_META = Map.of(
-        "SEOUL_SHELTER_EARTHQUAKE", new ShelterSourceMeta("TlEtqkP",           "row", "EARTHQUAKE"),
+        "SEOUL_SHELTER_EARTHQUAKE", new ShelterSourceMeta("TbEqKkenvinfo",      "row", "EARTHQUAKE"),
         "SEOUL_SHELTER_LANDSLIDE",  new ShelterSourceMeta("data",               null,  "LANDSLIDE"),
         "SEOUL_SHELTER_FLOOD",      new ShelterSourceMeta("TbFloodShelterInfo", "row", "FLOOD")
     );
@@ -76,6 +76,20 @@ public class ShelterNormalizer implements Normalizer {
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
+
+            // Seoul OpenAPI sources (rowSubPath != null) return a top-level RESULT node on error.
+            if (meta.rowSubPath() != null) {
+                JsonNode resultCode = root.path("RESULT").path("CODE");
+                if (!resultCode.isMissingNode()) {
+                    String code = resultCode.asText("");
+                    if (!"INFO-000".equals(code)) {
+                        String msg = root.path("RESULT").path("MESSAGE").asText("");
+                        log.warn("[{}] Seoul API error raw_id={} CODE={} MESSAGE={}", sourceCode, raw.getRawId(), code, msg);
+                        return NormalizationResult.failure("Seoul API error CODE=" + code + " " + msg);
+                    }
+                }
+            }
+
             JsonNode rows = meta.rowSubPath() != null
                 ? root.path(meta.rootKey()).path(meta.rowSubPath())
                 : root.path(meta.rootKey());

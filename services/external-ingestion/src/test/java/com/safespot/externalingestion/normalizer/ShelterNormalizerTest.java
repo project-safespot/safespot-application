@@ -85,7 +85,7 @@ class ShelterNormalizerTest {
 
         NormalizationResult result = normalizer("SEOUL_SHELTER_EARTHQUAKE").normalize(buildRaw("SEOUL_SHELTER_EARTHQUAKE", """
             {
-              "TlEtqkP": {
+              "TbEqKkenvinfo": {
                 "row": [
                   {
                     "FCLT_NO": "188",

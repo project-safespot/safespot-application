@@ -9,6 +9,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 @Slf4j
@@ -26,8 +27,13 @@ public class RestClientExternalApiClient implements ExternalApiClient {
                 .uri(uri)
                 .retrieve()
                 .onStatus(HttpStatusCode::is4xxClientError, (req, res) -> {
+                    String body = "";
+                    try { body = new String(res.getBody().readAllBytes(), StandardCharsets.UTF_8); } catch (Exception ignored) {}
+                    String snippet = body.length() > 300 ? body.substring(0, 300) : body;
+                    log.warn("[ExternalApiClient] 4xx url={} status={} body={}", url, res.getStatusCode().value(), snippet);
+                    String detail = snippet.isBlank() ? "" : " body=" + snippet;
                     throw new ExternalApiException(
-                        "4xx from " + url, ExternalApiException.ErrorType.CLIENT_ERROR, res.getStatusCode().value());
+                        "4xx from " + url + detail, ExternalApiException.ErrorType.CLIENT_ERROR, res.getStatusCode().value());
                 })
                 .onStatus(HttpStatusCode::is5xxServerError, (req, res) -> {
                     throw new ExternalApiException(
