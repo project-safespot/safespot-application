@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    open-in-view: false
+  flyway:
+    enabled: true
+    table: flyway_schema_history_simulator
+    locations: classpath:db/migration
+
+server:
+  port: 8085
+
+simulator:
+  sqs:
+    enabled: false
+    region: ap-northeast-2
+    # queue-url: http://...
+    # endpoint-override: http://localhost:4566  # LocalStack
