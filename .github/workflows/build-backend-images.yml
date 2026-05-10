@@ -31,7 +31,8 @@ jobs:
         run: |
           ./gradlew :services:api-core:bootJar \
                     :services:api-public-read:bootJar \
-                    :services:external-ingestion:bootJar
+                    :services:external-ingestion:bootJar \
+                    :services:scenario-simulator:bootJar
 
       - name: Compute short SHA
         id: sha
@@ -69,6 +70,13 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ghcr.io/project-safespot/safespot-external-ingestion:${{ steps.sha.outputs.short }}
 
+      - name: Build and push scenario-simulator
+        uses: docker/build-push-action@v5
+        with:
+          context: services/scenario-simulator
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ghcr.io/project-safespot/safespot-scenario-simulator:${{ steps.sha.outputs.short }}
+
   update-manifest:
     needs: build
     if: github.event_name != 'pull_request'
@@ -91,6 +99,7 @@ jobs:
           yq e '.apiCore.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
           yq e '.apiPublicRead.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
           yq e '.externalIngestion.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
+          yq e '.scenarioSimulator.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
 
       - name: Commit and push if changed
         env:
