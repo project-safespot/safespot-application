@@ -3,6 +3,8 @@ spring:
     name: scenario-simulator
   profiles:
     active: local
+  flyway:
+    enabled: false
 
 server:
   port: 8085

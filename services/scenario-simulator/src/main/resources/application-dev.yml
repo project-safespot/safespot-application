@@ -10,9 +10,7 @@ spring:
     show-sql: false
     open-in-view: false
   flyway:
-    enabled: true
-    table: flyway_schema_history_simulator
-    locations: classpath:db/migration
+    enabled: false
 
 server:
   port: 8085
