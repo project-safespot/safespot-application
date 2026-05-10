@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -23,15 +24,13 @@ import java.util.List;
 
 /**
  * 서울시 하천 수위 정규화 (SEOUL_RIVER_LEVEL → disaster_alert) — ListRiverStageService
- * 경계 이상 수위만 재난 알림으로 적재 (주의/경계/심각)
+ * 통제수위 이상만 재난 알림으로 적재한다.
  *
- * TODO: verification required — ListRiverStageService 실계정 응답 필드명 확인 필요.
- *       현재 STATION/STD_DT/WATER_LEVEL/WRNLEVEL_NM/GU_NM은 구 서비스(ListStnWaterLevelEntry) 기준.
- *
- * 예상 응답 구조 (구 서비스 기준, 신규 서비스 필드명 미확인):
+ * 예상 응답 구조:
  * {"ListRiverStageService": {"row": [
- *   {"STATION":"한강대교","STD_DT":"2026-04-21 10:00:00",
- *    "WATER_LEVEL":"4.5","WRNLEVEL_NM":"경계","GU_NM":"서울특별시"}
+ *   {"WATG_NM":"한강대교","GU_OFC_NM":"용산구",
+ *    "DTRSM_DATA_CLCT_TM":"2026-04-21 10:00:00",
+ *    "RLTM_RVR_WATL_CNT":"4.5","PLAN_FLDE":"6.5","CNTRL_WATL":"4.0"}
  * ]}}
  */
 @Slf4j
@@ -45,7 +44,6 @@ public class SeoulRiverLevelNormalizer implements Normalizer {
     private static final String DISASTER_TYPE = "FLOOD";
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final DateTimeFormatter DT_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final List<String> ALERT_LEVELS = List.of("주의", "경계", "심각");
 
     private final DisasterAlertRepository disasterAlertRepo;
     private final CacheEventPublisher cacheEventPublisher;
@@ -71,26 +69,26 @@ public class SeoulRiverLevelNormalizer implements Normalizer {
             if (rows.isMissingNode() || rows.isEmpty()) return NormalizationResult.success(0);
 
             for (JsonNode row : rows) {
-                String rawLevelStr = row.path("WRNLEVEL_NM").asText("");
-                if (!ALERT_LEVELS.contains(rawLevelStr)) continue;
+                String rawLevelStr = resolveAlertLevel(row);
+                if (rawLevelStr == null) continue;
 
                 try {
                     metrics.incrementDisasterAlertReceived(getSourceCode());
-                    String sourceRegion = row.path("GU_NM").asText("서울특별시");
+                    String sourceRegion = row.path("GU_OFC_NM").asText("서울특별시");
 
                     if (!seoulScopePolicy.isInScope(sourceRegion)) {
                         log.debug("[SEOUL_RIVER_LEVEL] non-Seoul region={} — skip", sourceRegion);
                         continue;
                     }
 
-                    OffsetDateTime issuedAt = parseDateTime(row.path("STD_DT").asText());
+                    OffsetDateTime issuedAt = parseDateTime(row.path("DTRSM_DATA_CLCT_TM").asText());
 
                     if (disasterAlertRepo.existsBySourceAndIssuedAt(getSourceCode(), issuedAt)) {
                         continue;
                     }
 
-                    String station = row.path("STATION").asText("미상");
-                    String waterLevel = row.path("WATER_LEVEL").asText("");
+                    String station = row.path("WATG_NM").asText("미상");
+                    String waterLevel = row.path("RLTM_RVR_WATL_CNT").asText("");
 
                     DisasterAlert alert = new DisasterAlert();
                     alert.setSource(getSourceCode());
@@ -108,7 +106,7 @@ public class SeoulRiverLevelNormalizer implements Normalizer {
                     alert.setIssuedAt(issuedAt);
                     alert.setIsInScope(true);
                     alert.setNormalizationReason(
-                        "SEOUL_RIVER_LEVEL: WRNLEVEL_NM=" + rawLevelStr + " → " + alert.getLevel());
+                        "SEOUL_RIVER_LEVEL: threshold=" + rawLevelStr + " → " + alert.getLevel());
 
                     DisasterAlert saved = disasterAlertRepo.save(alert);
                     metrics.incrementNormalizationSuccess(getSourceCode());
@@ -149,6 +147,17 @@ public class SeoulRiverLevelNormalizer implements Normalizer {
         }
     }
 
+    private String resolveAlertLevel(JsonNode row) {
+        BigDecimal current = decimal(row, "RLTM_RVR_WATL_CNT");
+        BigDecimal plannedFlood = decimal(row, "PLAN_FLDE");
+        BigDecimal control = decimal(row, "CNTRL_WATL");
+
+        if (current == null) return null;
+        if (plannedFlood != null && current.compareTo(plannedFlood) >= 0) return "심각";
+        if (control != null && current.compareTo(control) >= 0) return "경계";
+        return null;
+    }
+
     private String mapLevel(String rawLevel) {
         return switch (rawLevel) {
             case "심각" -> "CRITICAL";
@@ -172,6 +181,19 @@ public class SeoulRiverLevelNormalizer implements Normalizer {
             return LocalDateTime.parse(raw, DT_FMT).atZone(KST).toOffsetDateTime();
         } catch (Exception e) {
             return OffsetDateTime.now(KST);
+        }
+    }
+
+    private BigDecimal decimal(JsonNode row, String key) {
+        JsonNode node = row.path(key);
+        if (node.isMissingNode() || node.isNull()) return null;
+        if (node.isNumber()) return node.decimalValue();
+        String value = node.asText("").trim();
+        if (value.isBlank()) return null;
+        try {
+            return new BigDecimal(value);
+        } catch (NumberFormatException e) {
+            return null;
         }
     }
 

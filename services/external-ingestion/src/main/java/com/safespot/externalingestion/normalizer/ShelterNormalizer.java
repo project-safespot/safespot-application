@@ -22,10 +22,7 @@ import java.util.Optional;
  *
  * TODO: shelter 외부 식별자 미정의 — name+address+disasterType 임시 키 사용.
  *       서울 공공데이터 포털 식별자 확정 후 unique key 변경 필요.
- * TODO: SEOUL_SHELTER_EARTHQUAKE XCRD/YCRD 는 한국 투영 좌표계(TM/UTM-K 추정).
- *       CRS 확인 후 proj4j/GeoTools 로 WGS84 변환 및 좌표 backfill 필요.
- * TODO: SEOUL_SHELTER_EARTHQUAKE LOT 는 WGS84 경도 범위이나 위도(LAT) 필드 미확인.
- *       위도 확정 후 좌표 backfill 필요.
+ * TODO: source_code/external_id 컬럼이 추가되면 source별 원천 ID 기반 upsert로 전환 필요.
  */
 @Slf4j
 public class ShelterNormalizer implements Normalizer {
@@ -38,7 +35,7 @@ public class ShelterNormalizer implements Normalizer {
     private record ShelterSourceMeta(String rootKey, String rowSubPath, String disasterType) {}
 
     private static final Map<String, ShelterSourceMeta> SOURCE_META = Map.of(
-        "SEOUL_SHELTER_EARTHQUAKE", new ShelterSourceMeta("TbEqKkenvinfo",      "row", "EARTHQUAKE"),
+        "SEOUL_SHELTER_EARTHQUAKE", new ShelterSourceMeta("TlEtqkP",            "row", "EARTHQUAKE"),
         "SEOUL_SHELTER_LANDSLIDE",  new ShelterSourceMeta("data",               null,  "LANDSLIDE"),
         "SEOUL_SHELTER_FLOOD",      new ShelterSourceMeta("TbFloodShelterInfo", "row", "FLOOD")
     );
@@ -71,7 +68,6 @@ public class ShelterNormalizer implements Normalizer {
         List<String> errors = new ArrayList<>();
         int succeeded = 0;
         int skippedRequired = 0;
-        int skippedIncomplete = 0;
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
@@ -117,13 +113,6 @@ public class ShelterNormalizer implements Normalizer {
                     BigDecimal   lon      = coords[1];
                     Integer      capacity = extractCapacity(row);
 
-                    if (lat == null || lon == null || capacity == null) {
-                        skippedIncomplete++;
-                        log.debug("[{}] skip row name={} — NOT NULL constraint: lat={} lon={} capacity={}",
-                            sourceCode, name, lat, lon, capacity);
-                        continue;
-                    }
-
                     String manager = extractManager(row);
                     String contact = extractContact(row);
                     String note    = extractNote(row);
@@ -149,8 +138,8 @@ public class ShelterNormalizer implements Normalizer {
                     log.warn("[{}] shelter upsert failed raw_id={}", sourceCode, raw.getRawId(), e);
                 }
             }
-            log.info("[{}] done saved={} skipped_required={} skipped_incomplete={}",
-                sourceCode, succeeded, skippedRequired, skippedIncomplete);
+            log.info("[{}] done saved={} skipped_required={}",
+                sourceCode, succeeded, skippedRequired);
 
         } catch (Exception e) {
             errors.add(e.getMessage());
@@ -180,13 +169,11 @@ public class ShelterNormalizer implements Normalizer {
     /**
      * Returns [latitude, longitude]. Both null when no valid WGS84 pair is available.
      *
-     * EARTHQUAKE: XCRD/YCRD are Korean projected coordinates (TM/UTM-K), not WGS84 — never stored
-     *             as lat/lon. LOT is a WGS84 longitude candidate but no LAT field is confirmed, so
-     *             both are stored as null until a valid lat/lon pair can be established.
+     * EARTHQUAKE: TlEtqkP exposes LAT/LOT as WGS84 latitude/longitude.
      * LANDSLIDE:  no coordinate fields in this source.
      */
     private BigDecimal[] extractCoords(JsonNode row) {
-        if ("SEOUL_SHELTER_EARTHQUAKE".equals(sourceCode) || "SEOUL_SHELTER_LANDSLIDE".equals(sourceCode)) {
+        if ("SEOUL_SHELTER_LANDSLIDE".equals(sourceCode)) {
             return new BigDecimal[]{null, null};
         }
         // Generic fallback: try standard WGS84 field names
@@ -199,7 +186,7 @@ public class ShelterNormalizer implements Normalizer {
     private Integer extractCapacity(JsonNode row) {
         return switch (sourceCode) {
             case "SEOUL_SHELTER_LANDSLIDE"  -> integer(row, "대피가능인원수");
-            case "SEOUL_SHELTER_EARTHQUAKE" -> null;
+            case "SEOUL_SHELTER_EARTHQUAKE" -> integer(row, "FCAR", "MAN_CNT");
             default -> integer(row, "MAN_CNT", "대피가능인원수");
         };
     }
@@ -256,6 +243,7 @@ public class ShelterNormalizer implements Normalizer {
                 String s = node.asText("").trim().replace(",", "");
                 if (!s.isEmpty()) {
                     try { return Integer.parseInt(s); } catch (NumberFormatException ignored) {}
+                    try { return new BigDecimal(s).intValue(); } catch (NumberFormatException ignored) {}
                 }
             }
         }

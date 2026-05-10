@@ -22,6 +22,10 @@ public class JdbcEnvironmentLogRepository implements EnvironmentLogRepository {
         SELECT nx, ny,
             COALESCE(tmp, 0.0)   AS tmp,
             COALESCE(sky, '')    AS sky,
+            COALESCE(pty, '')    AS pty,
+            pcp,
+            wsd,
+            reh,
             forecast_dt
         FROM weather_log
         ORDER BY collected_at DESC
@@ -32,6 +36,12 @@ public class JdbcEnvironmentLogRepository implements EnvironmentLogRepository {
         SELECT station_name,
             COALESCE(khai_value, 0)    AS khai_value,
             COALESCE(khai_grade, '')   AS khai_grade,
+            pm10,
+            pm10_grade,
+            pm25,
+            pm25_grade,
+            o3,
+            o3_grade,
             measured_at
         FROM air_quality_log
         ORDER BY measured_at DESC
@@ -43,6 +53,10 @@ public class JdbcEnvironmentLogRepository implements EnvironmentLogRepository {
         SELECT nx, ny,
             COALESCE(tmp, 0.0)   AS tmp,
             COALESCE(sky, '')    AS sky,
+            COALESCE(pty, '')    AS pty,
+            pcp,
+            wsd,
+            reh,
             forecast_dt
         FROM weather_log
         WHERE collected_at >= :start AND collected_at < :end
@@ -55,6 +69,12 @@ public class JdbcEnvironmentLogRepository implements EnvironmentLogRepository {
         SELECT station_name,
             COALESCE(khai_value, 0)    AS khai_value,
             COALESCE(khai_grade, '')   AS khai_grade,
+            pm10,
+            pm10_grade,
+            pm25,
+            pm25_grade,
+            o3,
+            o3_grade,
             measured_at
         FROM air_quality_log
         WHERE measured_at >= :start AND measured_at < :end
@@ -79,7 +99,11 @@ public class JdbcEnvironmentLogRepository implements EnvironmentLogRepository {
                 rs.getInt("nx"),
                 rs.getInt("ny"),
                 rs.getDouble("tmp"),
-                mapSkyCondition(rs.getString("sky")),
+                resolveWeatherCondition(rs.getString("sky"), rs.getString("pty")),
+                rs.getString("pty"),
+                rs.getString("pcp"),
+                rs.getBigDecimal("wsd"),
+                (Integer) rs.getObject("reh"),
                 rs.getString("forecast_dt")
             )
         );
@@ -97,6 +121,12 @@ public class JdbcEnvironmentLogRepository implements EnvironmentLogRepository {
                 rs.getString("station_name"),
                 rs.getInt("khai_value"),
                 rs.getString("khai_grade"),
+                (Integer) rs.getObject("pm10"),
+                rs.getString("pm10_grade"),
+                (Integer) rs.getObject("pm25"),
+                rs.getString("pm25_grade"),
+                rs.getBigDecimal("o3"),
+                rs.getString("o3_grade"),
                 rs.getString("measured_at")
             )
         );
@@ -112,7 +142,11 @@ public class JdbcEnvironmentLogRepository implements EnvironmentLogRepository {
                     rs.getInt("nx"),
                     rs.getInt("ny"),
                     rs.getDouble("tmp"),
-                    mapSkyCondition(rs.getString("sky")),
+                    resolveWeatherCondition(rs.getString("sky"), rs.getString("pty")),
+                    rs.getString("pty"),
+                    rs.getString("pcp"),
+                    rs.getBigDecimal("wsd"),
+                    (Integer) rs.getObject("reh"),
                     rs.getString("forecast_dt")
                 )
             );
@@ -132,6 +166,12 @@ public class JdbcEnvironmentLogRepository implements EnvironmentLogRepository {
                     rs.getString("station_name"),
                     rs.getInt("khai_value"),
                     rs.getString("khai_grade"),
+                    (Integer) rs.getObject("pm10"),
+                    rs.getString("pm10_grade"),
+                    (Integer) rs.getObject("pm25"),
+                    rs.getString("pm25_grade"),
+                    rs.getBigDecimal("o3"),
+                    rs.getString("o3_grade"),
                     rs.getString("measured_at")
                 )
             );
@@ -150,5 +190,12 @@ public class JdbcEnvironmentLogRepository implements EnvironmentLogRepository {
             case "4" -> "흐림";
             default -> sky;
         };
+    }
+
+    private String resolveWeatherCondition(String sky, String pty) {
+        String mappedSky = mapSkyCondition(sky);
+        if (mappedSky != null && !mappedSky.isBlank()) return mappedSky;
+        if (pty != null && !pty.isBlank() && !"없음".equals(pty)) return pty;
+        return "관측값";
     }
 }

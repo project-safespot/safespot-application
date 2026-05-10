@@ -397,7 +397,7 @@ WHERE shelter_id = :id AND entry_status = 'ENTERED';
 | `SAFETY_DATA_ALERT` | 재난문자 | 행정안전부 | DISASTER | TRUE | |
 | `KMA_EARTHQUAKE` | 지진 정보 | 기상청 | DISASTER | TRUE | |
 | `SEOUL_EARTHQUAKE` | 서울시 지진 발생 현황 | 서울시 | DISASTER | TRUE | |
-| `FORESTRY_LANDSLIDE` | 산사태 위험 예측 | 산림청 | DISASTER | FALSE | 인증키 승인 대기 |
+| `FORESTRY_LANDSLIDE` | 산사태 위험 예측 | 산림청 | DISASTER | TRUE | 공식 산림청 예측정보 API 기준 |
 | `SEOUL_RIVER_LEVEL` | 하천 수위 | 서울시 | DISASTER | TRUE | |
 | `KMA_WEATHER` | 날씨 단기예보 | 기상청 | ENVIRONMENT | TRUE | |
 | `AIR_KOREA_AIR_QUALITY` | 대기질 | 에어코리아 | ENVIRONMENT | TRUE | |

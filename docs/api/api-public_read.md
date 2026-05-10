@@ -309,12 +309,16 @@ Query parameter:
   "data": {
     "region": "Seoul",
     "nx": 60,
-    "ny": 127,
-    "temperature": 18.5,
-    "weatherCondition": "CLEAR",
-    "forecastedAt": "2026-04-15T15:00:00+09:00"
-  }
-}
+	    "ny": 127,
+	    "temperature": 18.5,
+	    "weatherCondition": "관측값",
+	    "precipitationType": "없음",
+	    "precipitation": "0",
+	    "windSpeed": 1.2,
+	    "humidity": 65,
+	    "forecastedAt": "2026-04-15T15:00:00+09:00"
+	  }
+	}
 ```
 
 실패:
@@ -341,6 +345,26 @@ Query parameter:
 | `stationName` | string | N | Seoul station name |
 
 `region` 또는 `stationName` 중 하나 이상을 제공해야 한다.
+
+`200` 응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "stationName": "중구",
+    "aqi": 42,
+    "grade": "좋음",
+    "pm10": 34,
+    "pm10Grade": "좋음",
+    "pm25": 18,
+    "pm25Grade": "보통",
+    "o3": 0.025,
+    "o3Grade": "좋음",
+    "measuredAt": "2026-04-15T15:00:00+09:00"
+  }
+}
+```
 
 실패:
 

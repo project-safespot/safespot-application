@@ -40,8 +40,9 @@ class SeoulRiverLevelNormalizerTest {
     void normalize_seoulAlertLevel_saves() {
         ExternalApiRawPayload raw = buildRaw("""
             {"ListRiverStageService":{"row":[
-              {"STATION":"한강대교","STD_DT":"2026-04-21 10:00:00",
-               "WATER_LEVEL":"4.5","WRNLEVEL_NM":"경계","GU_NM":"서울특별시"}
+              {"WATG_NM":"한강대교","GU_OFC_NM":"서울특별시 용산구",
+               "DTRSM_DATA_CLCT_TM":"2026-04-21 10:00:00",
+               "RLTM_RVR_WATL_CNT":"4.5","PLAN_FLDE":"6.5","CNTRL_WATL":"4.0"}
             ]}}
             """);
 
@@ -56,7 +57,7 @@ class SeoulRiverLevelNormalizerTest {
         verify(disasterAlertRepo).save(argThat(a ->
             "FLOOD".equals(a.getDisasterType()) &&
             "seoul".equals(a.getRegion()) &&
-            "서울특별시".equals(a.getSourceRegion()) &&
+            "서울특별시 용산구".equals(a.getSourceRegion()) &&
             "WARNING".equals(a.getLevel()) &&
             Integer.valueOf(3).equals(a.getLevelRank())
         ));
@@ -67,8 +68,9 @@ class SeoulRiverLevelNormalizerTest {
     void normalize_belowAlertLevel_skipsInsert() {
         ExternalApiRawPayload raw = buildRaw("""
             {"ListRiverStageService":{"row":[
-              {"STATION":"한강대교","STD_DT":"2026-04-21 10:00:00",
-               "WATER_LEVEL":"1.2","WRNLEVEL_NM":"관심","GU_NM":"서울특별시"}
+              {"WATG_NM":"한강대교","GU_OFC_NM":"서울특별시 용산구",
+               "DTRSM_DATA_CLCT_TM":"2026-04-21 10:00:00",
+               "RLTM_RVR_WATL_CNT":"1.2","PLAN_FLDE":"6.5","CNTRL_WATL":"4.0"}
             ]}}
             """);
 
@@ -83,8 +85,9 @@ class SeoulRiverLevelNormalizerTest {
     void normalize_nonSeoulRegion_skipsInsert() {
         ExternalApiRawPayload raw = buildRaw("""
             {"ListRiverStageService":{"row":[
-              {"STATION":"한강대교","STD_DT":"2026-04-21 10:00:00",
-               "WATER_LEVEL":"4.5","WRNLEVEL_NM":"경계","GU_NM":"경기도 하남시"}
+              {"WATG_NM":"한강대교","GU_OFC_NM":"경기도 하남시",
+               "DTRSM_DATA_CLCT_TM":"2026-04-21 10:00:00",
+               "RLTM_RVR_WATL_CNT":"4.5","PLAN_FLDE":"6.5","CNTRL_WATL":"4.0"}
             ]}}
             """);
 

@@ -207,11 +207,13 @@ class EnvironmentReadServiceTest {
         when(log.getKhaiValue()).thenReturn(42);
         when(log.getKhaiGrade()).thenReturn("좋음");
         when(log.getMeasuredAt()).thenReturn(OffsetDateTime.now());
-        when(airQualityLogRepository.findLatest()).thenReturn(Optional.of(log));
+        when(airQualityLogRepository.findLatestByStationName("종로구")).thenReturn(Optional.of(log));
 
         AirQualityDto result = environmentReadService.findAirQuality(null, "종로구");
 
         assertThat(result.stationName()).isEqualTo("종로구");
+        verify(airQualityLogRepository).findLatestByStationName("종로구");
+        verify(airQualityLogRepository, never()).findLatest();
         verify(redisReadCache).recordFallback(eq("/air-quality"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
         verify(cacheRegenerationPublisher).publish(AIR_KEY, CacheRegenerationReason.CACHE_MISS, "/air-quality");
         verify(redisReadCache, never()).set(any(), any(), any());

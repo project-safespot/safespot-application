@@ -152,6 +152,10 @@ weather는 MVP에서 region-scoped이다.
 - Seoul region -> Seoul grid mapping
 - `nx` / `ny`는 source API 및 DB storage selector로 남는다.
 - 현재 public Redis read model은 Seoul environment namespace를 사용한다: `environment:weather:seoul`, `environment:weather-alert:seoul`, `environment:air-quality:seoul`
+- external-ingestion pod가 시작되면 1회에 한해 `KMA_WEATHER`, `AIR_KOREA_AIR_QUALITY`, `SEOUL_SHELTER_EARTHQUAKE`, `SEOUL_SHELTER_LANDSLIDE`를 warmup 수집한다.
+- warmup 수집은 `ingestion.startup.enabled=false`로 비활성화할 수 있다.
+- weather read model은 temperature 외에 precipitation type, precipitation amount, wind speed, humidity를 포함할 수 있다.
+- air-quality read model은 CAI 외에 PM10, PM2.5, O3 값과 등급을 포함할 수 있다.
 
 ## 5. Event Publication 계약
 
@@ -217,7 +221,7 @@ structured log 및 metric label에는 `queue_name`을 포함할 수 있지만:
 |--------------------------|----------|------------|------|---------|---------------------------|
 | SAFETY_DATA_ALERT        | 행정안전부    | 긴급재난문자     | HTTP | true    | SAFETY_DATA_ALERT_API_KEY |
 | KMA_EARTHQUAKE           | 기상청      | 지진정보조회     | HTTP | true    | KMA_API_KEY               |
-| FORESTRY_LANDSLIDE       | 산림청      | 산사태 예측     | HTTP | false   | FORESTRY_API_KEY          |
+| FORESTRY_LANDSLIDE       | 산림청      | 산사태 예측     | HTTP | true    | FORESTRY_API_KEY          |
 | SEOUL_RIVER_LEVEL        | 서울시      | 하천 수위      | HTTP | true    | SEOUL_API_KEY             |
 | SEOUL_EARTHQUAKE         | 서울시      | 지진 발생 현황   | HTTP | true    | SEOUL_API_KEY             |
 | SEOUL_SHELTER_EARTHQUAKE | 서울시      | 지진 대피소     | HTTP | true    | SEOUL_API_KEY             |
@@ -275,7 +279,7 @@ structured log 및 metric label에는 `queue_name`을 포함할 수 있지만:
 | `AIR_KOREA_AIR_QUALITY` | AirKorea / data.go.kr | `https://apis.data.go.kr/B552584/ArpltnInforInqireSvc/getCtprvnRltmMesureDnsty` | query `serviceKey` (env: `AIR_KOREA_API_KEY`) | `returnType=json`, `numOfRows`, `pageNo`, `sidoName=서울`, `ver=1.0` | 500/day | 매시 정각 | true | `response.body.items[]` | smoke OK — 실계정 동작 확인. 초기 계약 문서의 `getMinuDustFrcstDspth`는 오류였음 |
 | `SEOUL_SHELTER_EARTHQUAKE` | 서울 열린데이터 | `http://openapi.seoul.go.kr:8088/{KEY}/json/TlEtqkP/{start}/{end}` | path segment `{KEY}` (env: `SEOUL_API_KEY`) | start=1, end=1000 (path) | 없음 | 매일 02:00 (CronJob) | true | `TlEtqkP.row[]` | TODO: 필드명 미확인 |
 | `SEOUL_SHELTER_LANDSLIDE` | odcloud (공공데이터포털) | `https://api.odcloud.kr/api/15118898/v1/uddi:19815091-0f2c-4d7a-a77f-96cec77038ad` | query `serviceKey` (env: `ODCLOUD_API_KEY`) | `page=1`, `perPage=1000`, `returnType=json` | 없음 | 매일 02:00 (CronJob) | true | `data[]` | TODO: odcloud 실계정 응답 필드명 확인 필요. 현재 normalizer 필드명은 미검증 |
-| `FORESTRY_LANDSLIDE` | 산림청 / data.go.kr | ⚠️ 불일치 — 아래 상세 참조 | query `ServiceKey` (공식 원문) / `serviceKey` (현재 코드) — 불일치 | `pageNo`, `numOfRows`, `dataType=JSON` | 10,000/day | 5분 | **false** (승인 대기 중) | `response.body.items.item[]` | TODO: 승인 완료 후 공식 원문 기준으로 검증 필요 |
+| `FORESTRY_LANDSLIDE` | 산림청 / data.go.kr | `http://apis.data.go.kr/1400000/predictionInfoService/predictionInfoList` | query `ServiceKey` (env: `FORESTRY_API_KEY`) | `pageNo`, `numOfRows`, `_type=json` | 10,000/day | 5분 | true | `response.body.items.item[]` | 공식 schema 기준 정렬 |
 | `SEOUL_SHELTER_FLOOD` | 서울 열린데이터 | 파일 데이터 (xlsx) | 해당 없음 | 해당 없음 | 해당 없음 | 배치 전용 | false (batch-only placeholder) | 해당 없음 | TODO: 파일 파싱 구현 전 |
 
 `code-inferred`: 실계정으로 실제 호출 검증을 완료하지 않았으며 코드에서 추론한 계약이다.
@@ -301,15 +305,13 @@ structured log 및 metric label에는 `queue_name`을 포함할 수 있지만:
 
 #### FORESTRY_LANDSLIDE
 
-- 공식 원문 endpoint: `http://apis.data.go.kr/1400000/predictionInfoService/predictionInfoList`
-- 현재 코드 endpoint: `https://apis.data.go.kr/1400119/slfswarnApi/getSlfswarnDataList`
-- **⚠️ 불일치: 공식 원문과 코드의 endpoint가 다르다. 승인 완료 후 공식 원문 기준으로 반드시 검증 및 정렬 필요.**
-- 공식 원문 auth: query `ServiceKey`
-- 현재 코드 auth: query `serviceKey` — 대소문자 불일치
-- 필수 (공식 원문 기준): `ServiceKey`
-- 선택: `pageNo`, `numOfRows`
+- endpoint: `http://apis.data.go.kr/1400000/predictionInfoService/predictionInfoList`
+- auth: query `ServiceKey`
+- 필수: `ServiceKey`
+- 선택: `pageNo`, `numOfRows`, `_type=json`, `lndslFrcstNm`, `sgg`
 - root: `response.body.items.item`
-- enabled: false (인증키 승인 대기 중)
+- 주요 필드: `sgg`, `lndslFrcstNm`, `prctnInfoAnlssDt`
+- enabled: true
 
 #### SEOUL_RIVER_LEVEL
 

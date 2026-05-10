@@ -34,7 +34,7 @@ class IngestionApiKeyValidatorTest {
     @Test
     void passesWhenSourceIsDisabled() {
         IngestionApiKeyValidator validator = new IngestionApiKeyValidator(
-            List.of(stubHandler("FORESTRY_LANDSLIDE", false, "DUMMY_KEY")));
+            List.of(stubHandler("DISABLED_TEST_SOURCE", false, "DUMMY_KEY")));
 
         assertThatCode(() -> validator.run(null)).doesNotThrowAnyException();
     }

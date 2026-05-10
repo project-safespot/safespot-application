@@ -153,6 +153,8 @@ environment key는 disaster message key와 분리되어 유지된다.
 - `environment:*`는 weather, air quality, weather alert style environment data에만 사용한다.
 - `env:*`는 deprecated historical naming이며 현재 Redis 계약으로 사용하면 안 된다.
 - environment payload를 disaster message key family에 섞지 않는다.
+- `environment:weather:seoul` payload는 temperature 외에 precipitation, wind, humidity context를 포함할 수 있다.
+- `environment:air-quality:seoul` payload는 CAI 외에 PM10, PM2.5, O3 context를 포함할 수 있다.
 
 ## 5. Shelter Key Precision
 

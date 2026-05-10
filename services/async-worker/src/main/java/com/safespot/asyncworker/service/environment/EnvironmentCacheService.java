@@ -71,7 +71,7 @@ public class EnvironmentCacheService {
         envLogRepository.findMostRecentWeather().ifPresentOrElse(
             r -> {
                 cacheWriter.setEnvironmentWeather(
-                    new WeatherCacheValue(r.nx(), r.ny(), r.temperature(), r.weatherCondition(), r.forecastedAt()));
+                    toWeatherCacheValue(r));
                 log.info("environment:weather:seoul SET (regeneration)");
             },
             () -> log.warn("environment:weather:seoul rebuild skipped: no weather record in DB")
@@ -82,7 +82,7 @@ public class EnvironmentCacheService {
         envLogRepository.findMostRecentAirQuality().ifPresentOrElse(
             r -> {
                 cacheWriter.setEnvironmentAirQuality(
-                    new AirQualityCacheValue(r.stationName(), r.aqi(), r.grade(), r.measuredAt()));
+                    toAirQualityCacheValue(r));
                 log.info("environment:air-quality:seoul SET (regeneration)");
             },
             () -> log.warn("environment:air-quality:seoul rebuild skipped: no air quality record in DB")
@@ -103,8 +103,7 @@ public class EnvironmentCacheService {
             return;
         }
         WeatherLogRecord r = records.get(0);
-        WeatherCacheValue value = new WeatherCacheValue(r.nx(), r.ny(), r.temperature(), r.weatherCondition(), r.forecastedAt());
-        cacheWriter.setEnvironmentWeather(value);
+        cacheWriter.setEnvironmentWeather(toWeatherCacheValue(r));
         log.info("environment:weather:seoul SET: timeWindow={}", timeWindow);
     }
 
@@ -116,8 +115,19 @@ public class EnvironmentCacheService {
             return;
         }
         AirQualityLogRecord r = records.get(0);
-        AirQualityCacheValue value = new AirQualityCacheValue(r.stationName(), r.aqi(), r.grade(), r.measuredAt());
-        cacheWriter.setEnvironmentAirQuality(value);
+        cacheWriter.setEnvironmentAirQuality(toAirQualityCacheValue(r));
         log.info("environment:air-quality:seoul SET: timeWindow={}", timeWindow);
+    }
+
+    private WeatherCacheValue toWeatherCacheValue(WeatherLogRecord r) {
+        return new WeatherCacheValue(
+            r.nx(), r.ny(), r.temperature(), r.weatherCondition(),
+            r.precipitationType(), r.precipitation(), r.windSpeed(), r.humidity(), r.forecastedAt());
+    }
+
+    private AirQualityCacheValue toAirQualityCacheValue(AirQualityLogRecord r) {
+        return new AirQualityCacheValue(
+            r.stationName(), r.aqi(), r.grade(),
+            r.pm10(), r.pm10Grade(), r.pm25(), r.pm25Grade(), r.o3(), r.o3Grade(), r.measuredAt());
     }
 }

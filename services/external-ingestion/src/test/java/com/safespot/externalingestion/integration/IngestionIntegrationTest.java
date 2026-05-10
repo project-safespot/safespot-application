@@ -41,7 +41,12 @@ class IngestionIntegrationTest {
         assertThat(sources).hasSizeGreaterThanOrEqualTo(10);
 
         assertThat(sources).anyMatch(s -> "SAFETY_DATA_ALERT".equals(s.getSourceCode()) && s.isActive());
-        assertThat(sources).anyMatch(s -> "FORESTRY_LANDSLIDE".equals(s.getSourceCode()) && s.isActive());
+        assertThat(sources).anyMatch(s -> "FORESTRY_LANDSLIDE".equals(s.getSourceCode())
+            && s.isActive()
+            && s.getBaseUrl().contains("predictionInfoService/predictionInfoList"));
+        assertThat(sources).anyMatch(s -> "SEOUL_SHELTER_EARTHQUAKE".equals(s.getSourceCode())
+            && s.isActive()
+            && s.getBaseUrl().contains("TlEtqkP"));
         assertThat(sources).anyMatch(s -> "KMA_WEATHER".equals(s.getSourceCode()));
     }
 

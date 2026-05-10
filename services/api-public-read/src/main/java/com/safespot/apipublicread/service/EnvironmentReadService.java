@@ -100,13 +100,21 @@ public class EnvironmentReadService {
         requestRegeneration(AIR_KEY, ENDPOINT_AIR, cached.fallbackReason());
 
         long start = System.currentTimeMillis();
-        AirQualityLog log = airQualityLogRepository.findLatest().orElse(null);
+        AirQualityLog log = stationName != null
+                ? airQualityLogRepository.findLatestByStationName(stationName).orElse(null)
+                : airQualityLogRepository.findLatest().orElse(null);
         redisReadCache.recordDbFallbackLatency(ENDPOINT_AIR, System.currentTimeMillis() - start);
         if (log == null) return null;
         return new AirQualityDto(
                 log.getStationName(),
                 log.getKhaiValue(),
                 log.getKhaiGrade(),
+                log.getPm10(),
+                log.getPm10Grade(),
+                log.getPm25(),
+                log.getPm25Grade(),
+                log.getO3(),
+                log.getO3Grade(),
                 log.getMeasuredAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
         );
     }
@@ -128,8 +136,20 @@ public class EnvironmentReadService {
                 log.getNx(),
                 log.getNy(),
                 log.getTmp() != null ? log.getTmp().doubleValue() : null,
-                log.getSky() != null ? log.getSky() : "알수없음",
+                resolveWeatherCondition(log),
+                log.getPty(),
+                log.getPcp(),
+                log.getWsd(),
+                log.getReh(),
                 log.getForecastDt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
         );
+    }
+
+    private String resolveWeatherCondition(WeatherLog log) {
+        if (log.getSky() != null) return log.getSky();
+        if (log.getPty() != null && !log.getPty().isBlank() && !"없음".equals(log.getPty())) {
+            return log.getPty();
+        }
+        return "관측값";
     }
 }

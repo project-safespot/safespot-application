@@ -29,9 +29,9 @@ import java.util.List;
  *
  * 예상 응답 구조:
  * {"response": {"body": {"items": {"item": [
- *   {"TM_FC": "202604211000", "EQ_REG": "서울특별시",
- *    "EQ_MAG": "3.5", "EQ_DPT": "10", "EQ_LOC": "서울 북부 10km",
- *    "JDG_INTS": "진도2", "WARN_VAL": "주의"}
+ *   {"tmFc": "202604211000", "tmEqk": "20260421095800",
+ *    "lat": "37.56", "lon": "126.97", "loc": "서울 북부 10km",
+ *    "mt": "3.5", "inT": "최대진도Ⅱ"}
  * ]}}}}
  */
 @Slf4j
@@ -84,21 +84,21 @@ public class KmaEarthquakeNormalizer implements Normalizer {
             for (JsonNode item : items) {
                 try {
                     metrics.incrementDisasterAlertReceived(getSourceCode());
-                    String sourceRegion = item.path("EQ_REG").asText("서울특별시");
+                    String sourceRegion = item.path("loc").asText("서울특별시");
 
                     if (!seoulScopePolicy.isInScope(sourceRegion)) {
                         log.debug("[KMA_EARTHQUAKE] non-Seoul region={} — skip", sourceRegion);
                         continue;
                     }
 
-                    OffsetDateTime issuedAt = parseDateTime(item.path("TM_FC").asText());
+                    OffsetDateTime issuedAt = parseDateTime(item.path("tmFc").asText());
 
                     if (disasterAlertRepo.existsBySourceAndIssuedAt(getSourceCode(), issuedAt)) {
                         log.debug("[KMA_EARTHQUAKE] duplicate issuedAt={} — skip", issuedAt);
                         continue;
                     }
 
-                    String rawLevelStr = item.path("WARN_VAL").asText("");
+                    String rawLevelStr = item.path("inT").asText("");
 
                     DisasterAlert alert = new DisasterAlert();
                     alert.setSource(getSourceCode());
@@ -112,13 +112,13 @@ public class KmaEarthquakeNormalizer implements Normalizer {
                     alert.setLevelRank(mapLevelRank(rawLevelStr));
                     alert.setRawCategoryTokens(toJsonArray(List.of("발생")));
                     alert.setMessageCategory("ALERT");
-                    alert.setMessage("지진 발생: " + item.path("EQ_LOC").asText("") +
-                        " 규모 " + item.path("EQ_MAG").asText("") +
-                        " " + item.path("JDG_INTS").asText(""));
+                    alert.setMessage("지진 발생: " + item.path("loc").asText("") +
+                        " 규모 " + item.path("mt").asText("") +
+                        " " + item.path("inT").asText(""));
                     alert.setIssuedAt(issuedAt);
                     alert.setIsInScope(true);
                     alert.setNormalizationReason(
-                        "KMA_EARTHQUAKE: WARN_VAL=" + rawLevelStr + " → " + alert.getLevel());
+                        "KMA_EARTHQUAKE: inT=" + rawLevelStr + " → " + alert.getLevel());
 
                     DisasterAlert saved = disasterAlertRepo.save(alert);
 
@@ -164,12 +164,12 @@ public class KmaEarthquakeNormalizer implements Normalizer {
         DisasterAlertDetail detail = new DisasterAlertDetail();
         detail.setAlert(saved);
         detail.setDetailType(DISASTER_TYPE);
-        String magStr = item.path("EQ_MAG").asText("");
+        String magStr = item.path("mt").asText("");
         if (!magStr.isBlank()) {
             detail.setMagnitude(new BigDecimal(magStr));
         }
-        detail.setEpicenter(item.path("EQ_LOC").asText(""));
-        detail.setIntensity(item.path("JDG_INTS").asText(""));
+        detail.setEpicenter(item.path("loc").asText(""));
+        detail.setIntensity(item.path("inT").asText(""));
         return detail;
     }
 
@@ -189,10 +189,10 @@ public class KmaEarthquakeNormalizer implements Normalizer {
     private String mapLevel(String rawLevel) {
         if (rawLevel == null) return null;
         return switch (rawLevel) {
-            case "심각" -> "CRITICAL";
-            case "경계" -> "WARNING";
-            case "주의" -> "CAUTION";
-            case "관심" -> "INTEREST";
+            case "심각", "최대진도Ⅶ", "최대진도Ⅷ", "최대진도Ⅸ", "최대진도Ⅹ" -> "CRITICAL";
+            case "경계", "최대진도Ⅴ", "최대진도Ⅵ" -> "WARNING";
+            case "주의", "최대진도Ⅲ", "최대진도Ⅳ" -> "CAUTION";
+            case "관심", "최대진도Ⅰ", "최대진도Ⅱ" -> "INTEREST";
             default -> null;
         };
     }
@@ -200,10 +200,10 @@ public class KmaEarthquakeNormalizer implements Normalizer {
     private Integer mapLevelRank(String rawLevel) {
         if (rawLevel == null) return null;
         return switch (rawLevel) {
-            case "심각" -> 4;
-            case "경계" -> 3;
-            case "주의" -> 2;
-            case "관심" -> 1;
+            case "심각", "최대진도Ⅶ", "최대진도Ⅷ", "최대진도Ⅸ", "최대진도Ⅹ" -> 4;
+            case "경계", "최대진도Ⅴ", "최대진도Ⅵ" -> 3;
+            case "주의", "최대진도Ⅲ", "최대진도Ⅳ" -> 2;
+            case "관심", "최대진도Ⅰ", "최대진도Ⅱ" -> 1;
             default -> null;
         };
     }

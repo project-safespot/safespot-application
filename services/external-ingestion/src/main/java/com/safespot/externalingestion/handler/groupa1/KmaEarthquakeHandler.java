@@ -48,8 +48,8 @@ public class KmaEarthquakeHandler extends AbstractIngestionHandler {
         params.put("pageNo", "1");
         params.put("numOfRows", "10");
         params.put("dataType", "JSON");
-        params.put("startDt", today.minusDays(2).format(DATE_FMT));
-        params.put("endDt", today.format(DATE_FMT));
+        params.put("fromTmFc", today.minusDays(2).format(DATE_FMT));
+        params.put("toTmFc", today.format(DATE_FMT));
         return params;
     }
 

@@ -43,9 +43,9 @@ class KmaEarthquakeNormalizerTest {
     void normalize_validEarthquake_savesAlertAndDetail() {
         ExternalApiRawPayload raw = buildRaw("""
             {"response":{"body":{"items":{"item":[
-              {"TM_FC":"202604211000","EQ_REG":"서울특별시",
-               "EQ_MAG":"3.5","EQ_DPT":"10","EQ_LOC":"서울 북부 10km",
-               "JDG_INTS":"진도2","WARN_VAL":"주의"}
+              {"tmFc":"202604211000","tmEqk":"20260421095800",
+               "lat":"37.56","lon":"126.97","loc":"서울 북부 10km",
+               "mt":"3.5","inT":"최대진도Ⅱ"}
             ]}}}}
             """);
 
@@ -65,7 +65,7 @@ class KmaEarthquakeNormalizerTest {
         verify(detailRepo).save(argThat(d ->
             "EARTHQUAKE".equals(d.getDetailType()) &&
             new BigDecimal("3.5").compareTo(d.getMagnitude()) == 0 &&
-            "진도2".equals(d.getIntensity())
+            "최대진도Ⅱ".equals(d.getIntensity())
         ));
     }
 
@@ -73,9 +73,9 @@ class KmaEarthquakeNormalizerTest {
     void normalize_duplicate_skipsInsert() {
         ExternalApiRawPayload raw = buildRaw("""
             {"response":{"body":{"items":{"item":[
-              {"TM_FC":"202604211000","EQ_REG":"서울특별시",
-               "EQ_MAG":"3.5","EQ_DPT":"10","EQ_LOC":"...",
-               "JDG_INTS":"진도2","WARN_VAL":"주의"}
+              {"tmFc":"202604211000","tmEqk":"20260421095800",
+               "lat":"37.56","lon":"126.97","loc":"서울 북부 10km",
+               "mt":"3.5","inT":"최대진도Ⅱ"}
             ]}}}}
             """);
 
@@ -90,9 +90,9 @@ class KmaEarthquakeNormalizerTest {
     void normalize_detailFails_compensatesAlertDelete() {
         ExternalApiRawPayload raw = buildRaw("""
             {"response":{"body":{"items":{"item":[
-              {"TM_FC":"202604221100","EQ_REG":"서울특별시",
-               "EQ_MAG":"4.1","EQ_DPT":"15","EQ_LOC":"서울 남부 5km",
-               "JDG_INTS":"진도3","WARN_VAL":"경계"}
+              {"tmFc":"202604221100","tmEqk":"20260422105500",
+               "lat":"37.50","lon":"127.00","loc":"서울 남부 5km",
+               "mt":"4.1","inT":"최대진도Ⅴ"}
             ]}}}}
             """);
 
@@ -118,9 +118,9 @@ class KmaEarthquakeNormalizerTest {
     void normalize_nonSeoulRegion_skipsInsert() {
         ExternalApiRawPayload raw = buildRaw("""
             {"response":{"body":{"items":{"item":[
-              {"TM_FC":"202604211000","EQ_REG":"부산광역시",
-               "EQ_MAG":"3.5","EQ_DPT":"10","EQ_LOC":"부산 북부 10km",
-               "JDG_INTS":"진도2","WARN_VAL":"주의"}
+              {"tmFc":"202604211000","tmEqk":"20260421095800",
+               "lat":"35.17","lon":"129.07","loc":"부산 북부 10km",
+               "mt":"3.5","inT":"최대진도Ⅱ"}
             ]}}}}
             """);
 
@@ -135,9 +135,9 @@ class KmaEarthquakeNormalizerTest {
     void normalize_seoulAlert_usesCanonicalRegion() {
         ExternalApiRawPayload raw = buildRaw("""
             {"response":{"body":{"items":{"item":[
-              {"TM_FC":"202604211100","EQ_REG":"서울특별시",
-               "EQ_MAG":"2.1","EQ_DPT":"5","EQ_LOC":"서울 중구",
-               "JDG_INTS":"진도1","WARN_VAL":"관심"}
+              {"tmFc":"202604211100","tmEqk":"20260421105800",
+               "lat":"37.56","lon":"126.98","loc":"서울 중구",
+               "mt":"2.1","inT":"최대진도Ⅰ"}
             ]}}}}
             """);
 
@@ -151,7 +151,7 @@ class KmaEarthquakeNormalizerTest {
 
         verify(disasterAlertRepo).save(argThat(a ->
             "seoul".equals(a.getRegion()) &&
-            "서울특별시".equals(a.getSourceRegion())
+            "서울 중구".equals(a.getSourceRegion())
         ));
     }
 

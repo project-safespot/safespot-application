@@ -22,8 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 산림청 산사태 위험 예측 정규화 (FORESTRY_LANDSLIDE → disaster_alert)
- * NOTE: 산림청 인증키 승인 대기 중 — ForestryLandslideHandler.isEnabled()=false
+ * 산림청 산사태 예측정보 정규화 (FORESTRY_LANDSLIDE → disaster_alert)
  */
 @Slf4j
 @Component
@@ -57,44 +56,52 @@ public class ForestryLandslideNormalizer implements Normalizer {
 
         try {
             JsonNode root = objectMapper.readTree(raw.getResponseBody());
+            String resultCode = root.path("response").path("header").path("resultCode").asText("");
+            if (!resultCode.isBlank() && !"00".equals(resultCode)) {
+                String resultMsg = root.path("response").path("header").path("resultMsg").asText("");
+                log.warn("[FORESTRY_LANDSLIDE] API error raw_id={} resultCode={} resultMsg={}",
+                    raw.getRawId(), resultCode, resultMsg);
+                return NormalizationResult.failure("API resultCode=" + resultCode + " " + resultMsg);
+            }
+
             JsonNode items = root.path("response").path("body").path("items").path("item");
             if (items.isMissingNode() || items.isEmpty()) return NormalizationResult.success(0);
 
             for (JsonNode item : items) {
                 try {
                     metrics.incrementDisasterAlertReceived(getSourceCode());
-                    String sourceRegion = item.path("PRV_AREA_NM").asText("서울특별시");
+                    String sourceRegion = item.path("sgg").asText("");
 
                     if (!seoulScopePolicy.isInScope(sourceRegion)) {
                         log.debug("[FORESTRY_LANDSLIDE] non-Seoul region={} — skip", sourceRegion);
                         continue;
                     }
 
-                    OffsetDateTime issuedAt = parseDateTime(item.path("STD_DT").asText());
+                    OffsetDateTime issuedAt = parseDateTime(item.path("prctnInfoAnlssDt").asText());
 
                     if (disasterAlertRepo.existsBySourceAndIssuedAt(getSourceCode(), issuedAt)) {
                         continue;
                     }
 
-                    String riskGrade = item.path("RISK_GRADE").asText("");
+                    String forecastName = item.path("lndslFrcstNm").asText("");
 
                     DisasterAlert alert = new DisasterAlert();
                     alert.setSource(getSourceCode());
-                    alert.setRawType("산사태위험");
+                    alert.setRawType("산사태예측정보");
                     alert.setDisasterType(DISASTER_TYPE);
                     alert.setSourceRegion(sourceRegion);
                     alert.setRegion(REGION);
-                    alert.setRawLevel(riskGrade);
-                    alert.setRawLevelTokens(toJsonArray(List.of(riskGrade)));
-                    alert.setLevel(mapLevel(riskGrade));
-                    alert.setLevelRank(mapLevelRank(riskGrade));
-                    alert.setRawCategoryTokens(toJsonArray(List.of("위험")));
+                    alert.setRawLevel(forecastName);
+                    alert.setRawLevelTokens(toJsonArray(List.of(forecastName)));
+                    alert.setLevel(mapLevel(forecastName));
+                    alert.setLevelRank(mapLevelRank(forecastName));
+                    alert.setRawCategoryTokens(toJsonArray(List.of("예측정보")));
                     alert.setMessageCategory("ALERT");
-                    alert.setMessage("산사태 위험 " + riskGrade + " — " + sourceRegion);
+                    alert.setMessage("산사태 예측정보 " + forecastName + " — " + sourceRegion);
                     alert.setIssuedAt(issuedAt);
                     alert.setIsInScope(true);
                     alert.setNormalizationReason(
-                        "FORESTRY_LANDSLIDE: RISK_GRADE=" + riskGrade + " → " + alert.getLevel());
+                        "FORESTRY_LANDSLIDE: lndslFrcstNm=" + forecastName + " → " + alert.getLevel());
 
                     DisasterAlert saved = disasterAlertRepo.save(alert);
                     metrics.incrementNormalizationSuccess(getSourceCode());
@@ -135,24 +142,22 @@ public class ForestryLandslideNormalizer implements Normalizer {
         }
     }
 
-    private String mapLevel(String riskGrade) {
-        if (riskGrade == null) return null;
-        return switch (riskGrade) {
-            case "5등급", "4등급" -> "CRITICAL";
-            case "3등급" -> "WARNING";
-            case "2등급" -> "CAUTION";
-            case "1등급" -> "INTEREST";
+    private String mapLevel(String forecastName) {
+        if (forecastName == null) return null;
+        return switch (forecastName) {
+            case "경보" -> "CRITICAL";
+            case "주의보" -> "WARNING";
+            case "관심" -> "INTEREST";
             default -> null;
         };
     }
 
-    private Integer mapLevelRank(String riskGrade) {
-        if (riskGrade == null) return null;
-        return switch (riskGrade) {
-            case "5등급", "4등급" -> 4;
-            case "3등급" -> 3;
-            case "2등급" -> 2;
-            case "1등급" -> 1;
+    private Integer mapLevelRank(String forecastName) {
+        if (forecastName == null) return null;
+        return switch (forecastName) {
+            case "경보" -> 4;
+            case "주의보" -> 3;
+            case "관심" -> 1;
             default -> null;
         };
     }

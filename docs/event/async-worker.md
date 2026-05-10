@@ -116,6 +116,8 @@ Trigger:
 동작:
 
 - `environment:weather:seoul`, `environment:air-quality:seoul`, `environment:weather-alert:seoul` 중 하나를 rebuild한다.
+- weather rebuild value는 temperature, weatherCondition, precipitationType, precipitation, windSpeed, humidity, forecastedAt을 포함할 수 있다.
+- air-quality rebuild value는 aqi/grade 외에 pm10, pm10Grade, pm25, pm25Grade, o3, o3Grade, measuredAt을 포함할 수 있다.
 
 ## 6. EVENT-007 Handling
 

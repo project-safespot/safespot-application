@@ -34,8 +34,12 @@ class ShelterNormalizerTest {
     // ── LANDSLIDE ──────────────────────────────────────────────────────────────
 
     @Test
-    void landslide_row_without_coords_is_skipped() {
-        // LANDSLIDE source provides no coordinate fields → lat/lon always null → NOT NULL skip
+    void landslide_row_without_coords_is_saved() {
+        given(shelterRepo.findByNameAndAddressAndDisasterType(anyString(), anyString(), anyString()))
+            .willReturn(Optional.empty());
+        given(shelterRepo.save(any())).willAnswer(inv -> inv.getArgument(0));
+
+        // LANDSLIDE source provides no coordinate fields; shelter latitude/longitude are nullable.
         NormalizationResult result = normalizer("SEOUL_SHELTER_LANDSLIDE").normalize(buildRaw("SEOUL_SHELTER_LANDSLIDE", """
             {
               "currentCount": 1,
@@ -55,8 +59,13 @@ class ShelterNormalizerTest {
             }
             """));
 
-        assertThat(result.getSucceeded()).isEqualTo(0);
-        verify(shelterRepo, never()).save(any());
+        assertThat(result.getSucceeded()).isEqualTo(1);
+        verify(shelterRepo).save(argThat(s ->
+            "LANDSLIDE".equals(s.getDisasterType()) &&
+            s.getLatitude() == null &&
+            s.getLongitude() == null &&
+            Integer.valueOf(333).equals(s.getCapacity())
+        ));
     }
 
     @Test
@@ -76,8 +85,12 @@ class ShelterNormalizerTest {
     }
 
     @Test
-    void missing_capacity_skips_row_without_saving() {
-        // capacity null → NOT NULL constraint → skip, no save
+    void missing_capacity_is_saved_with_null_capacity() {
+        given(shelterRepo.findByNameAndAddressAndDisasterType(anyString(), anyString(), anyString()))
+            .willReturn(Optional.empty());
+        given(shelterRepo.save(any())).willAnswer(inv -> inv.getArgument(0));
+
+        // capacity is nullable in the shelter table.
         NormalizationResult result = normalizer("SEOUL_SHELTER_LANDSLIDE").normalize(buildRaw("SEOUL_SHELTER_LANDSLIDE", """
             {
               "data": [
@@ -89,24 +102,32 @@ class ShelterNormalizerTest {
             }
             """));
 
-        assertThat(result.getSucceeded()).isEqualTo(0);
-        verify(shelterRepo, never()).save(any());
+        assertThat(result.getSucceeded()).isEqualTo(1);
+        verify(shelterRepo).save(argThat(s ->
+            "LANDSLIDE".equals(s.getDisasterType()) &&
+            s.getCapacity() == null
+        ));
     }
 
     // ── EARTHQUAKE ─────────────────────────────────────────────────────────────
 
     @Test
-    void earthquake_row_without_coords_is_skipped() {
-        // EARTHQUAKE source: XCRD/YCRD are TM/UTM-K (not WGS84), no valid lat/lon → NOT NULL skip
+    void earthquake_row_with_official_tletqkp_fields_is_saved() {
+        given(shelterRepo.findByNameAndAddressAndDisasterType(anyString(), anyString(), anyString()))
+            .willReturn(Optional.empty());
+        given(shelterRepo.save(any())).willAnswer(inv -> inv.getArgument(0));
+
         NormalizationResult result = normalizer("SEOUL_SHELTER_EARTHQUAKE").normalize(buildRaw("SEOUL_SHELTER_EARTHQUAKE", """
             {
-              "TbEqKkenvinfo": {
+              "TlEtqkP": {
                 "row": [
                   {
                     "FCLT_NO": "188",
                     "ACTC_FCLT_NM": "광양중학교",
                     "DADDR": "서울특별시 광진구 자양로3길 7",
+                    "LAT": "37.5300000",
                     "LOT": "127.0830000",
+                    "FCAR": "333",
                     "XCRD": "208982.859139",
                     "YCRD": "548967.597592"
                   }
@@ -115,15 +136,21 @@ class ShelterNormalizerTest {
             }
             """));
 
-        assertThat(result.getSucceeded()).isEqualTo(0);
-        verify(shelterRepo, never()).save(any());
+        assertThat(result.getSucceeded()).isEqualTo(1);
+        verify(shelterRepo).save(argThat(s ->
+            "EARTHQUAKE".equals(s.getDisasterType()) &&
+            "광양중학교".equals(s.getName()) &&
+            Integer.valueOf(333).equals(s.getCapacity()) &&
+            s.getLatitude() != null &&
+            s.getLongitude() != null
+        ));
     }
 
     @Test
     void missing_address_skips_row_without_saving() {
         NormalizationResult result = normalizer("SEOUL_SHELTER_EARTHQUAKE").normalize(buildRaw("SEOUL_SHELTER_EARTHQUAKE", """
             {
-              "TbEqKkenvinfo": {
+              "TlEtqkP": {
                 "row": [
                   {
                     "ACTC_FCLT_NM": "이름만있는대피소"

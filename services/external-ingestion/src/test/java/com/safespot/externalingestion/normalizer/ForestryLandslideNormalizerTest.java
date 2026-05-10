@@ -39,8 +39,8 @@ class ForestryLandslideNormalizerTest {
     @Test
     void normalize_seoulAlert_saves() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"response":{"body":{"items":{"item":[
-              {"STD_DT":"2026-04-21 10:00:00","PRV_AREA_NM":"서울특별시","RISK_GRADE":"3등급"}
+            {"response":{"header":{"resultCode":"00","resultMsg":"NORMAL SERVICE."},"body":{"items":{"item":[
+              {"prctnInfoAnlssDt":"2026-04-21 10:00:00","sgg":"서울특별시 종로구","lndslFrcstNm":"주의보"}
             ]}}}}
             """);
 
@@ -55,7 +55,7 @@ class ForestryLandslideNormalizerTest {
         verify(disasterAlertRepo).save(argThat(a ->
             "LANDSLIDE".equals(a.getDisasterType()) &&
             "seoul".equals(a.getRegion()) &&
-            "서울특별시".equals(a.getSourceRegion()) &&
+            "서울특별시 종로구".equals(a.getSourceRegion()) &&
             "WARNING".equals(a.getLevel()) &&
             Integer.valueOf(3).equals(a.getLevelRank())
         ));
@@ -65,14 +65,28 @@ class ForestryLandslideNormalizerTest {
     @Test
     void normalize_nonSeoulRegion_skipsInsert() {
         ExternalApiRawPayload raw = buildRaw("""
-            {"response":{"body":{"items":{"item":[
-              {"STD_DT":"2026-04-21 10:00:00","PRV_AREA_NM":"경기도 하남시","RISK_GRADE":"4등급"}
+            {"response":{"header":{"resultCode":"00","resultMsg":"NORMAL SERVICE."},"body":{"items":{"item":[
+              {"prctnInfoAnlssDt":"2026-04-21 10:00:00","sgg":"경기도 하남시","lndslFrcstNm":"경보"}
             ]}}}}
             """);
 
         NormalizationResult result = normalizer.normalize(raw);
 
         assertThat(result.getSucceeded()).isEqualTo(0);
+        verify(disasterAlertRepo, never()).save(any());
+        verify(cacheEventPublisher, never()).publish(any(), any());
+    }
+
+    @Test
+    void normalize_apiError_returnsFailure() {
+        ExternalApiRawPayload raw = buildRaw("""
+            {"response":{"header":{"resultCode":"03","resultMsg":"NODATA_ERROR"}}}
+            """);
+
+        NormalizationResult result = normalizer.normalize(raw);
+
+        assertThat(result.getSucceeded()).isEqualTo(0);
+        assertThat(result.getFailed()).isGreaterThan(0);
         verify(disasterAlertRepo, never()).save(any());
         verify(cacheEventPublisher, never()).publish(any(), any());
     }
