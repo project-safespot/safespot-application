@@ -3,7 +3,10 @@ package com.safespot.externalingestion.handler.groupa2;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 
@@ -15,6 +18,7 @@ class KmaWeatherHandlerTest {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HHmm");
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     @Test
     void baseTime_hour0minute10_usesPreviousDayHour2300() {
@@ -47,7 +51,7 @@ class KmaWeatherHandlerTest {
     @Test
     @SuppressWarnings("unchecked")
     void seoulGridCoordinatesAreSentAsParams() {
-        KmaWeatherHandler handler = new KmaWeatherHandler();
+        KmaWeatherHandler handler = newHandlerAt("2026-05-10T13:50:00Z");
         ReflectionTestUtils.setField(handler, "apiKey", "TEST_KEY");
 
         Map<String, String> params = (Map<String, String>) ReflectionTestUtils.invokeMethod(
@@ -60,7 +64,7 @@ class KmaWeatherHandlerTest {
     @Test
     @SuppressWarnings("unchecked")
     void serviceKeyParamIsCapitalizedPerOfficialContract() {
-        KmaWeatherHandler handler = new KmaWeatherHandler();
+        KmaWeatherHandler handler = newHandlerAt("2026-05-10T13:50:00Z");
         ReflectionTestUtils.setField(handler, "apiKey", "TEST_KEY");
 
         Map<String, String> params = (Map<String, String>) ReflectionTestUtils.invokeMethod(
@@ -77,7 +81,7 @@ class KmaWeatherHandlerTest {
     void buildRequestParams_baseTimeIsDynamic_notHardcoded0500() {
         // Verifies that base_time is computed from resolveBaseDateTime, not a hardcoded constant.
         // The resolution policy is tested in isolation via the baseTime_* tests above.
-        KmaWeatherHandler handler = new KmaWeatherHandler();
+        KmaWeatherHandler handler = newHandlerAt("2026-05-10T13:50:00Z");
         ReflectionTestUtils.setField(handler, "apiKey", "TEST_KEY");
 
         Map<String, String> params = (Map<String, String>) ReflectionTestUtils.invokeMethod(
@@ -87,5 +91,22 @@ class KmaWeatherHandlerTest {
         assertThat(params.get("base_time")).matches("[0-2][0-9][0-5][0-9]");
         assertThat(params).containsKey("base_date");
         assertThat(params.get("base_date")).matches("\\d{8}");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void buildRequestParams_usesKstClock_notJvmUtcDefaultTime() {
+        KmaWeatherHandler handler = newHandlerAt("2026-05-10T13:50:00Z"); // 22:50 KST
+        ReflectionTestUtils.setField(handler, "apiKey", "TEST_KEY");
+
+        Map<String, String> params = (Map<String, String>) ReflectionTestUtils.invokeMethod(
+            handler, "buildRequestParams");
+
+        assertThat(params.get("base_date")).isEqualTo("20260510");
+        assertThat(params.get("base_time")).isEqualTo("2200");
+    }
+
+    private KmaWeatherHandler newHandlerAt(String instant) {
+        return new KmaWeatherHandler(Clock.fixed(Instant.parse(instant), KST));
     }
 }

@@ -4,7 +4,9 @@ import com.safespot.externalingestion.handler.AbstractIngestionHandler;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
@@ -19,8 +21,20 @@ import java.util.Map;
 @Component
 public class KmaWeatherHandler extends AbstractIngestionHandler {
 
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
     @Value("${KMA_API_KEY:${KMA_SERVICE_KEY:DUMMY_KEY}}")
     private String apiKey;
+
+    private final Clock clock;
+
+    public KmaWeatherHandler() {
+        this(Clock.system(KST));
+    }
+
+    KmaWeatherHandler(Clock clock) {
+        this.clock = clock;
+    }
 
     // 서울 중심 격자 좌표 (nx=60, ny=127)
     private static final String DEFAULT_NX = "60";
@@ -54,7 +68,7 @@ public class KmaWeatherHandler extends AbstractIngestionHandler {
 
     @Override
     protected Map<String, String> buildRequestParams() {
-        LocalDateTime base = resolveBaseDateTime(LocalDateTime.now());
+        LocalDateTime base = resolveBaseDateTime(LocalDateTime.now(clock));
         Map<String, String> params = new HashMap<>();
         params.put("ServiceKey", apiKey);
         params.put("pageNo", "1");
