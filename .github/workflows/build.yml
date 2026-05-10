@@ -28,5 +28,10 @@ jobs:
       - name: Grant execute permission for Gradle
         run: chmod +x ./gradlew
 
-      - name: Build async-worker
-        run: ./gradlew :services:async-worker:build :services:async-worker:lambdaPackage --no-daemon
+      - name: Build async-worker and pre-scaling-controller
+        run: |
+          ./gradlew \
+            :services:async-worker:build \
+            :services:async-worker:lambdaPackage \
+            :services:pre-scaling-controller:build \
+            --no-daemon

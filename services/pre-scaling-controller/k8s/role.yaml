@@ -1,0 +1,17 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pre-scaling-controller
+  namespace: application
+  labels:
+    app: pre-scaling-controller
+rules:
+  # Required: read and patch HPA spec.minReplicas (§3, §7)
+  # Deployments and Pods are NOT read by this controller — permissions omitted (§7, RBAC minimization).
+  - apiGroups:
+      - autoscaling
+    resources:
+      - horizontalpodautoscalers
+    verbs:
+      - get
+      - patch

@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: pre-scaling-controller
+  profiles:
+    active: local
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/safespot}
+    username: ${DB_USERNAME:safespot}
+    password: ${DB_PASSWORD:safespot}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 2
+      minimum-idle: 1
+      connection-timeout: 5000
+      idle-timeout: 300000
+
+server:
+  port: 8084
+  servlet:
+    context-path: /
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      service: pre-scaling-controller
+      env: ${SPRING_ENV:dev}
+      region: seoul
+
+pre-scaling:
+  enabled: true
+  namespace: ${K8S_NAMESPACE:application}
+  target-hpa-name: api-public-read-surge
+  polling-interval-ms: 30000
+
+  trigger:
+    disaster-types:
+      - EARTHQUAKE
+      - FLOOD
+      - LANDSLIDE
+    min-level-rank: 3
+    lookback-minutes: 10
+
+  surge:
+    normal-min-replicas: 0
+    disaster-min-replicas: 3
+    max-replicas: 10
+    cooldown-seconds: 1800

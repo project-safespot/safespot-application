@@ -1,0 +1,53 @@
+plugins {
+    id 'org.springframework.boot'
+    id 'io.spring.dependency-management'
+}
+
+dependencyManagement {
+    // Override Spring BOM's Testcontainers 1.20.4 → 1.21.3.
+    // Needed for Spring Boot 3.4.1 compatibility with Docker 27.x in GitHub Actions CI.
+    // Note: Docker 29.x (MinAPIVersion 1.44) is incompatible with docker-java's hardcoded
+    // API 1.32. GitHub Actions ubuntu-22.04 runs Docker 27.x (MinAPIVersion ~1.24) which works.
+    imports {
+        mavenBom 'org.testcontainers:testcontainers-bom:1.21.3'
+    }
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.micrometer:micrometer-registry-prometheus'
+
+    implementation 'io.fabric8:kubernetes-client:6.13.1'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    runtimeOnly 'org.postgresql:postgresql'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
+    testRuntimeOnly 'org.postgresql:postgresql'
+    testCompileOnly 'org.projectlombok:lombok'
+    testAnnotationProcessor 'org.projectlombok:lombok'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    // Force Unix socket strategy; avoids WSL2 DockerDesktop NPE.
+    // In GitHub Actions, Docker socket detection works without this.
+    environment 'DOCKER_HOST', 'unix:///var/run/docker.sock'
+    environment 'TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE', '/var/run/docker.sock'
+    systemProperty 'org.testcontainers.dockerclientstrategy',
+            'org.testcontainers.dockerclient.UnixSocketClientProviderStrategy'
+}
+
+jar {
+    enabled = false
+}
+
+bootJar {
+    archiveFileName = 'app.jar'
+}

@@ -8,4 +8,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: ./gradlew :services:async-worker:test :services:async-worker:lambdaPackage
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: gradle
+      - run: |
+          ./gradlew \
+            :services:async-worker:test \
+            :services:async-worker:lambdaPackage \
+            :services:pre-scaling-controller:test

@@ -1,0 +1,66 @@
+# HPA for api-public-read-surge (surge workload)
+#
+# minReplicas: 0 검증 필요 (§4.2):
+#
+#   EKS server-side dry-run:
+#     kubectl apply --dry-run=server -n application -f hpa-api-public-read-surge.yaml
+#
+#   성공 시:
+#     minReplicas=0 사용 가능 (custom metric 기반 HPA는 scale-to-zero 지원)
+#
+#   실패 시 원인 및 fallback:
+#     원인: CPU/Memory metric 기반이면 minReplicas=0 거부 (KEDA 없이 불가)
+#     fallback A: PRE_SCALING_SURGE_NORMAL_MIN_REPLICAS=1 설정 (비용 증가, 즉시 적용 가능)
+#     fallback B: KEDA ScaledObject로 scale-to-zero 구현 (추가 운영 의존성 발생)
+#
+# dry-run 검증 결과:
+#   client-side: kubeconfig가 EKS 엔드포인트를 가리키지만 개발 환경에서 EKS 네트워크 접근 불가.
+#                매니페스트 YAML 구조는 autoscaling/v2 스키마 기준 유효 (HPA v2 minReplicas: 0 허용 필드).
+#   server-side: 실제 EKS 클러스터에서 아래 명령으로 실행 필요:
+#                kubectl apply --dry-run=server -n application -f hpa-api-public-read-surge.yaml
+#
+# 예상 결과:
+#   성공(minReplicas=0 허용): custom.metrics.k8s.io Pods metric 기반 HPA는 scale-to-zero 지원.
+#   실패(minReplicas=0 거부): PRE_SCALING_SURGE_NORMAL_MIN_REPLICAS=1 로 ConfigMap 변경 후 재배포.
+
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-public-read-surge
+  namespace: application
+  labels:
+    app: api-public-read-surge
+    component: surge
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-public-read-surge
+
+  # normalMinReplicas=0 (scale-to-zero during non-disaster period)
+  # If EKS dry-run rejects this, set to 1 via ConfigMap PRE_SCALING_SURGE_NORMAL_MIN_REPLICAS=1
+  minReplicas: 0
+  maxReplicas: 10
+
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: "5"
+
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 3
+          periodSeconds: 60
