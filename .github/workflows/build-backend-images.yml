@@ -71,28 +71,28 @@ jobs:
         with:
           context: services/api-core
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.registry.outputs.value }}/safespot-api-core:${{ steps.sha.outputs.short }}
+          tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-api-core:${{ steps.sha.outputs.short }}
 
       - name: Build and push api-public-read
         uses: docker/build-push-action@v5
         with:
           context: services/api-public-read
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.registry.outputs.value }}/safespot-api-public-read:${{ steps.sha.outputs.short }}
+          tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-api-public-read:${{ steps.sha.outputs.short }}
 
       - name: Build and push external-ingestion
         uses: docker/build-push-action@v5
         with:
           context: services/external-ingestion
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.registry.outputs.value }}/safespot-external-ingestion:${{ steps.sha.outputs.short }}
+          tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-external-ingestion:${{ steps.sha.outputs.short }}
 
       - name: Build and push scenario-simulator
         uses: docker/build-push-action@v5
         with:
           context: services/scenario-simulator
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.registry.outputs.value }}/safespot-scenario-simulator:${{ steps.sha.outputs.short }}
+          tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-scenario-simulator:${{ steps.sha.outputs.short }}
 
   update-manifest:
     needs: build
@@ -120,16 +120,16 @@ jobs:
         run: |
           cd k8s-manifest
 
-          yq e '.apiCore.image.repository = strenv(ECR_REGISTRY) + "/safespot-api-core"' -i charts/safespot/values-dev.images.yaml
+          yq e '.apiCore.image.repository = strenv(ECR_REGISTRY) + "/safespot-dev-ops-ecr-api-core"' -i charts/safespot/values-dev.images.yaml
           yq e '.apiCore.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
 
-          yq e '.apiPublicRead.image.repository = strenv(ECR_REGISTRY) + "/safespot-api-public-read"' -i charts/safespot/values-dev.images.yaml
+          yq e '.apiPublicRead.image.repository = strenv(ECR_REGISTRY) + "/safespot-dev-ops-ecr-api-public-read"' -i charts/safespot/values-dev.images.yaml
           yq e '.apiPublicRead.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
 
-          yq e '.externalIngestion.image.repository = strenv(ECR_REGISTRY) + "/safespot-external-ingestion"' -i charts/safespot/values-dev.images.yaml
+          yq e '.externalIngestion.image.repository = strenv(ECR_REGISTRY) + "/safespot-dev-ops-ecr-external-ingestion"' -i charts/safespot/values-dev.images.yaml
           yq e '.externalIngestion.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
 
-          yq e '.scenarioSimulator.image.repository = strenv(ECR_REGISTRY) + "/safespot-scenario-simulator"' -i charts/safespot/values-dev.images.yaml
+          yq e '.scenarioSimulator.image.repository = strenv(ECR_REGISTRY) + "/safespot-dev-ops-ecr-scenario-simulator"' -i charts/safespot/values-dev.images.yaml
           yq e '.scenarioSimulator.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
 
       - name: Commit and push if changed
