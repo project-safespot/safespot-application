@@ -20,12 +20,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ResidentBulkSimulatorService {
+
+    private static final DateTimeFormatter SCENARIO_NAME_TIMESTAMP =
+            DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
     private final SimShelterRepository shelterRepository;
     private final SimEvacuationEntryRepository evacuationEntryRepository;
@@ -35,8 +39,10 @@ public class ResidentBulkSimulatorService {
 
     @Transactional
     public ResidentBulkResponse createBulkResidents(ResidentBulkRequest request, String scenarioId) {
-        log.info("[SIM] bulk residents: scenarioId={} type={} count={} distribution={}",
-                scenarioId, request.getDisasterType(), request.getResidentCount(), request.getDistribution());
+        String scenarioName = resolveScenarioName(request);
+
+        log.info("[SIM] bulk residents: scenarioId={} scenarioName={} type={} count={} distribution={}",
+                scenarioId, scenarioName, request.getDisasterType(), request.getResidentCount(), request.getDistribution());
 
         List<SimShelter> shelters = loadShelters(request);
         if (shelters.isEmpty()) {
@@ -74,6 +80,7 @@ public class ResidentBulkSimulatorService {
 
                 scenarioRecordRepository.save(TestScenarioRecord.builder()
                         .scenarioId(scenarioId)
+                        .scenarioName(scenarioName)
                         .targetTable("evacuation_entry")
                         .targetId(saved.getEntryId())
                         .build());
@@ -105,6 +112,21 @@ public class ResidentBulkSimulatorService {
                 .entriesPerShelter(entriesPerShelter)
                 .eventsPublished(eventsPublished)
                 .build();
+    }
+
+    private String resolveScenarioName(ResidentBulkRequest request) {
+        if (request.getScenarioName() != null && !request.getScenarioName().isBlank()) {
+            return request.getScenarioName();
+        }
+
+        return sanitizeScenarioName("BULK_RESIDENTS_"
+                + request.getDisasterType() + "_"
+                + request.getRegion() + "_"
+                + OffsetDateTime.now().format(SCENARIO_NAME_TIMESTAMP));
+    }
+
+    private String sanitizeScenarioName(String scenarioName) {
+        return scenarioName.replaceAll("\\s+", "_");
     }
 
     private List<SimShelter> loadShelters(ResidentBulkRequest request) {

@@ -263,4 +263,51 @@ class DisasterAlertSimulatorServiceTest {
 
         verify(scenarioRecordRepository, times(2)).save(any(TestScenarioRecord.class));
     }
+
+    @Test
+    void generates_non_null_scenario_name_when_missing() {
+        DisasterAlertRequest request = DisasterAlertRequest.builder()
+                .disasterType(DisasterType.EARTHQUAKE)
+                .region("SEOUL")
+                .level(DisasterLevel.HIGH)
+                .count(1)
+                .publishEvents(false)
+                .build();
+
+        SimDisasterAlert saved = SimDisasterAlert.builder()
+                .alertId(1L).disasterType("EARTHQUAKE").region("seoul")
+                .source("SIMULATOR").message("test").build();
+        when(disasterAlertRepository.save(any())).thenReturn(saved);
+
+        service.createAlerts(request, "scenario-alerts-1");
+
+        ArgumentCaptor<TestScenarioRecord> captor = ArgumentCaptor.forClass(TestScenarioRecord.class);
+        verify(scenarioRecordRepository).save(captor.capture());
+        assertThat(captor.getValue().getScenarioName())
+                .isNotBlank()
+                .startsWith("DISASTER_ALERTS_EARTHQUAKE_SEOUL_");
+    }
+
+    @Test
+    void uses_request_scenario_name_when_provided() {
+        DisasterAlertRequest request = DisasterAlertRequest.builder()
+                .disasterType(DisasterType.FLOOD)
+                .region("SEOUL")
+                .level(DisasterLevel.MEDIUM)
+                .count(1)
+                .publishEvents(false)
+                .scenarioName("CUSTOM_ALERT_SCENARIO")
+                .build();
+
+        SimDisasterAlert saved = SimDisasterAlert.builder()
+                .alertId(2L).disasterType("FLOOD").region("seoul")
+                .source("SIMULATOR").message("test").build();
+        when(disasterAlertRepository.save(any())).thenReturn(saved);
+
+        service.createAlerts(request, "scenario-alerts-2");
+
+        ArgumentCaptor<TestScenarioRecord> captor = ArgumentCaptor.forClass(TestScenarioRecord.class);
+        verify(scenarioRecordRepository).save(captor.capture());
+        assertThat(captor.getValue().getScenarioName()).isEqualTo("CUSTOM_ALERT_SCENARIO");
+    }
 }

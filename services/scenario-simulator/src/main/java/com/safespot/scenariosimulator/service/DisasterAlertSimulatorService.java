@@ -20,9 +20,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
 @Slf4j
 @Service
@@ -31,6 +31,8 @@ public class DisasterAlertSimulatorService {
 
     private static final String SOURCE_SIMULATOR = "SIMULATOR";
     private static final int DEFAULT_REPLICAS_FOR_SCALE = 10;
+    private static final DateTimeFormatter SCENARIO_NAME_TIMESTAMP =
+            DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
     private final SimDisasterAlertRepository disasterAlertRepository;
     private final TestScenarioRecordRepository scenarioRecordRepository;
@@ -39,8 +41,10 @@ public class DisasterAlertSimulatorService {
 
     @Transactional
     public DisasterAlertResponse createAlerts(DisasterAlertRequest request, String scenarioId) {
-        log.info("[SIM] creating disaster alerts: scenarioId={} type={} region={} level={} count={}",
-                scenarioId, request.getDisasterType(), request.getRegion(), request.getLevel(), request.getCount());
+        String scenarioName = resolveScenarioName(request);
+
+        log.info("[SIM] creating disaster alerts: scenarioId={} scenarioName={} type={} region={} level={} count={}",
+                scenarioId, scenarioName, request.getDisasterType(), request.getRegion(), request.getLevel(), request.getCount());
 
         List<Long> alertIds = new ArrayList<>();
         int eventsPublished = 0;
@@ -50,7 +54,7 @@ public class DisasterAlertSimulatorService {
             SimDisasterAlert saved = disasterAlertRepository.save(alert);
             alertIds.add(saved.getAlertId());
 
-            trackRecord(scenarioId, null, "disaster_alert", saved.getAlertId());
+            trackRecord(scenarioId, scenarioName, "disaster_alert", saved.getAlertId());
 
             if (request.isPublishEvents()) {
                 eventsPublished += publishAlertEvents(saved, request);
@@ -74,6 +78,21 @@ public class DisasterAlertSimulatorService {
                 .alertIds(alertIds)
                 .eventsPublished(eventsPublished)
                 .build();
+    }
+
+    private String resolveScenarioName(DisasterAlertRequest request) {
+        if (request.getScenarioName() != null && !request.getScenarioName().isBlank()) {
+            return request.getScenarioName();
+        }
+
+        return sanitizeScenarioName("DISASTER_ALERTS_"
+                + request.getDisasterType() + "_"
+                + request.getRegion() + "_"
+                + OffsetDateTime.now().format(SCENARIO_NAME_TIMESTAMP));
+    }
+
+    private String sanitizeScenarioName(String scenarioName) {
+        return scenarioName.replaceAll("\\s+", "_");
     }
 
     private SimDisasterAlert buildAlert(DisasterAlertRequest request, int index) {

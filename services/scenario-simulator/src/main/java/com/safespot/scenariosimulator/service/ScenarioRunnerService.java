@@ -109,6 +109,7 @@ public class ScenarioRunnerService {
                 .intervalSeconds(0)
                 .publishEvents(true)
                 .triggerProactiveScale(triggerProactiveScale)
+                .scenarioName(request.getScenarioName())
                 .build();
     }
 
@@ -122,6 +123,7 @@ public class ScenarioRunnerService {
                 .entryStatus("ENTERED")
                 .publishEvents(true)
                 .scenarioId(scenarioId)
+                .scenarioName(request.getScenarioName())
                 .build();
     }
 
