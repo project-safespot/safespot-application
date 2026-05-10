@@ -149,6 +149,102 @@ class DisasterAlertSimulatorServiceTest {
     }
 
     @Test
+    void high_level_maps_to_warning_canonical_level() {
+        DisasterAlertRequest request = DisasterAlertRequest.builder()
+                .disasterType(DisasterType.EARTHQUAKE)
+                .region("SEOUL")
+                .level(DisasterLevel.HIGH)
+                .count(1)
+                .publishEvents(false)
+                .build();
+
+        ArgumentCaptor<SimDisasterAlert> captor = ArgumentCaptor.forClass(SimDisasterAlert.class);
+        SimDisasterAlert saved = SimDisasterAlert.builder()
+                .alertId(1L).disasterType("EARTHQUAKE").region("seoul")
+                .source("SIMULATOR").message("test").build();
+        when(disasterAlertRepository.save(captor.capture())).thenReturn(saved);
+
+        service.createAlerts(request, "test-scenario");
+
+        SimDisasterAlert captured = captor.getValue();
+        assertThat(captured.getLevel()).isEqualTo("WARNING");
+        assertThat(captured.getRawLevel()).isEqualTo("HIGH");
+        assertThat(captured.getLevelRank()).isEqualTo(3);
+    }
+
+    @Test
+    void low_level_maps_to_interest_canonical_level() {
+        DisasterAlertRequest request = DisasterAlertRequest.builder()
+                .disasterType(DisasterType.FLOOD)
+                .region("SEOUL")
+                .level(DisasterLevel.LOW)
+                .count(1)
+                .publishEvents(false)
+                .build();
+
+        ArgumentCaptor<SimDisasterAlert> captor = ArgumentCaptor.forClass(SimDisasterAlert.class);
+        SimDisasterAlert saved = SimDisasterAlert.builder()
+                .alertId(2L).disasterType("FLOOD").region("seoul")
+                .source("SIMULATOR").message("test").build();
+        when(disasterAlertRepository.save(captor.capture())).thenReturn(saved);
+
+        service.createAlerts(request, "test-scenario");
+
+        SimDisasterAlert captured = captor.getValue();
+        assertThat(captured.getLevel()).isEqualTo("INTEREST");
+        assertThat(captured.getRawLevel()).isEqualTo("LOW");
+        assertThat(captured.getLevelRank()).isEqualTo(1);
+    }
+
+    @Test
+    void medium_level_maps_to_caution_canonical_level() {
+        DisasterAlertRequest request = DisasterAlertRequest.builder()
+                .disasterType(DisasterType.LANDSLIDE)
+                .region("SEOUL")
+                .level(DisasterLevel.MEDIUM)
+                .count(1)
+                .publishEvents(false)
+                .build();
+
+        ArgumentCaptor<SimDisasterAlert> captor = ArgumentCaptor.forClass(SimDisasterAlert.class);
+        SimDisasterAlert saved = SimDisasterAlert.builder()
+                .alertId(3L).disasterType("LANDSLIDE").region("seoul")
+                .source("SIMULATOR").message("test").build();
+        when(disasterAlertRepository.save(captor.capture())).thenReturn(saved);
+
+        service.createAlerts(request, "test-scenario");
+
+        SimDisasterAlert captured = captor.getValue();
+        assertThat(captured.getLevel()).isEqualTo("CAUTION");
+        assertThat(captured.getRawLevel()).isEqualTo("MEDIUM");
+        assertThat(captured.getLevelRank()).isEqualTo(2);
+    }
+
+    @Test
+    void critical_level_maps_to_critical_canonical_level() {
+        DisasterAlertRequest request = DisasterAlertRequest.builder()
+                .disasterType(DisasterType.EARTHQUAKE)
+                .region("SEOUL")
+                .level(DisasterLevel.CRITICAL)
+                .count(1)
+                .publishEvents(false)
+                .build();
+
+        ArgumentCaptor<SimDisasterAlert> captor = ArgumentCaptor.forClass(SimDisasterAlert.class);
+        SimDisasterAlert saved = SimDisasterAlert.builder()
+                .alertId(4L).disasterType("EARTHQUAKE").region("seoul")
+                .source("SIMULATOR").message("test").build();
+        when(disasterAlertRepository.save(captor.capture())).thenReturn(saved);
+
+        service.createAlerts(request, "test-scenario");
+
+        SimDisasterAlert captured = captor.getValue();
+        assertThat(captured.getLevel()).isEqualTo("CRITICAL");
+        assertThat(captured.getRawLevel()).isEqualTo("CRITICAL");
+        assertThat(captured.getLevelRank()).isEqualTo(4);
+    }
+
+    @Test
     void tracks_each_alert_in_scenario_record() {
         DisasterAlertRequest request = DisasterAlertRequest.builder()
                 .disasterType(DisasterType.EARTHQUAKE)
