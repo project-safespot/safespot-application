@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       short-sha: ${{ steps.sha.outputs.short }}
+      image-tag: ${{ steps.sha.outputs.image_tag }}
       ecr-registry: ${{ steps.ecr.outputs.registry }}
 
     steps:
@@ -40,7 +41,10 @@ jobs:
 
       - name: Compute short SHA
         id: sha
-        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          short="$(git rev-parse --short HEAD)"
+          echo "short=${short}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${short}-${GITHUB_RUN_NUMBER}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials
         if: github.event_name != 'pull_request'
@@ -71,28 +75,28 @@ jobs:
         with:
           context: services/api-core
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-api-core:${{ steps.sha.outputs.short }}
+          tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-api-core:${{ steps.sha.outputs.image_tag }}
 
       - name: Build and push api-public-read
         uses: docker/build-push-action@v5
         with:
           context: services/api-public-read
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-api-public-read:${{ steps.sha.outputs.short }}
+          tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-api-public-read:${{ steps.sha.outputs.image_tag }}
 
       - name: Build and push external-ingestion
         uses: docker/build-push-action@v5
         with:
           context: services/external-ingestion
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-external-ingestion:${{ steps.sha.outputs.short }}
+          tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-external-ingestion:${{ steps.sha.outputs.image_tag }}
 
       - name: Build and push scenario-simulator
         uses: docker/build-push-action@v5
         with:
           context: services/scenario-simulator
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-scenario-simulator:${{ steps.sha.outputs.short }}
+          tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-scenario-simulator:${{ steps.sha.outputs.image_tag }}
 
   update-manifest:
     needs: build
@@ -115,26 +119,26 @@ jobs:
 
       - name: Update image repositories and tags
         env:
-          SHORT_SHA: ${{ needs.build.outputs.short-sha }}
+          IMAGE_TAG: ${{ needs.build.outputs.image-tag }}
           ECR_REGISTRY: ${{ needs.build.outputs.ecr-registry }}
         run: |
           cd k8s-manifest
 
           yq e '.apiCore.image.repository = strenv(ECR_REGISTRY) + "/safespot-dev-ops-ecr-api-core"' -i charts/safespot/values-dev.images.yaml
-          yq e '.apiCore.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
+          yq e '.apiCore.image.tag = strenv(IMAGE_TAG)' -i charts/safespot/values-dev.images.yaml
 
           yq e '.apiPublicRead.image.repository = strenv(ECR_REGISTRY) + "/safespot-dev-ops-ecr-api-public-read"' -i charts/safespot/values-dev.images.yaml
-          yq e '.apiPublicRead.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
+          yq e '.apiPublicRead.image.tag = strenv(IMAGE_TAG)' -i charts/safespot/values-dev.images.yaml
 
           yq e '.externalIngestion.image.repository = strenv(ECR_REGISTRY) + "/safespot-dev-ops-ecr-external-ingestion"' -i charts/safespot/values-dev.images.yaml
-          yq e '.externalIngestion.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
+          yq e '.externalIngestion.image.tag = strenv(IMAGE_TAG)' -i charts/safespot/values-dev.images.yaml
 
           yq e '.scenarioSimulator.image.repository = strenv(ECR_REGISTRY) + "/safespot-dev-ops-ecr-scenario-simulator"' -i charts/safespot/values-dev.images.yaml
-          yq e '.scenarioSimulator.image.tag = strenv(SHORT_SHA)' -i charts/safespot/values-dev.images.yaml
+          yq e '.scenarioSimulator.image.tag = strenv(IMAGE_TAG)' -i charts/safespot/values-dev.images.yaml
 
       - name: Commit and push if changed
         env:
-          SHORT_SHA: ${{ needs.build.outputs.short-sha }}
+          IMAGE_TAG: ${{ needs.build.outputs.image-tag }}
         run: |
           cd k8s-manifest
           git config user.name "github-actions[bot]"
@@ -144,6 +148,6 @@ jobs:
             echo "No manifest changes detected, skipping commit."
           else
             git add charts/safespot/values-dev.images.yaml
-            git commit -m "chore: update backend ECR image tags to ${SHORT_SHA}"
+            git commit -m "chore: update backend ECR image tags to ${IMAGE_TAG}"
             git push
           fi
