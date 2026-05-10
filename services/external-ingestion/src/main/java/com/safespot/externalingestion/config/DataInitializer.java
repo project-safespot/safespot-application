@@ -12,8 +12,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 /**
- * external_api_source 초기 데이터 seed (DB에 없을 경우에만 INSERT).
- * 기존 row 갱신은 Flyway data migration(V2+)이 담당한다. 이 클래스는 INSERT-only.
+ * external_api_source canonical contract seed.
+ *
+ * Flyway is disabled in deployed profiles, so this initializer also reconciles
+ * existing rows whose endpoint/auth contract drifted from the application code.
  */
 @Slf4j
 @Component
@@ -43,19 +45,43 @@ public class DataInitializer implements ApplicationRunner {
         );
 
         for (SourceSeed s : seeds) {
-            if (sourceRepo.findBySourceCode(s.code).isEmpty()) {
-                ExternalApiSource src = new ExternalApiSource();
-                src.setSourceCode(s.code);
-                src.setSourceName(s.name);
-                src.setProvider(s.provider);
-                src.setCategory(s.category);
-                src.setAuthType(s.authType);
-                src.setBaseUrl(s.baseUrl);
-                src.setActive(s.active);
+            ExternalApiSource src = sourceRepo.findBySourceCode(s.code)
+                .orElseGet(() -> {
+                    ExternalApiSource created = new ExternalApiSource();
+                    created.setSourceCode(s.code);
+                    return created;
+                });
+
+            boolean isNew = src.getSourceId() == null;
+            boolean changed = applySeed(src, s);
+
+            if (isNew || changed) {
                 sourceRepo.save(src);
-                log.info("[DataInitializer] seeded source={}", s.code);
+                log.info("[DataInitializer] {} source={}", isNew ? "seeded" : "reconciled", s.code);
             }
         }
+    }
+
+    private boolean applySeed(ExternalApiSource src, SourceSeed seed) {
+        boolean changed = false;
+        changed |= setIfChanged(src.getSourceName(), seed.name, src::setSourceName);
+        changed |= setIfChanged(src.getProvider(), seed.provider, src::setProvider);
+        changed |= setIfChanged(src.getCategory(), seed.category, src::setCategory);
+        changed |= setIfChanged(src.getAuthType(), seed.authType, src::setAuthType);
+        changed |= setIfChanged(src.getBaseUrl(), seed.baseUrl, src::setBaseUrl);
+        if (src.isActive() != seed.active) {
+            src.setActive(seed.active);
+            changed = true;
+        }
+        return changed;
+    }
+
+    private boolean setIfChanged(String current, String next, java.util.function.Consumer<String> setter) {
+        if (java.util.Objects.equals(current, next)) {
+            return false;
+        }
+        setter.accept(next);
+        return true;
     }
 
     private record SourceSeed(String code, String name, String provider, String category,

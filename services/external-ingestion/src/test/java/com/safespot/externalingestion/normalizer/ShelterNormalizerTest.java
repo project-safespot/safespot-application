@@ -164,6 +164,27 @@ class ShelterNormalizerTest {
         verify(shelterRepo, never()).save(any());
     }
 
+    @Test
+    void missing_expected_payload_path_fails_contract_mismatch() {
+        NormalizationResult result = normalizer("SEOUL_SHELTER_EARTHQUAKE").normalize(buildRaw("SEOUL_SHELTER_EARTHQUAKE", """
+            {
+              "TbEqKkenvinfo": {
+                "row": [
+                  {
+                    "ACTC_FCLT_NM": "wrong endpoint payload",
+                    "DADDR": "서울"
+                  }
+                ]
+              }
+            }
+            """));
+
+        assertThat(result.getSucceeded()).isEqualTo(0);
+        assertThat(result.getFailed()).isGreaterThan(0);
+        assertThat(result.getErrors()).anyMatch(e -> e.contains("TlEtqkP.row"));
+        verify(shelterRepo, never()).save(any());
+    }
+
     // ── FLOOD (좌표 + capacity 유효 → 저장 정상 동작) ──────────────────────────
 
     @Test

@@ -51,6 +51,20 @@ class IngestionIntegrationTest {
     }
 
     @Test
+    void dataInitializer_reconcilesExistingSourceContract() {
+        ExternalApiSource source = sourceRepo.findBySourceCode("SEOUL_SHELTER_EARTHQUAKE").orElseThrow();
+        source.setBaseUrl("http://openapi.seoul.go.kr:8088/{KEY}/json/TbEqKkenvinfo/1/1000/");
+        source.setActive(false);
+        sourceRepo.saveAndFlush(source);
+
+        dataInitializer.run(null);
+
+        ExternalApiSource reconciled = sourceRepo.findBySourceCode("SEOUL_SHELTER_EARTHQUAKE").orElseThrow();
+        assertThat(reconciled.isActive()).isTrue();
+        assertThat(reconciled.getBaseUrl()).isEqualTo("http://openapi.seoul.go.kr:8088/{KEY}/json/TlEtqkP/1/1000/");
+    }
+
+    @Test
     void normalizationService_processesDisasterAlert() {
         ExternalApiSource source = sourceRepo.findBySourceCode("SAFETY_DATA_ALERT")
             .orElseThrow(() -> new IllegalStateException("SAFETY_DATA_ALERT source not seeded"));

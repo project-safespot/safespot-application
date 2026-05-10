@@ -89,7 +89,15 @@ public class ShelterNormalizer implements Normalizer {
                 ? root.path(meta.rootKey()).path(meta.rowSubPath())
                 : root.path(meta.rootKey());
 
-            if (rows.isMissingNode() || rows.isEmpty()) {
+            String expectedPath = meta.rootKey() + (meta.rowSubPath() != null ? "." + meta.rowSubPath() : "");
+            if (rows.isMissingNode()) {
+                String message = "missing expected shelter payload path: " + expectedPath;
+                log.warn("[{}] {} raw_id={}", sourceCode, message, raw.getRawId());
+                metrics.incrementNormalizationFailure(sourceCode, "contract_mismatch");
+                return NormalizationResult.failure(message);
+            }
+
+            if (rows.isEmpty()) {
                 log.info("[{}] no rows at path {}{}", sourceCode, meta.rootKey(),
                     meta.rowSubPath() != null ? "." + meta.rowSubPath() : "");
                 return NormalizationResult.success(0);

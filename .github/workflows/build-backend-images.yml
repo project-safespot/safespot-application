@@ -54,11 +54,6 @@ jobs:
         id: ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Set local registry for PR build
-        if: github.event_name == 'pull_request'
-        id: local-registry
-        run: echo "registry=local" >> "$GITHUB_OUTPUT"
-
       - name: Set image registry
         id: registry
         run: |
@@ -99,13 +94,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.registry.outputs.value }}/safespot-scenario-simulator:${{ steps.sha.outputs.short }}
 
-      - name: Build and push scenario-simulator
-        uses: docker/build-push-action@v5
-        with:
-          context: services/scenario-simulator
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ghcr.io/project-safespot/safespot-scenario-simulator:${{ steps.sha.outputs.short }}
-
   update-manifest:
     needs: build
     if: github.event_name != 'pull_request'
@@ -119,6 +107,11 @@ jobs:
           token: ${{ secrets.MANIFEST_REPO_TOKEN }}
           ref: feat/aws-gitops-cleanup
           path: k8s-manifest
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
 
       - name: Update image repositories and tags
         env:
