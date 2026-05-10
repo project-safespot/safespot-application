@@ -52,7 +52,7 @@ pre-scaling:
     lookback-minutes: 10
 
   surge:
-    normal-min-replicas: 0
+    normal-min-replicas: 1
     disaster-min-replicas: 3
     max-replicas: 10
     cooldown-seconds: 1800

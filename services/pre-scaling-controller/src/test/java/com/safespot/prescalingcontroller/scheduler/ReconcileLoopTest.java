@@ -42,13 +42,14 @@ class ReconcileLoopTest {
 
     @Test
     void reconcile_active_patchesToDisasterMin() {
+        // normalMinReplicas=1, so HPA starts at 1 in normal state
         when(alertRepository.queryCondition()).thenReturn(DisasterConditionResult.ACTIVE);
-        when(hpaPatchService.getHpaSnapshot()).thenReturn(Optional.of(new HpaSnapshot(0, 10)));
-        when(hpaPatchService.patchMinReplicas(0, 3, 10)).thenReturn(true);
+        when(hpaPatchService.getHpaSnapshot()).thenReturn(Optional.of(new HpaSnapshot(1, 10)));
+        when(hpaPatchService.patchMinReplicas(1, 3, 10)).thenReturn(true);
 
         loop.reconcile();
 
-        verify(hpaPatchService).patchMinReplicas(0, 3, 10);
+        verify(hpaPatchService).patchMinReplicas(1, 3, 10);
         verify(metrics).recordDecision();
     }
 
@@ -87,7 +88,7 @@ class ReconcileLoopTest {
 
         loop.reconcile(); // triggered just now; 1800s cooldown not elapsed
 
-        verify(hpaPatchService, never()).patchMinReplicas(3, 0, 10);
+        verify(hpaPatchService, never()).patchMinReplicas(3, 1, 10);
     }
 
     @Test
@@ -97,18 +98,20 @@ class ReconcileLoopTest {
 
         when(alertRepository.queryCondition()).thenReturn(DisasterConditionResult.INACTIVE);
         when(hpaPatchService.getHpaSnapshot()).thenReturn(Optional.of(new HpaSnapshot(3, 10)));
-        when(hpaPatchService.patchMinReplicas(3, 0, 10)).thenReturn(true);
+        when(hpaPatchService.patchMinReplicas(3, 1, 10)).thenReturn(true);
 
         loop.reconcile();
 
-        verify(hpaPatchService).patchMinReplicas(3, 0, 10);
+        // recovers to normalMinReplicas=1, not 0
+        verify(hpaPatchService).patchMinReplicas(3, 1, 10);
         verify(metrics).recordDecision();
     }
 
     @Test
     void reconcile_noDisasterAndNormalState_noAction() {
+        // HPA already at normalMinReplicas=1, stateHolder not active
         when(alertRepository.queryCondition()).thenReturn(DisasterConditionResult.INACTIVE);
-        when(hpaPatchService.getHpaSnapshot()).thenReturn(Optional.of(new HpaSnapshot(0, 10)));
+        when(hpaPatchService.getHpaSnapshot()).thenReturn(Optional.of(new HpaSnapshot(1, 10)));
 
         loop.reconcile();
 
@@ -146,7 +149,7 @@ class ReconcileLoopTest {
     void reconcile_unknown_inNormalState_doesNotTrigger() {
         // stateHolder: disasterActive=false (default)
         when(alertRepository.queryCondition()).thenReturn(DisasterConditionResult.UNKNOWN);
-        when(hpaPatchService.getHpaSnapshot()).thenReturn(Optional.of(new HpaSnapshot(0, 10)));
+        when(hpaPatchService.getHpaSnapshot()).thenReturn(Optional.of(new HpaSnapshot(1, 10)));
 
         loop.reconcile();
 
@@ -180,13 +183,14 @@ class ReconcileLoopTest {
 
     @Test
     void initializeState_activeAndHpaBelowDisasterMin_patches() {
-        when(hpaPatchService.getHpaSnapshot()).thenReturn(Optional.of(new HpaSnapshot(0, 10)));
+        // Startup: HPA is at normalMinReplicas=1, DB says disaster ACTIVE → patch to 3
+        when(hpaPatchService.getHpaSnapshot()).thenReturn(Optional.of(new HpaSnapshot(1, 10)));
         when(alertRepository.queryCondition()).thenReturn(DisasterConditionResult.ACTIVE);
-        when(hpaPatchService.patchMinReplicas(0, 3, 10)).thenReturn(true);
+        when(hpaPatchService.patchMinReplicas(1, 3, 10)).thenReturn(true);
 
         loop.initializeState();
 
-        verify(hpaPatchService).patchMinReplicas(0, 3, 10);
+        verify(hpaPatchService).patchMinReplicas(1, 3, 10);
     }
 
     @Test
@@ -234,7 +238,7 @@ class ReconcileLoopTest {
         props.setTrigger(trigger);
 
         PreScalingProperties.Surge surge = new PreScalingProperties.Surge();
-        surge.setNormalMinReplicas(0);
+        surge.setNormalMinReplicas(1);  // EKS rejects minReplicas:0; use 1 as normal floor
         surge.setDisasterMinReplicas(3);
         surge.setMaxReplicas(10);
         surge.setCooldownSeconds(1800);
