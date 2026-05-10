@@ -34,4 +34,6 @@ public class DisasterAlertRequest {
     private boolean publishEvents = true;
 
     private boolean triggerProactiveScale = false;
+
+    private String scenarioName;
 }

@@ -35,4 +35,6 @@ public class ResidentBulkRequest {
     private boolean publishEvents = true;
 
     private String scenarioId;
+
+    private String scenarioName;
 }
