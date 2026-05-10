@@ -88,7 +88,7 @@ public class DisasterAlertSimulatorService {
                 .messageCategory("ALERT")
                 .rawLevel(level.name())
                 .rawLevelTokens("[\"" + level.name() + "\"]")
-                .level(level.name())
+                .level(level.canonicalLevel)
                 .levelRank(level.rank)
                 .region(request.getRegion().toLowerCase())
                 .sourceRegion(request.getRegion())
