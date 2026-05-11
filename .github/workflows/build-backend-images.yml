@@ -106,8 +106,27 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.registry.outputs.value }}/safespot-dev-ops-ecr-pre-scaling-controller:${{ steps.sha.outputs.image_tag }}
 
+  validate-manifest-update-targets:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify all backend services update manifest tags
+        run: |
+          workflow=".github/workflows/build-backend-images.yml"
+
+          for service in apiCore apiPublicRead externalIngestion scenarioSimulator preScalingController; do
+            if ! grep -F ".${service}.image.tag = strenv(IMAGE_TAG)" "${workflow}" > /dev/null; then
+              echo "ERROR: ${service}.image.tag is not updated by ${workflow}"
+              exit 1
+            fi
+          done
+
   update-manifest:
-    needs: build
+    needs:
+      - build
+      - validate-manifest-update-targets
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
