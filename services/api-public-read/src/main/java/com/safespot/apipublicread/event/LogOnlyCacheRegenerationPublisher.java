@@ -29,12 +29,10 @@ public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPubli
             return;
         }
         CacheRegenerationEnvelope e = CacheRegenerationEnvelope.build(cacheKey, family.get(), reason);
-        log.info("[CacheRegen] eventType={} eventId={} occurredAt={} producer={} traceId={} idempotencyKey={} " +
-                        "payload.cacheKey={} payload.cacheKeyFamily={} payload.requestedAt={} " +
-                        "payload.reason={} payload.schemaVersion={}",
-                e.eventType(), e.eventId(), e.occurredAt(), e.producer(), e.traceId(), e.idempotencyKey(),
-                e.payload().cacheKey(), e.payload().cacheKeyFamily(), e.payload().requestedAt(),
-                e.payload().reason(), e.payload().schemaVersion());
+        log.info("[CacheRegen] eventType={} eventId={} occurredAt={} producer={} reason={} cacheFamily={} cacheKey={} endpoint={} traceId={} idempotencyKey={} " +
+                        "payload.requestedAt={} payload.schemaVersion={}",
+                e.eventType(), e.eventId(), e.occurredAt(), e.producer(), reason.value(), family.get(), cacheKey, endpoint,
+                e.traceId(), e.idempotencyKey(), e.payload().requestedAt(), e.payload().schemaVersion());
         meterRegistry.counter("api_read_cache_regen_publish_total",
                 "service", "api-public-read",
                 "endpoint", endpoint,
