@@ -7,7 +7,8 @@ public enum EventType {
     ShelterUpdated,
     DisasterDataCollected,
     EnvironmentDataCollected,
-    CacheRegenerationRequested;
+    CacheRegenerationRequested,
+    ShelterStatusWarmupRequested;
 
     public static EventType from(String value) {
         try {
