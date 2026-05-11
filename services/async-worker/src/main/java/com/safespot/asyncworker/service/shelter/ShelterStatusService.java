@@ -10,6 +10,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
+import java.util.Map;
+
 @Profile({"cache-worker", "async-worker"})
 @Slf4j
 @Service
@@ -25,6 +28,35 @@ public class ShelterStatusService {
             .orElseThrow(() -> new ResourceNotFoundException("shelter", shelterId));
 
         int currentOccupancy = entryRepository.countEntered(shelterId);
+        writeStatus(shelter, currentOccupancy);
+        log.info("Shelter status recalculated: shelterId={}, occupancy={}, level={}",
+            shelterId, currentOccupancy, CongestionLevel.of(currentOccupancy, shelter.capacity()));
+    }
+
+    public int warmUpAll() {
+        List<ShelterInfo> shelters = shelterRepository.findAllForStatusWarmup();
+        if (shelters.isEmpty()) {
+            log.info("Shelter status warm-up skipped: no shelters found");
+            return 0;
+        }
+
+        List<Long> shelterIds = shelters.stream()
+            .map(ShelterInfo::shelterId)
+            .toList();
+        Map<Long, Integer> occupancyByShelterId = entryRepository.countEnteredByShelterIds(shelterIds);
+
+        int count = 0;
+        for (ShelterInfo shelter : shelters) {
+            int currentOccupancy = occupancyByShelterId.getOrDefault(shelter.shelterId(), 0);
+            writeStatus(shelter, currentOccupancy);
+            count++;
+        }
+
+        log.info("Shelter status warm-up completed: count={}", count);
+        return count;
+    }
+
+    private void writeStatus(ShelterInfo shelter, int currentOccupancy) {
         Integer capacity = shelter.capacity();
         CongestionLevel level = CongestionLevel.of(currentOccupancy, capacity);
         int availableCapacity = (capacity == null) ? 0 : Math.max(0, capacity - currentOccupancy);
@@ -36,8 +68,6 @@ public class ShelterStatusService {
             shelter.shelterStatus()
         );
 
-        cacheWriter.setShelterStatus(shelterId, value);
-        log.info("Shelter status recalculated: shelterId={}, occupancy={}, level={}",
-            shelterId, currentOccupancy, level);
+        cacheWriter.setShelterStatus(shelter.shelterId(), value);
     }
 }
