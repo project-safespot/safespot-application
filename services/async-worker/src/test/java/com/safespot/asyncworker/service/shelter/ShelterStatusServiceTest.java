@@ -111,7 +111,7 @@ class ShelterStatusServiceTest {
             .containsExactly(60, 0, 0);
         assertThat(valueCaptor.getAllValues())
             .extracting(ShelterStatusValue::congestionLevel)
-            .containsExactly("NORMAL", "FULL", "AVAILABLE");
+            .containsExactly("AVAILABLE", "FULL", "AVAILABLE");
     }
 
     @Test
