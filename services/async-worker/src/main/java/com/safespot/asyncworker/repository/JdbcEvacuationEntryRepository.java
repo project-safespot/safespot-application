@@ -2,6 +2,7 @@ package com.safespot.asyncworker.repository;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
+import org.springframework.jdbc.core.RowCallbackHandler;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -42,10 +43,13 @@ public class JdbcEvacuationEntryRepository implements EvacuationEntryRepository 
         }
 
         Map<Long, Integer> result = new HashMap<>();
+        RowCallbackHandler rowCallbackHandler = rs ->
+            result.put(rs.getLong("shelter_id"), rs.getInt("occupancy"));
+
         jdbcTemplate.query(
             COUNT_ENTERED_BY_SHELTER_IDS_SQL,
             Map.of("shelterIds", shelterIds),
-            rs -> result.put(rs.getLong("shelter_id"), rs.getInt("occupancy"))
+            rowCallbackHandler
         );
         return result;
     }
