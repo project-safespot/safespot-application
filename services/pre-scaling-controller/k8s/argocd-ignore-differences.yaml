@@ -1,0 +1,51 @@
+# ArgoCD ignoreDifferences patch for pre-scaling-controller (§4.1)
+#
+# Problem:
+#   ArgoCD dev Application은 automated sync + selfHeal을 사용한다.
+#   pre-scaling-controller가 HPA/api-public-read-surge spec.minReplicas를 runtime에 patch하면
+#   ArgoCD가 selfHeal 시 Git 값(예: minReplicas: 0)으로 되돌린다.
+#
+# Solution:
+#   ArgoCD Application에 아래 ignoreDifferences를 추가한다.
+#   ArgoCD는 /spec/minReplicas 차이를 무시하여 runtime patch를 보존한다.
+#
+# 적용 방법:
+#   ArgoCD Application manifest (Git에서 관리) 또는 ArgoCD UI의
+#   spec.ignoreDifferences 섹션에 아래를 추가한다.
+#
+# 주의:
+#   RespectIgnoreDifferences=true sync option을 함께 설정하면
+#   ArgoCD가 sync 시 해당 필드를 덮어쓰지 않는다.
+#   설정하지 않으면 sync 시 여전히 덮어쓸 수 있으므로 함께 설정을 권장한다.
+
+# --- ArgoCD Application spec에 추가할 내용 ---
+#
+# spec:
+#   ignoreDifferences:
+#     - group: autoscaling
+#       kind: HorizontalPodAutoscaler
+#       name: api-public-read-surge
+#       namespace: application
+#       jsonPointers:
+#         - /spec/minReplicas
+#
+#   syncPolicy:
+#     syncOptions:
+#       - RespectIgnoreDifferences=true
+
+# --- selfHeal 충돌 조건 정리 ---
+#
+# 충돌 시나리오:
+#   1. pre-scaling-controller가 minReplicas=3으로 patch
+#   2. ArgoCD가 selfHeal 감지: Git(minReplicas=0) vs Live(minReplicas=3)
+#   3. ignoreDifferences 없으면: ArgoCD가 minReplicas=0으로 복구 → 재난 중 surge 무효화
+#   4. ignoreDifferences 있으면: ArgoCD가 /spec/minReplicas 차이를 무시 → patch 보존
+#
+# 복구 시나리오:
+#   1. pre-scaling-controller가 cooldown 후 minReplicas=0으로 patch
+#   2. ArgoCD Live 상태가 Git과 일치하므로 충돌 없음
+#
+# ignoreDifferences 미적용 시 위험:
+#   - 재난 중 ArgoCD sync/selfHeal 발생 시 surge pod 즉시 축소
+#   - Karpenter public-surge node 조기 제거
+#   - 재난 중 public-read 트래픽 처리 용량 손실

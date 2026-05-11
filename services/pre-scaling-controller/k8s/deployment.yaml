@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pre-scaling-controller
+  namespace: application
+  labels:
+    app: pre-scaling-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pre-scaling-controller
+  template:
+    metadata:
+      labels:
+        app: pre-scaling-controller
+    spec:
+      serviceAccountName: pre-scaling-controller
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: pre-scaling-controller
+          image: ghcr.io/project-safespot/safespot-pre-scaling-controller:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8084
+
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "dev"
+
+            # ── DB credentials (Secret) ──────────────────────────────────────
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: pre-scaling-controller-db-secret
+                  key: url
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: pre-scaling-controller-db-secret
+                  key: username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pre-scaling-controller-db-secret
+                  key: password
+
+          # ── All pre-scaling config from ConfigMap ────────────────────────
+          envFrom:
+            - configMapRef:
+                name: pre-scaling-controller-config
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8084
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8084
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "200m"
+              memory: "512Mi"
+
+      nodeSelector:
+        eks.amazonaws.com/nodegroup: app

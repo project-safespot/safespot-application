@@ -1,0 +1,15 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pre-scaling-controller
+  namespace: application
+  labels:
+    app: pre-scaling-controller
+subjects:
+  - kind: ServiceAccount
+    name: pre-scaling-controller
+    namespace: application
+roleRef:
+  kind: Role
+  name: pre-scaling-controller
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,54 @@
+# ArgoCD Application manifest for the safespot dev environment.
+#
+# ignoreDifferences 반영 대상:
+#   HPA/api-public-read-surge spec.minReplicas
+#
+# 이 파일은 k8s-manifest repo (project-safespot/safespot-application-k8s-manifest)의
+# argocd/application-dev.yaml 에 merge되어야 한다.
+#
+# 적용 명령:
+#   kubectl apply -f services/pre-scaling-controller/k8s/argocd-application.yaml
+#   또는 k8s-manifest repo의 argocd/application-dev.yaml에 spec 필드를 병합.
+#
+# RespectIgnoreDifferences=true 없이 ignoreDifferences만 설정하면
+# ArgoCD가 sync 시 해당 필드를 덮어쓸 수 있다. 반드시 함께 설정한다.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: safespot-dev
+  namespace: argocd
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/project-safespot/safespot-application-k8s-manifest
+    targetRevision: feat/aws-gitops-cleanup
+    path: charts/safespot
+    helm:
+      valueFiles:
+        - values-dev.yaml
+        - values-dev.images.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: application
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - RespectIgnoreDifferences=true   # prevents ArgoCD from overwriting ignoreDifferences fields on sync
+
+  # pre-scaling-controller가 runtime에 HPA spec.minReplicas를 patch하므로
+  # ArgoCD selfHeal이 원래 Git 값으로 되돌리지 않도록 ignoreDifferences 설정.
+  # 이 설정 없이 selfHeal=true이면 재난 중 ArgoCD가 minReplicas를 0으로 복구해 surge pod를 삭제한다.
+  ignoreDifferences:
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      name: api-public-read-surge
+      namespace: application
+      jsonPointers:
+        - /spec/minReplicas
