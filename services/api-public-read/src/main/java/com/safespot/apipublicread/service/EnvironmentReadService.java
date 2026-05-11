@@ -8,6 +8,8 @@ import com.safespot.apipublicread.domain.AirQualityLog;
 import com.safespot.apipublicread.domain.WeatherLog;
 import com.safespot.apipublicread.dto.AirQualityDto;
 import com.safespot.apipublicread.dto.WeatherAlertDto;
+import com.safespot.apipublicread.dto.cache.AirQualityCacheDto;
+import com.safespot.apipublicread.dto.cache.WeatherCacheDto;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
 import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
@@ -51,9 +53,9 @@ public class EnvironmentReadService {
     }
 
     private WeatherAlertDto findWeatherByGrid(String region, int nx, int ny) {
-        RedisReadCache.CacheResult<WeatherAlertDto> cached = redisReadCache.get(WEATHER_KEY, new TypeReference<>() {});
+        RedisReadCache.CacheResult<WeatherCacheDto> cached = redisReadCache.get(WEATHER_KEY, new TypeReference<>() {});
         redisReadCache.recordCacheRequest(ENDPOINT_WEATHER, cached.resultLabel());
-        if (cached.isHit()) return cached.value();
+        if (cached.isHit()) return toWeatherDto(region, cached.value());
 
         redisReadCache.recordFallback(ENDPOINT_WEATHER, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_WEATHER);
@@ -71,9 +73,9 @@ public class EnvironmentReadService {
                 .orElseThrow(() -> new ApiException(ErrorCode.UNSUPPORTED_REGION,
                         "현재 지원하지 않는 지역입니다: " + region));
 
-        RedisReadCache.CacheResult<WeatherAlertDto> cached = redisReadCache.get(WEATHER_KEY, new TypeReference<>() {});
+        RedisReadCache.CacheResult<WeatherCacheDto> cached = redisReadCache.get(WEATHER_KEY, new TypeReference<>() {});
         redisReadCache.recordCacheRequest(ENDPOINT_WEATHER, cached.resultLabel());
-        if (cached.isHit()) return cached.value();
+        if (cached.isHit()) return toWeatherDto(region, cached.value());
 
         redisReadCache.recordFallback(ENDPOINT_WEATHER, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_WEATHER);
@@ -91,9 +93,9 @@ public class EnvironmentReadService {
             throw new ApiException(ErrorCode.MISSING_REQUIRED_FIELD, "region, stationName 중 최소 1개는 필요합니다.");
         }
 
-        RedisReadCache.CacheResult<AirQualityDto> cached = redisReadCache.get(AIR_KEY, new TypeReference<>() {});
+        RedisReadCache.CacheResult<AirQualityCacheDto> cached = redisReadCache.get(AIR_KEY, new TypeReference<>() {});
         redisReadCache.recordCacheRequest(ENDPOINT_AIR, cached.resultLabel());
-        if (cached.isHit()) return cached.value();
+        if (cached.isHit()) return toAirQualityDto(cached.value());
 
         redisReadCache.recordFallback(ENDPOINT_AIR, cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_AIR);
@@ -120,6 +122,9 @@ public class EnvironmentReadService {
     }
 
     private void requestRegeneration(String cacheKey, String endpoint, RedisReadCache.FallbackReason fallbackReason) {
+        if (fallbackReason == RedisReadCache.FallbackReason.PARSE_ERROR) {
+            return;
+        }
         meterRegistry.counter("api_read_cache_regen_requested_total",
                 "service", "api-public-read", "endpoint", endpoint).increment();
         if (suppressWindowService.tryPublish(cacheKey)) {
@@ -142,6 +147,36 @@ public class EnvironmentReadService {
                 log.getWsd(),
                 log.getReh(),
                 log.getForecastDt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+        );
+    }
+
+    private WeatherAlertDto toWeatherDto(String region, WeatherCacheDto value) {
+        return new WeatherAlertDto(
+                region,
+                value.nx(),
+                value.ny(),
+                value.temperature(),
+                value.weatherCondition(),
+                value.precipitationType(),
+                value.precipitation(),
+                value.windSpeed(),
+                value.humidity(),
+                value.forecastedAt()
+        );
+    }
+
+    private AirQualityDto toAirQualityDto(AirQualityCacheDto value) {
+        return new AirQualityDto(
+                value.stationName(),
+                value.aqi(),
+                value.grade(),
+                value.pm10(),
+                value.pm10Grade(),
+                value.pm25(),
+                value.pm25Grade(),
+                value.o3(),
+                value.o3Grade(),
+                value.measuredAt()
         );
     }
 

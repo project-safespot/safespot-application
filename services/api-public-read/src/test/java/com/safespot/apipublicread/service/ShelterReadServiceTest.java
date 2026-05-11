@@ -6,6 +6,7 @@ import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.domain.Shelter;
 import com.safespot.apipublicread.dto.ShelterDetailDto;
 import com.safespot.apipublicread.dto.ShelterStatusCache;
+import com.safespot.apipublicread.dto.cache.ShelterStatusCacheDto;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
 import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
@@ -61,7 +62,7 @@ class ShelterReadServiceTest {
     @Test
     void findById_cacheHit_returnsFromCache() {
         when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
-        ShelterStatusCache cachedStatus = new ShelterStatusCache(68, 52, "NORMAL", "OPERATING", "2026-04-15T09:00:00+09:00");
+        ShelterStatusCacheDto cachedStatus = new ShelterStatusCacheDto(68, 52, "NORMAL", "OPERATING");
         when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(cachedStatus, null));
 
@@ -114,6 +115,20 @@ class ShelterReadServiceTest {
 
         shelterReadService.findById(101L);
 
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
+    }
+
+    @Test
+    void findById_parseError_fallsBackWithoutRegenerationRequest() {
+        when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
+        when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.PARSE_ERROR));
+        when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenReturn(10L);
+
+        ShelterDetailDto result = shelterReadService.findById(101L);
+
+        assertThat(result.currentOccupancy()).isEqualTo(10);
+        verify(suppressWindowService, never()).tryPublish(anyString());
         verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
 

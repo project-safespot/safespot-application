@@ -8,6 +8,7 @@ import com.safespot.apipublicread.domain.Shelter;
 import com.safespot.apipublicread.dto.ShelterDetailDto;
 import com.safespot.apipublicread.dto.ShelterNearbyItem;
 import com.safespot.apipublicread.dto.ShelterStatusCache;
+import com.safespot.apipublicread.dto.cache.ShelterStatusCacheDto;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
 import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
@@ -82,20 +83,23 @@ public class ShelterReadService {
 
     private ShelterStatusCache getShelterStatusFromCacheOrRds(Long shelterId, String endpoint) {
         String key = "shelter:status:" + shelterId;
-        RedisReadCache.CacheResult<ShelterStatusCache> cached = redisReadCache.get(key, new TypeReference<>() {});
+        RedisReadCache.CacheResult<ShelterStatusCacheDto> cached = redisReadCache.get(key, new TypeReference<>() {});
 
         redisReadCache.recordCacheRequest(endpoint, cached.resultLabel());
 
         if (cached.isHit()) {
-            return cached.value();
+            return new ShelterStatusCache(
+                    cached.value().currentOccupancy(),
+                    cached.value().availableCapacity(),
+                    cached.value().congestionLevel(),
+                    cached.value().shelterStatus(),
+                    null
+            );
         }
 
         FallbackReason reason = cached.fallbackReason();
         redisReadCache.recordFallback(endpoint, reason);
         redisReadCache.recordDbFallbackQuery(endpoint);
-
-        meterRegistry.counter("api_read_cache_regen_requested_total",
-                "service", "api-public-read", "endpoint", endpoint).increment();
 
         long start = System.currentTimeMillis();
         long occupancy = evacuationEntryRepository.countCurrentOccupancy(shelterId);
@@ -107,11 +111,15 @@ public class ShelterReadService {
                 ? shelter.getUpdatedAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) : null;
         redisReadCache.recordDbFallbackLatency(endpoint, System.currentTimeMillis() - start);
 
-        if (suppressWindowService.tryPublish(key)) {
-            cacheRegenerationPublisher.publish(key, CacheRegenerationReason.from(reason), endpoint);
-        } else {
-            meterRegistry.counter("api_read_cache_regen_suppressed_total",
+        if (reason != FallbackReason.PARSE_ERROR) {
+            meterRegistry.counter("api_read_cache_regen_requested_total",
                     "service", "api-public-read", "endpoint", endpoint).increment();
+            if (suppressWindowService.tryPublish(key)) {
+                cacheRegenerationPublisher.publish(key, CacheRegenerationReason.from(reason), endpoint);
+            } else {
+                meterRegistry.counter("api_read_cache_regen_suppressed_total",
+                        "service", "api-public-read", "endpoint", endpoint).increment();
+            }
         }
 
         return new ShelterStatusCache((int) occupancy, available, congestion,

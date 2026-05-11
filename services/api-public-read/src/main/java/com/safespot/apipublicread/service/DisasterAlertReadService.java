@@ -7,6 +7,8 @@ import com.safespot.apipublicread.domain.DisasterAlert;
 import com.safespot.apipublicread.domain.DisasterAlertDetail;
 import com.safespot.apipublicread.dto.DisasterAlertItem;
 import com.safespot.apipublicread.dto.DisasterLatestDto;
+import com.safespot.apipublicread.dto.cache.DisasterDetailCacheDto;
+import com.safespot.apipublicread.dto.cache.DisasterMessageCacheDto;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
 import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
@@ -45,13 +47,14 @@ public class DisasterAlertReadService {
     private final MeterRegistry meterRegistry;
 
     public List<DisasterAlertItem> findAlerts(String region, String disasterType) {
-        RedisReadCache.CacheResult<List<DisasterAlertItem>> cached =
+        RedisReadCache.CacheResult<List<DisasterMessageCacheDto>> cached =
                 redisReadCache.get(LIST_KEY, new TypeReference<>() {});
 
         redisReadCache.recordCacheRequest(ENDPOINT_LIST, cached.resultLabel());
 
         if (cached.isHit()) {
-            return filterItems(cached.value(), region, disasterType);
+            return filterItems(cached.value(), region, disasterType)
+                    .stream().map(this::toItem).toList();
         }
 
         redisReadCache.recordFallback(ENDPOINT_LIST, cached.fallbackReason());
@@ -66,13 +69,13 @@ public class DisasterAlertReadService {
     }
 
     public DisasterLatestDto findLatest(String disasterType, String region) {
-        RedisReadCache.CacheResult<List<DisasterAlertItem>> listResult =
+        RedisReadCache.CacheResult<List<DisasterMessageCacheDto>> listResult =
                 redisReadCache.get(LIST_KEY, new TypeReference<>() {});
 
         redisReadCache.recordCacheRequest(ENDPOINT_LATEST, listResult.resultLabel());
 
         if (listResult.isHit()) {
-            DisasterAlertItem match = filterByType(listResult.value(), disasterType);
+            DisasterMessageCacheDto match = filterByType(listResult.value(), disasterType);
             if (match != null) {
                 return resolveDetail(match, disasterType, region);
             }
@@ -90,14 +93,14 @@ public class DisasterAlertReadService {
                 .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
     }
 
-    private DisasterLatestDto resolveDetail(DisasterAlertItem item, String disasterType, String region) {
+    private DisasterLatestDto resolveDetail(DisasterMessageCacheDto item, String disasterType, String region) {
         String detailKey = DETAIL_KEY_PREFIX + item.alertId();
-        RedisReadCache.CacheResult<DisasterLatestDto> detailResult =
+        RedisReadCache.CacheResult<DisasterDetailCacheDto> detailResult =
                 redisReadCache.get(detailKey, new TypeReference<>() {});
 
         redisReadCache.recordCacheRequest(ENDPOINT_LATEST, detailResult.resultLabel());
 
-        if (detailResult.isHit()) return detailResult.value();
+        if (detailResult.isHit()) return toLatestDto(detailResult.value());
 
         redisReadCache.recordFallback(ENDPOINT_LATEST, detailResult.fallbackReason());
         redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
@@ -111,6 +114,9 @@ public class DisasterAlertReadService {
     }
 
     private void requestRegeneration(String cacheKey, String endpoint, RedisReadCache.FallbackReason fallbackReason) {
+        if (fallbackReason == RedisReadCache.FallbackReason.PARSE_ERROR) {
+            return;
+        }
         meterRegistry.counter("api_read_cache_regen_requested_total",
                 "service", "api-public-read", "endpoint", endpoint).increment();
         if (suppressWindowService.tryPublish(cacheKey)) {
@@ -121,15 +127,15 @@ public class DisasterAlertReadService {
         }
     }
 
-    private static List<DisasterAlertItem> filterItems(List<DisasterAlertItem> items,
-                                                        String region, String disasterType) {
+    private static List<DisasterMessageCacheDto> filterItems(List<DisasterMessageCacheDto> items,
+                                                             String region, String disasterType) {
         return items.stream()
                 .filter(i -> region == null || region.equals(i.region()))
                 .filter(i -> disasterType == null || disasterType.equals(i.disasterType()))
                 .toList();
     }
 
-    private static DisasterAlertItem filterByType(List<DisasterAlertItem> items, String disasterType) {
+    private static DisasterMessageCacheDto filterByType(List<DisasterMessageCacheDto> items, String disasterType) {
         return items.stream()
                 .filter(i -> disasterType.equals(i.disasterType()))
                 .findFirst()
@@ -145,6 +151,18 @@ public class DisasterAlertReadService {
                 a.getMessage(),
                 a.getIssuedAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
                 a.getExpiredAt() != null ? a.getExpiredAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) : null
+        );
+    }
+
+    private DisasterAlertItem toItem(DisasterMessageCacheDto item) {
+        return new DisasterAlertItem(
+                item.alertId(),
+                item.disasterType(),
+                item.region(),
+                item.level(),
+                item.message(),
+                item.issuedAt(),
+                item.expiredAt()
         );
     }
 
@@ -167,6 +185,19 @@ public class DisasterAlertReadService {
                 a.getIssuedAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME),
                 a.getExpiredAt() != null ? a.getExpiredAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) : null,
                 details
+        );
+    }
+
+    private DisasterLatestDto toLatestDto(DisasterDetailCacheDto value) {
+        return new DisasterLatestDto(
+                value.alertId(),
+                value.disasterType(),
+                value.region(),
+                value.level(),
+                value.message(),
+                value.issuedAt(),
+                value.expiredAt(),
+                null
         );
     }
 }

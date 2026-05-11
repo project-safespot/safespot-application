@@ -6,6 +6,8 @@ import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.domain.DisasterAlert;
 import com.safespot.apipublicread.dto.DisasterAlertItem;
 import com.safespot.apipublicread.dto.DisasterLatestDto;
+import com.safespot.apipublicread.dto.cache.DisasterDetailCacheDto;
+import com.safespot.apipublicread.dto.cache.DisasterMessageCacheDto;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
 import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
@@ -46,10 +48,12 @@ class DisasterAlertReadServiceTest {
 
     private static final String DETAIL_KEY_55 = DETAIL_KEY_PREFIX + "55";
 
-    private static final DisasterAlertItem EARTHQUAKE_ITEM = new DisasterAlertItem(
-            55L, "EARTHQUAKE", "서울특별시", "주의", "지진 감지", "2026-04-14T08:55:00+09:00", null);
-    private static final DisasterAlertItem FLOOD_ITEM = new DisasterAlertItem(
-            56L, "FLOOD", "서울특별시", "경보", "한강 수위 상승", "2026-04-14T09:00:00+09:00", null);
+    private static final DisasterMessageCacheDto EARTHQUAKE_ITEM = new DisasterMessageCacheDto(
+            1, 55L, "EARTHQUAKE", "지진", "ALERT", "주의", 2,
+            "서울특별시", "2026-04-14T08:55:00+09:00", null, "지진 감지", "MOIS", true);
+    private static final DisasterMessageCacheDto FLOOD_ITEM = new DisasterMessageCacheDto(
+            1, 56L, "FLOOD", "홍수", "ALERT", "경보", 3,
+            "서울특별시", "2026-04-14T09:00:00+09:00", null, "한강 수위 상승", "MOIS", true);
 
     // ── findAlerts ─────────────────────────────────────────────────────────
 
@@ -122,12 +126,25 @@ class DisasterAlertReadServiceTest {
         verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
 
+    @Test
+    void findAlerts_parseError_fallsBackWithoutRegenerationRequest() {
+        when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.PARSE_ERROR));
+        when(disasterAlertRepository.findAlerts(any(), any(), any(PageRequest.class))).thenReturn(List.of());
+
+        disasterAlertReadService.findAlerts(null, null);
+
+        verify(suppressWindowService, never()).tryPublish(anyString());
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
+    }
+
     // ── findLatest: list hit ───────────────────────────────────────────────
 
     @Test
     void findLatest_listHit_typeMatch_detailHit_returnsFromCache() {
-        DisasterLatestDto cached = new DisasterLatestDto(55L, "EARTHQUAKE", "서울특별시", "주의",
-                "지진 감지", "2026-04-14T08:55:00+09:00", null, null);
+        DisasterDetailCacheDto cached = new DisasterDetailCacheDto(
+                1, 55L, "EARTHQUAKE", "지진", "ALERT", "주의", 2,
+                "서울특별시", "2026-04-14T08:55:00+09:00", null, "지진 감지", "MOIS", true);
 
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(List.of(EARTHQUAKE_ITEM, FLOOD_ITEM), null));

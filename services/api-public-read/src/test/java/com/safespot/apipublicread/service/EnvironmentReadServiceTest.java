@@ -8,6 +8,8 @@ import com.safespot.apipublicread.domain.AirQualityLog;
 import com.safespot.apipublicread.domain.WeatherLog;
 import com.safespot.apipublicread.dto.AirQualityDto;
 import com.safespot.apipublicread.dto.WeatherAlertDto;
+import com.safespot.apipublicread.dto.cache.AirQualityCacheDto;
+import com.safespot.apipublicread.dto.cache.WeatherCacheDto;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
 import com.safespot.apipublicread.event.CacheRegenerationReason;
 import com.safespot.apipublicread.exception.ApiException;
@@ -52,7 +54,8 @@ class EnvironmentReadServiceTest {
 
     @Test
     void findWeather_cacheHit_returnsFromCache() {
-        WeatherAlertDto cached = new WeatherAlertDto("서울", 60, 127, 18.5, "맑음", "2026-04-15T15:00:00+09:00");
+        WeatherCacheDto cached = new WeatherCacheDto(60, 127, 18.5, "맑음",
+                null, null, null, null, "2026-04-15T15:00:00+09:00");
         when(redisReadCache.get(eq(WEATHER_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(cached, null));
 
@@ -99,6 +102,19 @@ class EnvironmentReadServiceTest {
     }
 
     @Test
+    void findWeather_parseError_fallsBackWithoutRegenerationRequest() {
+        when(redisReadCache.get(eq(WEATHER_KEY), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.PARSE_ERROR));
+        when(weatherLogRepository.findLatestByNxAndNy(anyInt(), anyInt())).thenReturn(Optional.empty());
+
+        WeatherAlertDto result = environmentReadService.findWeather("서울", 60, 127);
+
+        assertThat(result).isNull();
+        verify(suppressWindowService, never()).tryPublish(anyString());
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
+    }
+
+    @Test
     void findWeather_noData_returnsNull() {
         when(redisReadCache.get(eq(WEATHER_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
@@ -115,7 +131,8 @@ class EnvironmentReadServiceTest {
     @Test
     void findWeather_regionOnly_cacheHit_returnsFromCache() {
         when(regionToGridResolver.resolve("서울특별시")).thenReturn(Optional.of(SEOUL_GRID));
-        WeatherAlertDto cached = new WeatherAlertDto("서울특별시", 60, 127, 18.5, "맑음", "2026-04-15T15:00:00+09:00");
+        WeatherCacheDto cached = new WeatherCacheDto(60, 127, 18.5, "맑음",
+                null, null, null, null, "2026-04-15T15:00:00+09:00");
         when(redisReadCache.get(eq(WEATHER_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(cached, null));
 
@@ -185,7 +202,8 @@ class EnvironmentReadServiceTest {
 
     @Test
     void findAirQuality_cacheHit_returnsFromCache() {
-        AirQualityDto cached = new AirQualityDto("종로구", 42, "좋음", "2026-04-15T15:00:00+09:00");
+        AirQualityCacheDto cached = new AirQualityCacheDto("종로구", 42, "좋음",
+                null, null, null, null, null, null, "2026-04-15T15:00:00+09:00");
         when(redisReadCache.get(eq(AIR_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(cached, null));
 
