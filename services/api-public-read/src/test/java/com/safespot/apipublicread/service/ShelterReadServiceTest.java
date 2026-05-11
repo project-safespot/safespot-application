@@ -5,6 +5,7 @@ import com.safespot.apipublicread.cache.RedisReadCache;
 import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.domain.Shelter;
 import com.safespot.apipublicread.dto.ShelterDetailDto;
+import com.safespot.apipublicread.dto.ShelterNearbyItem;
 import com.safespot.apipublicread.dto.ShelterStatusCache;
 import com.safespot.apipublicread.dto.cache.ShelterStatusCacheDto;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
@@ -24,6 +25,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -56,6 +58,7 @@ class ShelterReadServiceTest {
         lenient().when(shelter.getLatitude()).thenReturn(BigDecimal.valueOf(37.5687));
         lenient().when(shelter.getLongitude()).thenReturn(BigDecimal.valueOf(126.9081));
         lenient().when(shelter.getCapacity()).thenReturn(120);
+        lenient().when(shelter.getShelterStatus()).thenReturn("OPERATING");
         lenient().when(shelter.getUpdatedAt()).thenReturn(OffsetDateTime.now());
     }
 
@@ -128,6 +131,31 @@ class ShelterReadServiceTest {
         ShelterDetailDto result = shelterReadService.findById(101L);
 
         assertThat(result.currentOccupancy()).isEqualTo(10);
+        verify(suppressWindowService, never()).tryPublish(anyString());
+        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
+    }
+
+    @Test
+    void findNearby_statusCacheMiss_fallsBackWithoutRegenerationRequest() {
+        when(shelterRepository.findByBoundingBoxAndDisasterType(
+                any(BigDecimal.class),
+                any(BigDecimal.class),
+                any(BigDecimal.class),
+                any(BigDecimal.class),
+                eq("EARTHQUAKE")
+        )).thenReturn(List.of(shelter));
+        when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+        when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
+        when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenReturn(10L);
+
+        List<ShelterNearbyItem> result = shelterReadService.findNearby(37.5687, 126.9081, 1_000, "EARTHQUAKE");
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).shelterId()).isEqualTo(101L);
+        assertThat(result.get(0).currentOccupancy()).isEqualTo(10);
+        verify(redisReadCache).recordFallback(eq("/shelters/nearby"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
+        verify(redisReadCache).recordDbFallbackQuery("/shelters/nearby");
         verify(suppressWindowService, never()).tryPublish(anyString());
         verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
