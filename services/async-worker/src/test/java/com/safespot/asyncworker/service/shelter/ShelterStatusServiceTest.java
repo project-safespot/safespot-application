@@ -1,5 +1,6 @@
 package com.safespot.asyncworker.service.shelter;
 
+import com.safespot.asyncworker.exception.RedisCacheException;
 import com.safespot.asyncworker.exception.ResourceNotFoundException;
 import com.safespot.asyncworker.redis.RedisCacheWriter;
 import com.safespot.asyncworker.repository.EvacuationEntryRepository;
@@ -12,9 +13,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-
-import com.safespot.asyncworker.exception.RedisCacheException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -79,6 +80,49 @@ class ShelterStatusServiceTest {
         ArgumentCaptor<ShelterStatusValue> captor = ArgumentCaptor.forClass(ShelterStatusValue.class);
         verify(cacheWriter).setShelterStatus(eq(101L), captor.capture());
         assertThat(captor.getValue().availableCapacity()).isZero();
+    }
+
+    @Test
+    void warmUpAll_전체_대피소_상태를_배치_조회해_캐시에_쓴다() {
+        List<ShelterInfo> shelters = List.of(
+            new ShelterInfo(101L, 100, "OPERATING"),
+            new ShelterInfo(102L, 50, "OPERATING"),
+            new ShelterInfo(103L, null, "OPERATING")
+        );
+        when(shelterRepository.findAllForStatusWarmup()).thenReturn(shelters);
+        when(entryRepository.countEnteredByShelterIds(List.of(101L, 102L, 103L)))
+            .thenReturn(Map.of(101L, 40, 102L, 50));
+
+        int count = service.warmUpAll();
+
+        assertThat(count).isEqualTo(3);
+        verify(entryRepository).countEnteredByShelterIds(List.of(101L, 102L, 103L));
+
+        ArgumentCaptor<Long> idCaptor = ArgumentCaptor.forClass(Long.class);
+        ArgumentCaptor<ShelterStatusValue> valueCaptor = ArgumentCaptor.forClass(ShelterStatusValue.class);
+        verify(cacheWriter, times(3)).setShelterStatus(idCaptor.capture(), valueCaptor.capture());
+
+        assertThat(idCaptor.getAllValues()).containsExactly(101L, 102L, 103L);
+        assertThat(valueCaptor.getAllValues())
+            .extracting(ShelterStatusValue::currentOccupancy)
+            .containsExactly(40, 50, 0);
+        assertThat(valueCaptor.getAllValues())
+            .extracting(ShelterStatusValue::availableCapacity)
+            .containsExactly(60, 0, 0);
+        assertThat(valueCaptor.getAllValues())
+            .extracting(ShelterStatusValue::congestionLevel)
+            .containsExactly("NORMAL", "FULL", "AVAILABLE");
+    }
+
+    @Test
+    void warmUpAll_대피소가_없으면_0을_반환하고_캐시에_쓰지_않는다() {
+        when(shelterRepository.findAllForStatusWarmup()).thenReturn(List.of());
+
+        int count = service.warmUpAll();
+
+        assertThat(count).isZero();
+        verifyNoInteractions(entryRepository);
+        verifyNoInteractions(cacheWriter);
     }
 
     @Test
