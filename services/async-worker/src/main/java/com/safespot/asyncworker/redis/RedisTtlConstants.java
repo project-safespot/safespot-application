@@ -7,7 +7,7 @@ public final class RedisTtlConstants {
     private RedisTtlConstants() {}
 
     // cache-ttl.md 기준
-    public static final Duration SHELTER_STATUS            = Duration.ofSeconds(30);
+    public static final Duration SHELTER_STATUS            = Duration.ofSeconds(300);
 
     public static final Duration DISASTER_DETAIL           = Duration.ofSeconds(3600);
     public static final Duration DISASTER_MESSAGES_RECENT  = Duration.ofSeconds(300);
