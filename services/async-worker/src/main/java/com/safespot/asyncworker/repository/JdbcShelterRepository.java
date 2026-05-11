@@ -6,6 +6,7 @@ import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -16,6 +17,9 @@ public class JdbcShelterRepository implements ShelterRepository {
 
     private static final String FIND_BY_ID_SQL =
         "SELECT shelter_id, capacity, shelter_status FROM shelter WHERE shelter_id = :shelterId";
+
+    private static final String FIND_ALL_FOR_STATUS_WARMUP_SQL =
+        "SELECT shelter_id, capacity, shelter_status FROM shelter";
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
@@ -35,5 +39,17 @@ public class JdbcShelterRepository implements ShelterRepository {
         } catch (EmptyResultDataAccessException e) {
             return Optional.empty();
         }
+    }
+
+    @Override
+    public List<ShelterInfo> findAllForStatusWarmup() {
+        return jdbcTemplate.query(
+            FIND_ALL_FOR_STATUS_WARMUP_SQL,
+            (rs, rowNum) -> new ShelterInfo(
+                rs.getLong("shelter_id"),
+                rs.getObject("capacity", Integer.class),
+                rs.getString("shelter_status")
+            )
+        );
     }
 }
