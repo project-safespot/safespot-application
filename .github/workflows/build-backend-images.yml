@@ -147,6 +147,20 @@ jobs:
           yq e '.preScalingController.image.repository = strenv(ECR_REGISTRY) + "/safespot-dev-ops-ecr-pre-scaling-controller"' -i charts/safespot/values-dev.images.yaml
           yq e '.preScalingController.image.tag = strenv(IMAGE_TAG)' -i charts/safespot/values-dev.images.yaml
 
+      - name: Verify manifest image tags
+        env:
+          IMAGE_TAG: ${{ needs.build.outputs.image-tag }}
+        run: |
+          cd k8s-manifest
+
+          for service in apiCore apiPublicRead externalIngestion scenarioSimulator preScalingController; do
+            actual="$(yq e ".${service}.image.tag" charts/safespot/values-dev.images.yaml)"
+            if [ "${actual}" != "${IMAGE_TAG}" ]; then
+              echo "ERROR: ${service}.image.tag is ${actual}, expected ${IMAGE_TAG}"
+              exit 1
+            fi
+          done
+
       - name: Commit and push if changed
         env:
           IMAGE_TAG: ${{ needs.build.outputs.image-tag }}
