@@ -64,7 +64,11 @@ public class ShelterReadService {
                     );
                     if (dist > radiusM) return null;
 
-                    ShelterStatusCache status = getShelterStatusFromCacheOrRds(s.getShelterId(), ENDPOINT_NEARBY);
+                    ShelterStatusCache status = getShelterStatusFromCacheOrRds(
+                            s.getShelterId(),
+                            ENDPOINT_NEARBY,
+                            false
+                    );
                     return toNearbyItem(s, dist, status);
                 })
                 .filter(item -> item != null)
@@ -77,11 +81,11 @@ public class ShelterReadService {
         Shelter shelter = shelterRepository.findById(shelterId)
                 .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
 
-        ShelterStatusCache status = getShelterStatusFromCacheOrRds(shelterId, ENDPOINT_DETAIL);
+        ShelterStatusCache status = getShelterStatusFromCacheOrRds(shelterId, ENDPOINT_DETAIL, true);
         return toDetailDto(shelter, status);
     }
 
-    private ShelterStatusCache getShelterStatusFromCacheOrRds(Long shelterId, String endpoint) {
+    private ShelterStatusCache getShelterStatusFromCacheOrRds(Long shelterId, String endpoint, boolean publishRegenerationOnFallback) {
         String key = "shelter:status:" + shelterId;
         RedisReadCache.CacheResult<ShelterStatusCacheDto> cached = redisReadCache.get(key, new TypeReference<>() {});
 
@@ -111,7 +115,7 @@ public class ShelterReadService {
                 ? shelter.getUpdatedAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) : null;
         redisReadCache.recordDbFallbackLatency(endpoint, System.currentTimeMillis() - start);
 
-        if (reason != FallbackReason.PARSE_ERROR) {
+        if (publishRegenerationOnFallback && reason != FallbackReason.PARSE_ERROR) {
             meterRegistry.counter("api_read_cache_regen_requested_total",
                     "service", "api-public-read", "endpoint", endpoint).increment();
             if (suppressWindowService.tryPublish(key)) {
