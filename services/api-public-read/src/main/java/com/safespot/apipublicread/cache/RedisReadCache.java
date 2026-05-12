@@ -26,7 +26,11 @@ public class RedisReadCache {
 
     public enum FallbackReason { REDIS_MISS, REDIS_DOWN, PARSE_ERROR }
 
-    public record CacheResult<T>(T value, FallbackReason fallbackReason) {
+    public record CacheResult<T>(T value, FallbackReason fallbackReason, String cache) {
+        public CacheResult(T value, FallbackReason fallbackReason) {
+            this(value, fallbackReason, "unknown");
+        }
+
         public boolean isHit() { return value != null; }
         public boolean isMiss() { return value == null && fallbackReason == FallbackReason.REDIS_MISS; }
         public boolean isDown() { return value == null && fallbackReason == FallbackReason.REDIS_DOWN; }
@@ -35,7 +39,7 @@ public class RedisReadCache {
         public String resultLabel() {
             if (value != null) return "hit";
             return switch (fallbackReason) {
-                case REDIS_DOWN -> "down";
+                case REDIS_DOWN -> "miss";
                 case PARSE_ERROR -> "parse_error";
                 case REDIS_MISS -> "miss";
             };
@@ -43,22 +47,29 @@ public class RedisReadCache {
     }
 
     public <T> CacheResult<T> get(String key, TypeReference<T> type) {
+        String cache = cacheName(key);
+        long start = System.nanoTime();
         try {
             String json = redisTemplate.opsForValue().get(key);
             if (json == null) {
-                return new CacheResult<>(null, FallbackReason.REDIS_MISS);
+                recordRedisRead(cache, "success", start);
+                return new CacheResult<>(null, FallbackReason.REDIS_MISS, cache);
             }
             T value = objectMapper.readValue(json, type);
-            return new CacheResult<>(value, null);
+            recordRedisRead(cache, "success", start);
+            return new CacheResult<>(value, null, cache);
         } catch (RedisConnectionFailureException e) {
             log.warn("Redis connection failure for key={}: {}", key, e.getMessage());
-            return new CacheResult<>(null, FallbackReason.REDIS_DOWN);
+            recordRedisRead(cache, "failure", start);
+            return new CacheResult<>(null, FallbackReason.REDIS_DOWN, cache);
         } catch (DataAccessException e) {
             log.warn("Redis error for key={}: {}", key, e.getMessage());
-            return new CacheResult<>(null, FallbackReason.REDIS_DOWN);
+            recordRedisRead(cache, "failure", start);
+            return new CacheResult<>(null, FallbackReason.REDIS_DOWN, cache);
         } catch (Exception e) {
             log.warn("Redis read/parse error for key={}: {}", key, e.getMessage());
-            return new CacheResult<>(null, FallbackReason.PARSE_ERROR);
+            recordRedisRead(cache, "failure", start);
+            return new CacheResult<>(null, FallbackReason.PARSE_ERROR, cache);
         }
     }
 
@@ -75,39 +86,76 @@ public class RedisReadCache {
         }
     }
 
-    public void recordCacheRequest(String endpoint, String result) {
-        meterRegistry.counter("api_read_cache_request_total",
+    public void recordCacheRequest(String cache, String result) {
+        meterRegistry.counter("safespot.cache.requests",
                 "service", "api-public-read",
-                "endpoint", endpoint,
+                "cache", lowCardinality(cache),
                 "result", result
         ).increment();
     }
 
-    public void recordFallback(String endpoint, FallbackReason reason) {
+    public void recordFallback(String cache, FallbackReason reason) {
         String reasonLabel = switch (reason) {
             case REDIS_DOWN -> "redis_down";
             case PARSE_ERROR -> "parse_error";
             case REDIS_MISS -> "redis_miss";
         };
-        meterRegistry.counter("api_read_cache_fallback_total",
+        meterRegistry.counter("safespot.cache.fallback",
                 "service", "api-public-read",
-                "endpoint", endpoint,
+                "cache", lowCardinality(cache),
                 "reason", reasonLabel
         ).increment();
     }
 
-    public void recordDbFallbackQuery(String endpoint) {
-        meterRegistry.counter("api_read_db_fallback_query_total",
+    public void recordDbFallbackQuery(String repository, FallbackReason reason) {
+        meterRegistry.counter("safespot.db.fallback.queries",
                 "service", "api-public-read",
-                "endpoint", endpoint
+                "repository", lowCardinality(repository),
+                "reason", dbFallbackReason(reason)
         ).increment();
     }
 
-    public void recordDbFallbackLatency(String endpoint, long durationMs) {
-        Timer.builder("api_read_db_fallback_latency_seconds")
+    public void recordDbFallbackLatency(String repository, String result, long durationMs) {
+        Timer.builder("safespot.db.fallback")
                 .tag("service", "api-public-read")
-                .tag("endpoint", endpoint)
+                .tag("repository", lowCardinality(repository))
+                .tag("result", lowCardinality(result))
                 .register(meterRegistry)
                 .record(durationMs, TimeUnit.MILLISECONDS);
+    }
+
+    private void recordRedisRead(String cache, String result, long startNanos) {
+        Timer.builder("safespot.redis.read")
+                .tag("service", "api-public-read")
+                .tag("cache", lowCardinality(cache))
+                .tag("result", lowCardinality(result))
+                .register(meterRegistry)
+                .record(System.nanoTime() - startNanos, TimeUnit.NANOSECONDS);
+    }
+
+    private static String dbFallbackReason(FallbackReason reason) {
+        return switch (reason) {
+            case REDIS_DOWN -> "redis_error";
+            case PARSE_ERROR -> "parse_error";
+            case REDIS_MISS -> "cache_miss";
+        };
+    }
+
+    private static String cacheName(String key) {
+        if (key == null) return "unknown";
+        if (key.equals("disaster:messages:list:seoul")) return "disaster_messages";
+        if (key.equals("disaster:messages:recent:seoul")) return "disaster_messages";
+        if (key.equals("disaster:message:core:seoul")) return "disaster_messages";
+        if (key.startsWith("disaster:detail:")) return "disaster_detail";
+        if (key.startsWith("shelter:status:")) return "shelter_status";
+        if (key.equals("environment:weather:seoul")) return "weather";
+        if (key.equals("environment:air-quality:seoul")) return "air_quality";
+        return "unknown";
+    }
+
+    private static String lowCardinality(String value) {
+        return Optional.ofNullable(value)
+                .filter(v -> v.matches("[a-zA-Z0-9_./{}-]+"))
+                .orElse("unknown");
     }
 }

@@ -69,7 +69,7 @@ class EnvironmentReadServiceTest {
     @Test
     void findWeather_cacheMiss_fallsBackAndPublishes() {
         when(redisReadCache.get(eq(WEATHER_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "weather"));
         when(suppressWindowService.tryPublish(WEATHER_KEY)).thenReturn(true);
 
         WeatherLog log = mock(WeatherLog.class);
@@ -84,7 +84,7 @@ class EnvironmentReadServiceTest {
 
         assertThat(result).isNotNull();
         assertThat(result.temperature()).isEqualTo(18.5);
-        verify(redisReadCache).recordFallback(eq("/weather-alerts"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
+        verify(redisReadCache).recordFallback(eq("weather"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
         verify(cacheRegenerationPublisher).publish(WEATHER_KEY, CacheRegenerationReason.CACHE_MISS, "/weather-alerts");
         verify(redisReadCache, never()).set(any(), any(), any());
     }
@@ -92,7 +92,7 @@ class EnvironmentReadServiceTest {
     @Test
     void findWeather_cacheMiss_suppressWindowPreventsDoublePublish() {
         when(redisReadCache.get(eq(WEATHER_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "weather"));
         when(suppressWindowService.tryPublish(WEATHER_KEY)).thenReturn(false);
         when(weatherLogRepository.findLatestByNxAndNy(anyInt(), anyInt())).thenReturn(Optional.empty());
 
@@ -104,7 +104,7 @@ class EnvironmentReadServiceTest {
     @Test
     void findWeather_parseError_fallsBackWithoutRegenerationRequest() {
         when(redisReadCache.get(eq(WEATHER_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.PARSE_ERROR));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.PARSE_ERROR, "weather"));
         when(weatherLogRepository.findLatestByNxAndNy(anyInt(), anyInt())).thenReturn(Optional.empty());
 
         WeatherAlertDto result = environmentReadService.findWeather("서울", 60, 127);
@@ -117,7 +117,7 @@ class EnvironmentReadServiceTest {
     @Test
     void findWeather_noData_returnsNull() {
         when(redisReadCache.get(eq(WEATHER_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "weather"));
         when(suppressWindowService.tryPublish(WEATHER_KEY)).thenReturn(false);
         when(weatherLogRepository.findLatestByNxAndNy(anyInt(), anyInt())).thenReturn(Optional.empty());
 
@@ -147,7 +147,7 @@ class EnvironmentReadServiceTest {
     void findWeather_regionOnly_cacheMiss_fallsBackAndPublishes() {
         when(regionToGridResolver.resolve("서울특별시")).thenReturn(Optional.of(SEOUL_GRID));
         when(redisReadCache.get(eq(WEATHER_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "weather"));
         when(suppressWindowService.tryPublish(WEATHER_KEY)).thenReturn(true);
 
         WeatherLog log = mock(WeatherLog.class);
@@ -163,7 +163,7 @@ class EnvironmentReadServiceTest {
         assertThat(result).isNotNull();
         assertThat(result.region()).isEqualTo("서울특별시");
         assertThat(result.temperature()).isEqualTo(20.0);
-        verify(redisReadCache).recordFallback(eq("/weather-alerts"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
+        verify(redisReadCache).recordFallback(eq("weather"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
         verify(cacheRegenerationPublisher).publish(WEATHER_KEY, CacheRegenerationReason.CACHE_MISS, "/weather-alerts");
         verify(redisReadCache, never()).set(any(), any(), any());
     }
@@ -172,7 +172,7 @@ class EnvironmentReadServiceTest {
     void findWeather_regionOnly_noData_returnsNull() {
         when(regionToGridResolver.resolve("서울특별시")).thenReturn(Optional.of(SEOUL_GRID));
         when(redisReadCache.get(eq(WEATHER_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "weather"));
         when(suppressWindowService.tryPublish(WEATHER_KEY)).thenReturn(false);
         when(weatherLogRepository.findLatestByNxAndNy(60, 127)).thenReturn(Optional.empty());
 
@@ -217,7 +217,7 @@ class EnvironmentReadServiceTest {
     @Test
     void findAirQuality_cacheMiss_fallsBackAndPublishes() {
         when(redisReadCache.get(eq(AIR_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "air_quality"));
         when(suppressWindowService.tryPublish(AIR_KEY)).thenReturn(true);
 
         AirQualityLog log = mock(AirQualityLog.class);
@@ -232,7 +232,7 @@ class EnvironmentReadServiceTest {
         assertThat(result.stationName()).isEqualTo("종로구");
         verify(airQualityLogRepository).findLatestByStationName("종로구");
         verify(airQualityLogRepository, never()).findLatest();
-        verify(redisReadCache).recordFallback(eq("/air-quality"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
+        verify(redisReadCache).recordFallback(eq("air_quality"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
         verify(cacheRegenerationPublisher).publish(AIR_KEY, CacheRegenerationReason.CACHE_MISS, "/air-quality");
         verify(redisReadCache, never()).set(any(), any(), any());
     }

@@ -38,5 +38,11 @@ public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPubli
                 "endpoint", endpoint,
                 "result", "success"
         ).increment();
+        meterRegistry.counter("safespot.cache.regeneration.requested",
+                "service", "api-public-read",
+                "cache", family.get(),
+                "reason", reason.value(),
+                "result", "success"
+        ).increment();
     }
 }

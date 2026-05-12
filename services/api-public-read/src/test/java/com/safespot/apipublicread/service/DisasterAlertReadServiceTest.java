@@ -84,7 +84,7 @@ class DisasterAlertReadServiceTest {
     @Test
     void findAlerts_cacheMiss_fallsBackToRdsAndPublishes() {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
         DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
         when(disasterAlertRepository.findAlerts(eq("서울특별시"), eq("EARTHQUAKE"), any(PageRequest.class)))
                 .thenReturn(List.of(alert));
@@ -93,7 +93,7 @@ class DisasterAlertReadServiceTest {
         List<DisasterAlertItem> result = disasterAlertReadService.findAlerts("서울특별시", "EARTHQUAKE");
 
         assertThat(result).hasSize(1);
-        verify(redisReadCache).recordFallback(eq("/disaster-alerts"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
+        verify(redisReadCache).recordFallback(eq("disaster_messages"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
         verify(cacheRegenerationPublisher).publish(LIST_KEY, CacheRegenerationReason.CACHE_MISS, "/disaster-alerts");
     }
 
@@ -102,7 +102,7 @@ class DisasterAlertReadServiceTest {
         PageRequest expectedPage = PageRequest.of(0, 50, Sort.by(Sort.Direction.DESC, "issuedAt"));
 
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
         List<DisasterAlert> rdsAlerts = java.util.stream.IntStream.rangeClosed(1, 50)
                 .mapToObj(i -> stubAlert(i, "FLOOD"))
                 .toList();
@@ -117,7 +117,7 @@ class DisasterAlertReadServiceTest {
     @Test
     void findAlerts_cacheMiss_suppressWindowPreventsDoublePublish() {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
         when(disasterAlertRepository.findAlerts(any(), any(), any(PageRequest.class))).thenReturn(List.of());
         when(suppressWindowService.tryPublish(LIST_KEY)).thenReturn(false);
 
@@ -129,7 +129,7 @@ class DisasterAlertReadServiceTest {
     @Test
     void findAlerts_parseError_fallsBackWithoutRegenerationRequest() {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.PARSE_ERROR));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.PARSE_ERROR, "disaster_messages"));
         when(disasterAlertRepository.findAlerts(any(), any(), any(PageRequest.class))).thenReturn(List.of());
 
         disasterAlertReadService.findAlerts(null, null);
@@ -163,7 +163,7 @@ class DisasterAlertReadServiceTest {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(List.of(EARTHQUAKE_ITEM), null));
         when(redisReadCache.get(eq(DETAIL_KEY_55), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_detail"));
         DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
         when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.of(alert));
         when(suppressWindowService.tryPublish(DETAIL_KEY_55)).thenReturn(true);
@@ -171,7 +171,7 @@ class DisasterAlertReadServiceTest {
         DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");
 
         assertThat(result.alertId()).isEqualTo(55L);
-        verify(redisReadCache).recordFallback(eq("/disasters/{disasterType}/latest"),
+        verify(redisReadCache).recordFallback(eq("disaster_detail"),
                 eq(RedisReadCache.FallbackReason.REDIS_MISS));
         verify(cacheRegenerationPublisher).publish(DETAIL_KEY_55, CacheRegenerationReason.CACHE_MISS, "/disasters/{disasterType}/latest");
         verify(cacheRegenerationPublisher, never()).publish(eq(LIST_KEY), any(), anyString());
@@ -194,7 +194,7 @@ class DisasterAlertReadServiceTest {
     @Test
     void findLatest_listMiss_fallsBackToRdsAndPublishesListKey() {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
         DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
         when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.of(alert));
         when(suppressWindowService.tryPublish(LIST_KEY)).thenReturn(true);
@@ -202,7 +202,7 @@ class DisasterAlertReadServiceTest {
         DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");
 
         assertThat(result.alertId()).isEqualTo(55L);
-        verify(redisReadCache).recordFallback(eq("/disasters/{disasterType}/latest"),
+        verify(redisReadCache).recordFallback(eq("disaster_messages"),
                 eq(RedisReadCache.FallbackReason.REDIS_MISS));
         verify(cacheRegenerationPublisher).publish(LIST_KEY, CacheRegenerationReason.CACHE_MISS, "/disasters/{disasterType}/latest");
     }
@@ -210,7 +210,7 @@ class DisasterAlertReadServiceTest {
     @Test
     void findLatest_listMiss_notFound_throwsApiException() {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS));
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
         when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.empty());
         when(suppressWindowService.tryPublish(LIST_KEY)).thenReturn(false);
 

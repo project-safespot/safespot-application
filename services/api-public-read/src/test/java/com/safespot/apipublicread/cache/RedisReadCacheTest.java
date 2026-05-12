@@ -16,8 +16,9 @@ class RedisReadCacheTest {
 
     private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
     private final ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
     private final RedisReadCache redisReadCache =
-            new RedisReadCache(redisTemplate, new ObjectMapper(), new SimpleMeterRegistry());
+            new RedisReadCache(redisTemplate, new ObjectMapper(), meterRegistry);
 
     @Test
     void missingKey_isCacheMiss() {
@@ -29,6 +30,11 @@ class RedisReadCacheTest {
 
         assertThat(result.isMiss()).isTrue();
         assertThat(result.resultLabel()).isEqualTo("miss");
+        assertThat(result.cache()).isEqualTo("shelter_status");
+        assertThat(meterRegistry.find("safespot.redis.read")
+                .tag("cache", "shelter_status")
+                .tag("result", "success")
+                .timer()).isNotNull();
     }
 
     @Test
@@ -41,5 +47,35 @@ class RedisReadCacheTest {
 
         assertThat(result.isParseError()).isTrue();
         assertThat(result.resultLabel()).isEqualTo("parse_error");
+        assertThat(result.cache()).isEqualTo("shelter_status");
+        assertThat(meterRegistry.find("safespot.redis.read")
+                .tag("cache", "shelter_status")
+                .tag("result", "failure")
+                .timer()).isNotNull();
+    }
+
+    @Test
+    void customMetrics_useLowCardinalityTags() {
+        redisReadCache.recordCacheRequest("disaster_detail", "miss");
+        redisReadCache.recordFallback("disaster_detail", RedisReadCache.FallbackReason.REDIS_MISS);
+        redisReadCache.recordDbFallbackQuery("disaster_alert_repository", RedisReadCache.FallbackReason.REDIS_MISS);
+        redisReadCache.recordDbFallbackLatency("disaster_alert_repository", "success", 10);
+
+        assertThat(meterRegistry.find("safespot.cache.requests")
+                .tag("cache", "disaster_detail")
+                .tag("result", "miss")
+                .counter()).isNotNull();
+        assertThat(meterRegistry.find("safespot.cache.fallback")
+                .tag("cache", "disaster_detail")
+                .tag("reason", "redis_miss")
+                .counter()).isNotNull();
+        assertThat(meterRegistry.find("safespot.db.fallback.queries")
+                .tag("repository", "disaster_alert_repository")
+                .tag("reason", "cache_miss")
+                .counter()).isNotNull();
+        assertThat(meterRegistry.find("safespot.db.fallback")
+                .tag("repository", "disaster_alert_repository")
+                .tag("result", "success")
+                .timer()).isNotNull();
     }
 }

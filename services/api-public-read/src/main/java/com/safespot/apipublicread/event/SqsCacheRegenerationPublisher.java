@@ -40,6 +40,12 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
                     "endpoint", endpoint,
                     "result", "failure"
             ).increment();
+            meterRegistry.counter("safespot.cache.regeneration.requested",
+                    "service", "api-public-read",
+                    "cache", family.get(),
+                    "reason", reason.value(),
+                    "result", "failure"
+            ).increment();
             return;
         }
         try {
@@ -54,6 +60,12 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
                     "endpoint", endpoint,
                     "result", "success"
             ).increment();
+            meterRegistry.counter("safespot.cache.regeneration.requested",
+                    "service", "api-public-read",
+                    "cache", family.get(),
+                    "reason", reason.value(),
+                    "result", "success"
+            ).increment();
         } catch (Exception e) {
             log.error("[CacheRegen] SQS send failed eventId={} eventType={} reason={} cacheFamily={} cacheKey={} endpoint={} traceId={} idempotencyKey={}: {}",
                     envelope.eventId(), envelope.eventType(), reason.value(), family.get(), cacheKey, endpoint,
@@ -62,6 +74,12 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
             meterRegistry.counter("api_read_cache_regen_publish_total",
                     "service", "api-public-read",
                     "endpoint", endpoint,
+                    "result", "failure"
+            ).increment();
+            meterRegistry.counter("safespot.cache.regeneration.requested",
+                    "service", "api-public-read",
+                    "cache", family.get(),
+                    "reason", reason.value(),
                     "result", "failure"
             ).increment();
         }

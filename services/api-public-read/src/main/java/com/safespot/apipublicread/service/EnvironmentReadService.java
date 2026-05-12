@@ -30,6 +30,8 @@ public class EnvironmentReadService {
 
     private static final String ENDPOINT_WEATHER = "/weather-alerts";
     private static final String ENDPOINT_AIR = "/air-quality";
+    private static final String REPOSITORY_WEATHER_LOG = "weather_log_repository";
+    private static final String REPOSITORY_AIR_QUALITY_LOG = "air_quality_log_repository";
 
     static final String WEATHER_KEY = "environment:weather:seoul";
     static final String AIR_KEY = "environment:air-quality:seoul";
@@ -54,16 +56,16 @@ public class EnvironmentReadService {
 
     private WeatherAlertDto findWeatherByGrid(String region, int nx, int ny) {
         RedisReadCache.CacheResult<WeatherCacheDto> cached = redisReadCache.get(WEATHER_KEY, new TypeReference<>() {});
-        redisReadCache.recordCacheRequest(ENDPOINT_WEATHER, cached.resultLabel());
+        redisReadCache.recordCacheRequest(cached.cache(), cached.resultLabel());
         if (cached.isHit()) return toWeatherDto(region, cached.value());
 
-        redisReadCache.recordFallback(ENDPOINT_WEATHER, cached.fallbackReason());
-        redisReadCache.recordDbFallbackQuery(ENDPOINT_WEATHER);
-        requestRegeneration(WEATHER_KEY, ENDPOINT_WEATHER, cached.fallbackReason());
+        redisReadCache.recordFallback(cached.cache(), cached.fallbackReason());
+        redisReadCache.recordDbFallbackQuery(REPOSITORY_WEATHER_LOG, cached.fallbackReason());
+        requestRegeneration(WEATHER_KEY, cached.cache(), ENDPOINT_WEATHER, cached.fallbackReason());
 
         long start = System.currentTimeMillis();
         WeatherLog log = weatherLogRepository.findLatestByNxAndNy(nx, ny).orElse(null);
-        redisReadCache.recordDbFallbackLatency(ENDPOINT_WEATHER, System.currentTimeMillis() - start);
+        redisReadCache.recordDbFallbackLatency(REPOSITORY_WEATHER_LOG, "success", System.currentTimeMillis() - start);
         if (log == null) return null;
         return toWeatherDto(region, log);
     }
@@ -74,16 +76,16 @@ public class EnvironmentReadService {
                         "현재 지원하지 않는 지역입니다: " + region));
 
         RedisReadCache.CacheResult<WeatherCacheDto> cached = redisReadCache.get(WEATHER_KEY, new TypeReference<>() {});
-        redisReadCache.recordCacheRequest(ENDPOINT_WEATHER, cached.resultLabel());
+        redisReadCache.recordCacheRequest(cached.cache(), cached.resultLabel());
         if (cached.isHit()) return toWeatherDto(region, cached.value());
 
-        redisReadCache.recordFallback(ENDPOINT_WEATHER, cached.fallbackReason());
-        redisReadCache.recordDbFallbackQuery(ENDPOINT_WEATHER);
-        requestRegeneration(WEATHER_KEY, ENDPOINT_WEATHER, cached.fallbackReason());
+        redisReadCache.recordFallback(cached.cache(), cached.fallbackReason());
+        redisReadCache.recordDbFallbackQuery(REPOSITORY_WEATHER_LOG, cached.fallbackReason());
+        requestRegeneration(WEATHER_KEY, cached.cache(), ENDPOINT_WEATHER, cached.fallbackReason());
 
         long start = System.currentTimeMillis();
         WeatherLog log = weatherLogRepository.findLatestByNxAndNy(grid[0], grid[1]).orElse(null);
-        redisReadCache.recordDbFallbackLatency(ENDPOINT_WEATHER, System.currentTimeMillis() - start);
+        redisReadCache.recordDbFallbackLatency(REPOSITORY_WEATHER_LOG, "success", System.currentTimeMillis() - start);
         if (log == null) return null;
         return toWeatherDto(region, log);
     }
@@ -94,18 +96,18 @@ public class EnvironmentReadService {
         }
 
         RedisReadCache.CacheResult<AirQualityCacheDto> cached = redisReadCache.get(AIR_KEY, new TypeReference<>() {});
-        redisReadCache.recordCacheRequest(ENDPOINT_AIR, cached.resultLabel());
+        redisReadCache.recordCacheRequest(cached.cache(), cached.resultLabel());
         if (cached.isHit()) return toAirQualityDto(cached.value());
 
-        redisReadCache.recordFallback(ENDPOINT_AIR, cached.fallbackReason());
-        redisReadCache.recordDbFallbackQuery(ENDPOINT_AIR);
-        requestRegeneration(AIR_KEY, ENDPOINT_AIR, cached.fallbackReason());
+        redisReadCache.recordFallback(cached.cache(), cached.fallbackReason());
+        redisReadCache.recordDbFallbackQuery(REPOSITORY_AIR_QUALITY_LOG, cached.fallbackReason());
+        requestRegeneration(AIR_KEY, cached.cache(), ENDPOINT_AIR, cached.fallbackReason());
 
         long start = System.currentTimeMillis();
         AirQualityLog log = stationName != null
                 ? airQualityLogRepository.findLatestByStationName(stationName).orElse(null)
                 : airQualityLogRepository.findLatest().orElse(null);
-        redisReadCache.recordDbFallbackLatency(ENDPOINT_AIR, System.currentTimeMillis() - start);
+        redisReadCache.recordDbFallbackLatency(REPOSITORY_AIR_QUALITY_LOG, "success", System.currentTimeMillis() - start);
         if (log == null) return null;
         return new AirQualityDto(
                 log.getStationName(),
@@ -121,17 +123,27 @@ public class EnvironmentReadService {
         );
     }
 
-    private void requestRegeneration(String cacheKey, String endpoint, RedisReadCache.FallbackReason fallbackReason) {
+    private void requestRegeneration(String cacheKey, String cache, String endpoint, RedisReadCache.FallbackReason fallbackReason) {
         if (fallbackReason == RedisReadCache.FallbackReason.PARSE_ERROR) {
             return;
         }
         meterRegistry.counter("api_read_cache_regen_requested_total",
                 "service", "api-public-read", "endpoint", endpoint).increment();
+        meterRegistry.counter("safespot.cache.regeneration.requested",
+                "service", "api-public-read",
+                "cache", cache,
+                "reason", CacheRegenerationReason.from(fallbackReason).value(),
+                "result", "requested").increment();
         if (suppressWindowService.tryPublish(cacheKey)) {
             cacheRegenerationPublisher.publish(cacheKey, CacheRegenerationReason.from(fallbackReason), endpoint);
         } else {
             meterRegistry.counter("api_read_cache_regen_suppressed_total",
                     "service", "api-public-read", "endpoint", endpoint).increment();
+            meterRegistry.counter("safespot.cache.regeneration.requested",
+                    "service", "api-public-read",
+                    "cache", cache,
+                    "reason", CacheRegenerationReason.from(fallbackReason).value(),
+                    "result", "suppressed").increment();
         }
     }
 

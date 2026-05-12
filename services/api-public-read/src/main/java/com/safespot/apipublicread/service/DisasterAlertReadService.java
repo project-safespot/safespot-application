@@ -33,6 +33,7 @@ public class DisasterAlertReadService {
 
     private static final String ENDPOINT_LIST = "/disaster-alerts";
     private static final String ENDPOINT_LATEST = "/disasters/{disasterType}/latest";
+    private static final String REPOSITORY_DISASTER_ALERT = "disaster_alert_repository";
 
     static final String LIST_KEY = "disaster:messages:list:seoul";
     static final String DETAIL_KEY_PREFIX = "disaster:detail:";
@@ -50,21 +51,21 @@ public class DisasterAlertReadService {
         RedisReadCache.CacheResult<List<DisasterMessageCacheDto>> cached =
                 redisReadCache.get(LIST_KEY, new TypeReference<>() {});
 
-        redisReadCache.recordCacheRequest(ENDPOINT_LIST, cached.resultLabel());
+        redisReadCache.recordCacheRequest(cached.cache(), cached.resultLabel());
 
         if (cached.isHit()) {
             return filterItems(cached.value(), region, disasterType)
                     .stream().map(this::toItem).toList();
         }
 
-        redisReadCache.recordFallback(ENDPOINT_LIST, cached.fallbackReason());
-        redisReadCache.recordDbFallbackQuery(ENDPOINT_LIST);
-        requestRegeneration(LIST_KEY, ENDPOINT_LIST, cached.fallbackReason());
+        redisReadCache.recordFallback(cached.cache(), cached.fallbackReason());
+        redisReadCache.recordDbFallbackQuery(REPOSITORY_DISASTER_ALERT, cached.fallbackReason());
+        requestRegeneration(LIST_KEY, cached.cache(), ENDPOINT_LIST, cached.fallbackReason());
 
         long start = System.currentTimeMillis();
         List<DisasterAlertItem> result = disasterAlertRepository.findAlerts(region, disasterType, FALLBACK_PAGE)
                 .stream().map(this::toItem).toList();
-        redisReadCache.recordDbFallbackLatency(ENDPOINT_LIST, System.currentTimeMillis() - start);
+        redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "success", System.currentTimeMillis() - start);
         return result;
     }
 
@@ -72,7 +73,7 @@ public class DisasterAlertReadService {
         RedisReadCache.CacheResult<List<DisasterMessageCacheDto>> listResult =
                 redisReadCache.get(LIST_KEY, new TypeReference<>() {});
 
-        redisReadCache.recordCacheRequest(ENDPOINT_LATEST, listResult.resultLabel());
+        redisReadCache.recordCacheRequest(listResult.cache(), listResult.resultLabel());
 
         if (listResult.isHit()) {
             DisasterMessageCacheDto match = filterByType(listResult.value(), disasterType);
@@ -82,13 +83,13 @@ public class DisasterAlertReadService {
             throw new ApiException(ErrorCode.NOT_FOUND);
         }
 
-        redisReadCache.recordFallback(ENDPOINT_LATEST, listResult.fallbackReason());
-        redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
-        requestRegeneration(LIST_KEY, ENDPOINT_LATEST, listResult.fallbackReason());
+        redisReadCache.recordFallback(listResult.cache(), listResult.fallbackReason());
+        redisReadCache.recordDbFallbackQuery(REPOSITORY_DISASTER_ALERT, listResult.fallbackReason());
+        requestRegeneration(LIST_KEY, listResult.cache(), ENDPOINT_LATEST, listResult.fallbackReason());
 
         long start = System.currentTimeMillis();
         Optional<DisasterAlert> maybeAlert = disasterAlertRepository.findLatest(disasterType, region);
-        redisReadCache.recordDbFallbackLatency(ENDPOINT_LATEST, System.currentTimeMillis() - start);
+        redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "success", System.currentTimeMillis() - start);
         return maybeAlert.map(this::toLatestDto)
                 .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
     }
@@ -98,32 +99,42 @@ public class DisasterAlertReadService {
         RedisReadCache.CacheResult<DisasterDetailCacheDto> detailResult =
                 redisReadCache.get(detailKey, new TypeReference<>() {});
 
-        redisReadCache.recordCacheRequest(ENDPOINT_LATEST, detailResult.resultLabel());
+        redisReadCache.recordCacheRequest(detailResult.cache(), detailResult.resultLabel());
 
         if (detailResult.isHit()) return toLatestDto(detailResult.value());
 
-        redisReadCache.recordFallback(ENDPOINT_LATEST, detailResult.fallbackReason());
-        redisReadCache.recordDbFallbackQuery(ENDPOINT_LATEST);
-        requestRegeneration(detailKey, ENDPOINT_LATEST, detailResult.fallbackReason());
+        redisReadCache.recordFallback(detailResult.cache(), detailResult.fallbackReason());
+        redisReadCache.recordDbFallbackQuery(REPOSITORY_DISASTER_ALERT, detailResult.fallbackReason());
+        requestRegeneration(detailKey, detailResult.cache(), ENDPOINT_LATEST, detailResult.fallbackReason());
 
         long start = System.currentTimeMillis();
         Optional<DisasterAlert> maybeAlert = disasterAlertRepository.findLatest(disasterType, region);
-        redisReadCache.recordDbFallbackLatency(ENDPOINT_LATEST, System.currentTimeMillis() - start);
+        redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "success", System.currentTimeMillis() - start);
         return maybeAlert.map(this::toLatestDto)
                 .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
     }
 
-    private void requestRegeneration(String cacheKey, String endpoint, RedisReadCache.FallbackReason fallbackReason) {
+    private void requestRegeneration(String cacheKey, String cache, String endpoint, RedisReadCache.FallbackReason fallbackReason) {
         if (fallbackReason == RedisReadCache.FallbackReason.PARSE_ERROR) {
             return;
         }
         meterRegistry.counter("api_read_cache_regen_requested_total",
                 "service", "api-public-read", "endpoint", endpoint).increment();
+        meterRegistry.counter("safespot.cache.regeneration.requested",
+                "service", "api-public-read",
+                "cache", cache,
+                "reason", CacheRegenerationReason.from(fallbackReason).value(),
+                "result", "requested").increment();
         if (suppressWindowService.tryPublish(cacheKey)) {
             cacheRegenerationPublisher.publish(cacheKey, CacheRegenerationReason.from(fallbackReason), endpoint);
         } else {
             meterRegistry.counter("api_read_cache_regen_suppressed_total",
                     "service", "api-public-read", "endpoint", endpoint).increment();
+            meterRegistry.counter("safespot.cache.regeneration.requested",
+                    "service", "api-public-read",
+                    "cache", cache,
+                    "reason", CacheRegenerationReason.from(fallbackReason).value(),
+                    "result", "suppressed").increment();
         }
     }
 
