@@ -27,6 +27,10 @@ server:
 #   sqs:
 #     enabled: true
 #     endpoint-override: http://localhost:4566
-#     disaster-cache-queue-url: http://localhost:4566/000000000000/disaster-cache
-#     environment-cache-queue-url: http://localhost:4566/000000000000/environment-cache
-# LocalStack 큐 생성: aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name disaster-cache
+#     cache-refresh-queue-url: http://localhost:4566/000000000000/safespot-cache-refresh
+#     readmodel-refresh-queue-url: http://localhost:4566/000000000000/safespot-readmodel-refresh
+#     environment-cache-refresh-queue-url: http://localhost:4566/000000000000/safespot-environment-cache-refresh
+# LocalStack 큐 생성:
+#   aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name safespot-cache-refresh
+#   aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name safespot-readmodel-refresh
+#   aws --endpoint-url=http://localhost:4566 sqs create-queue --queue-name safespot-environment-cache-refresh

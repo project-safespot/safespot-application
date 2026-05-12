@@ -5,10 +5,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safespot.externalingestion.domain.entity.ExternalApiRawPayload;
 import com.safespot.externalingestion.domain.entity.Shelter;
 import com.safespot.externalingestion.metrics.IngestionMetrics;
+import com.safespot.externalingestion.publisher.CacheEventPublisher;
+import com.safespot.externalingestion.publisher.event.ShelterDataCollectedEvent;
 import com.safespot.externalingestion.repository.ShelterRepository;
+import com.safespot.externalingestion.util.AfterCommit;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +39,10 @@ public class ShelterNormalizer implements Normalizer {
     private static final BigDecimal LON_MIN = new BigDecimal("124");
     private static final BigDecimal LON_MAX = new BigDecimal("132");
 
+    private static final String QUEUE = "cache-refresh";
+    private static final String EVENT_TYPE = "ShelterDataCollected";
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
     private record ShelterSourceMeta(String rootKey, String rowSubPath, String disasterType) {}
 
     private static final Map<String, ShelterSourceMeta> SOURCE_META = Map.of(
@@ -44,13 +55,16 @@ public class ShelterNormalizer implements Normalizer {
     private final ShelterRepository shelterRepo;
     private final IngestionMetrics metrics;
     private final ObjectMapper objectMapper;
+    private final CacheEventPublisher cacheEventPublisher;
 
     public ShelterNormalizer(String sourceCode, ShelterRepository shelterRepo,
-                              IngestionMetrics metrics, ObjectMapper objectMapper) {
+                              IngestionMetrics metrics, ObjectMapper objectMapper,
+                              CacheEventPublisher cacheEventPublisher) {
         this.sourceCode = sourceCode;
         this.shelterRepo = shelterRepo;
         this.metrics = metrics;
         this.objectMapper = objectMapper;
+        this.cacheEventPublisher = cacheEventPublisher;
     }
 
     @Override
@@ -59,6 +73,7 @@ public class ShelterNormalizer implements Normalizer {
     }
 
     @Override
+    @Transactional
     public NormalizationResult normalize(ExternalApiRawPayload raw) {
         ShelterSourceMeta meta = SOURCE_META.get(sourceCode);
         if (meta == null) {
@@ -155,7 +170,27 @@ public class ShelterNormalizer implements Normalizer {
             log.error("[{}] parse failed raw_id={}", sourceCode, raw.getRawId(), e);
         }
 
+        if (succeeded > 0) {
+            int capturedCount = succeeded;
+            String traceId = raw.getExecutionLog().getTraceId();
+            String completedAt = OffsetDateTime.now(KST).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+            String disasterType = meta != null ? meta.disasterType() : sourceCode;
+            AfterCommit.run(() -> publishEvent(traceId, disasterType, capturedCount, completedAt));
+        }
+
         return NormalizationResult.of(succeeded, errors.size(), errors);
+    }
+
+    private void publishEvent(String traceId, String disasterType, int savedCount, String completedAt) {
+        try {
+            ShelterDataCollectedEvent event = new ShelterDataCollectedEvent(traceId, disasterType, savedCount, completedAt);
+            cacheEventPublisher.publish(event, QUEUE);
+            metrics.incrementSqsPublish(sourceCode, QUEUE, EVENT_TYPE);
+        } catch (Exception e) {
+            metrics.incrementSqsPublishFailure(sourceCode, QUEUE, EVENT_TYPE);
+            log.error("[{}] shelter event publish failed — traceId={} disasterType={} savedCount={} completedAt={}",
+                sourceCode, traceId, disasterType, savedCount, completedAt, e);
+        }
     }
 
     private String extractName(JsonNode row) {

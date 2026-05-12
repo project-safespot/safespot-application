@@ -34,20 +34,24 @@ public class SqsCacheEventPublisher implements CacheEventPublisher {
         SqsClient sqsClient,
         ObjectMapper objectMapper,
         IngestionMetrics metrics,
-        @Value("${ingestion.sqs.disaster-cache-queue-url}") String disasterQueueUrl,
-        @Value("${ingestion.sqs.environment-cache-queue-url}") String environmentQueueUrl
+        @Value("${ingestion.sqs.cache-refresh-queue-url}") String cacheRefreshQueueUrl,
+        @Value("${ingestion.sqs.readmodel-refresh-queue-url}") String readmodelRefreshQueueUrl,
+        @Value("${ingestion.sqs.environment-cache-refresh-queue-url}") String envCacheRefreshQueueUrl
     ) {
-        Assert.hasText(disasterQueueUrl,
-            "ingestion.sqs.disaster-cache-queue-url must be set when ingestion.sqs.enabled=true");
-        Assert.hasText(environmentQueueUrl,
-            "ingestion.sqs.environment-cache-queue-url must be set when ingestion.sqs.enabled=true");
+        Assert.hasText(cacheRefreshQueueUrl,
+            "ingestion.sqs.cache-refresh-queue-url must be set when ingestion.sqs.enabled=true");
+        Assert.hasText(readmodelRefreshQueueUrl,
+            "ingestion.sqs.readmodel-refresh-queue-url must be set when ingestion.sqs.enabled=true");
+        Assert.hasText(envCacheRefreshQueueUrl,
+            "ingestion.sqs.environment-cache-refresh-queue-url must be set when ingestion.sqs.enabled=true");
 
         this.sqsClient = sqsClient;
         this.objectMapper = objectMapper;
         this.metrics = metrics;
         this.queueUrls = Map.of(
-            "disaster-collection", disasterQueueUrl,
-            "environment-collection", environmentQueueUrl
+            "cache-refresh", cacheRefreshQueueUrl,
+            "disaster-collection", readmodelRefreshQueueUrl,
+            "environment-collection", envCacheRefreshQueueUrl
         );
     }
 

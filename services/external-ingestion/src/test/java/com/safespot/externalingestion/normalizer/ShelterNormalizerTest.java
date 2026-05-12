@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.safespot.externalingestion.domain.entity.*;
 import com.safespot.externalingestion.metrics.IngestionMetrics;
+import com.safespot.externalingestion.publisher.CacheEventPublisher;
 import com.safespot.externalingestion.repository.ShelterRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
@@ -23,12 +24,13 @@ import static org.mockito.Mockito.*;
 class ShelterNormalizerTest {
 
     @Mock private ShelterRepository shelterRepo;
+    @Mock private CacheEventPublisher cacheEventPublisher;
 
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
     private final IngestionMetrics metrics = new IngestionMetrics(new SimpleMeterRegistry());
 
     private ShelterNormalizer normalizer(String sourceCode) {
-        return new ShelterNormalizer(sourceCode, shelterRepo, metrics, objectMapper);
+        return new ShelterNormalizer(sourceCode, shelterRepo, metrics, objectMapper, cacheEventPublisher);
     }
 
     // ── LANDSLIDE ──────────────────────────────────────────────────────────────

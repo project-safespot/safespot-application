@@ -3,6 +3,7 @@ package com.safespot.externalingestion.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safespot.externalingestion.metrics.IngestionMetrics;
 import com.safespot.externalingestion.normalizer.ShelterNormalizer;
+import com.safespot.externalingestion.publisher.CacheEventPublisher;
 import com.safespot.externalingestion.repository.ShelterRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -16,21 +17,24 @@ public class NormalizerConfig {
     @Bean
     public ShelterNormalizer seoulShelterEarthquakeNormalizer(ShelterRepository shelterRepo,
                                                                IngestionMetrics metrics,
-                                                               ObjectMapper objectMapper) {
-        return new ShelterNormalizer("SEOUL_SHELTER_EARTHQUAKE", shelterRepo, metrics, objectMapper);
+                                                               ObjectMapper objectMapper,
+                                                               CacheEventPublisher cacheEventPublisher) {
+        return new ShelterNormalizer("SEOUL_SHELTER_EARTHQUAKE", shelterRepo, metrics, objectMapper, cacheEventPublisher);
     }
 
     @Bean
     public ShelterNormalizer seoulShelterLandslideNormalizer(ShelterRepository shelterRepo,
                                                               IngestionMetrics metrics,
-                                                              ObjectMapper objectMapper) {
-        return new ShelterNormalizer("SEOUL_SHELTER_LANDSLIDE", shelterRepo, metrics, objectMapper);
+                                                              ObjectMapper objectMapper,
+                                                              CacheEventPublisher cacheEventPublisher) {
+        return new ShelterNormalizer("SEOUL_SHELTER_LANDSLIDE", shelterRepo, metrics, objectMapper, cacheEventPublisher);
     }
 
     @Bean
     public ShelterNormalizer seoulShelterFloodNormalizer(ShelterRepository shelterRepo,
                                                           IngestionMetrics metrics,
-                                                          ObjectMapper objectMapper) {
-        return new ShelterNormalizer("SEOUL_SHELTER_FLOOD", shelterRepo, metrics, objectMapper);
+                                                          ObjectMapper objectMapper,
+                                                          CacheEventPublisher cacheEventPublisher) {
+        return new ShelterNormalizer("SEOUL_SHELTER_FLOOD", shelterRepo, metrics, objectMapper, cacheEventPublisher);
     }
 }

@@ -14,74 +14,98 @@ import java.util.Optional;
 public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher {
 
     private final SqsClient sqsClient;
-    private final String queueUrl;
+    private final SqsQueueUrlProvider queueUrlProvider;
     private final ObjectMapper objectMapper;
-    private final CacheKeyFamilyResolver resolver;
+    private final CacheKeyFamilyResolver familyResolver;
+    private final CacheRegenerationRouteResolver routeResolver;
+    private final CacheRegenerationEnvelopeFactory envelopeFactory;
     private final CacheRegenerationPublishFailureRecorder failureRecorder;
     private final MeterRegistry meterRegistry;
 
     @Override
     public void publish(String cacheKey, CacheRegenerationReason reason, String endpoint) {
-        Optional<String> family = resolver.resolve(cacheKey);
-        if (family.isEmpty()) {
-            log.warn("[CacheRegen] unsupported cacheKey={}, skipping SQS publish", cacheKey);
+        Optional<String> familyOpt = familyResolver.resolve(cacheKey);
+        if (familyOpt.isEmpty()) {
+            log.warn("[CacheRegen] unsupported cacheKey={} endpoint={} reason={}: no family mapping",
+                    cacheKey, endpoint, reason.value());
+            recordUnsupportedMetric("unknown", reason.value());
             return;
         }
-        CacheRegenerationEnvelope envelope = CacheRegenerationEnvelope.build(cacheKey, family.get(), reason);
+        String cacheFamily = familyOpt.get();
+
+        Optional<CacheRegenerationRoute> routeOpt = routeResolver.resolve(cacheFamily);
+        if (routeOpt.isEmpty()) {
+            log.warn("[CacheRegen] unsupported cacheFamily={} cacheKey={} endpoint={} reason={}: no queue route",
+                    cacheFamily, cacheKey, endpoint, reason.value());
+            recordUnsupportedMetric(cacheFamily, reason.value());
+            return;
+        }
+        CacheRegenerationRoute route = routeOpt.get();
+        QueueType queueType = route.queueType();
+        String envelopeType = route.envelopeType();
+        String queueUrl = queueUrlProvider.get(queueType);
+
+        CacheRegenerationEnvelope envelope = envelopeFactory.build(queueType, cacheKey, cacheFamily, reason);
         String body;
         try {
             body = objectMapper.writeValueAsString(envelope);
         } catch (Exception e) {
-            log.error("[CacheRegen] envelope serialization failed reason={} cacheFamily={} cacheKey={} endpoint={} traceId={} idempotencyKey={}: {}",
-                    reason.value(), family.get(), cacheKey, endpoint, envelope.traceId(),
-                    envelope.idempotencyKey(), e.getMessage(), e);
-            meterRegistry.counter("api_read_cache_regen_publish_total",
-                    "service", "api-public-read",
-                    "endpoint", endpoint,
-                    "result", "failure"
-            ).increment();
-            meterRegistry.counter("safespot.cache.regeneration.requested",
-                    "service", "api-public-read",
-                    "cache", family.get(),
-                    "reason", reason.value(),
-                    "result", "failure"
-            ).increment();
+            log.error("[CacheRegen] serialization failed cacheFamily={} cacheKey={} queueType={} envelopeType={} endpoint={} traceId={} idempotencyKey={}: {}",
+                    cacheFamily, cacheKey, queueType.label(), envelopeType, endpoint,
+                    envelope.traceId(), envelope.idempotencyKey(), e.getMessage(), e);
+            recordMetric(cacheFamily, queueType.label(), envelopeType, reason.value(), endpoint, "failure");
             return;
         }
+
         try {
             sqsClient.sendMessage(SendMessageRequest.builder()
                     .queueUrl(queueUrl)
                     .messageBody(body)
                     .build());
-            log.info("[CacheRegen] sent to SQS reason={} cacheFamily={} cacheKey={} endpoint={} traceId={} idempotencyKey={}",
-                    reason.value(), family.get(), cacheKey, endpoint, envelope.traceId(), envelope.idempotencyKey());
-            meterRegistry.counter("api_read_cache_regen_publish_total",
-                    "service", "api-public-read",
-                    "endpoint", endpoint,
-                    "result", "success"
-            ).increment();
-            meterRegistry.counter("safespot.cache.regeneration.requested",
-                    "service", "api-public-read",
-                    "cache", family.get(),
-                    "reason", reason.value(),
-                    "result", "success"
-            ).increment();
+            log.info("[CacheRegen] published cacheFamily={} cacheKey={} queueType={} envelopeType={} endpoint={} traceId={} idempotencyKey={}",
+                    cacheFamily, cacheKey, queueType.label(), envelopeType, endpoint,
+                    envelope.traceId(), envelope.idempotencyKey());
+            recordMetric(cacheFamily, queueType.label(), envelopeType, reason.value(), endpoint, "success");
         } catch (Exception e) {
-            log.error("[CacheRegen] SQS send failed eventId={} eventType={} reason={} cacheFamily={} cacheKey={} endpoint={} traceId={} idempotencyKey={}: {}",
-                    envelope.eventId(), envelope.eventType(), reason.value(), family.get(), cacheKey, endpoint,
-                    envelope.traceId(), envelope.idempotencyKey(), e.getMessage());
-            failureRecorder.record(envelope, body);
-            meterRegistry.counter("api_read_cache_regen_publish_total",
-                    "service", "api-public-read",
-                    "endpoint", endpoint,
-                    "result", "failure"
-            ).increment();
-            meterRegistry.counter("safespot.cache.regeneration.requested",
-                    "service", "api-public-read",
-                    "cache", family.get(),
-                    "reason", reason.value(),
-                    "result", "failure"
-            ).increment();
+            log.error("[CacheRegen] SQS send failed cacheFamily={} cacheKey={} queueType={} envelopeType={} eventId={} endpoint={} traceId={} idempotencyKey={}: {}",
+                    cacheFamily, cacheKey, queueType.label(), envelopeType,
+                    envelope.eventId(), endpoint, envelope.traceId(), envelope.idempotencyKey(), e.getMessage());
+            failureRecorder.record(envelope, body, queueType, envelopeType);
+            recordMetric(cacheFamily, queueType.label(), envelopeType, reason.value(), endpoint, "failure");
         }
+    }
+
+    private void recordMetric(String cacheFamily, String queue, String envelopeType,
+                               String reason, String endpoint, String result) {
+        meterRegistry.counter("safespot_cache_regeneration_publish_total",
+                "service", "api-public-read",
+                "cache", cacheFamily,
+                "queue", queue,
+                "envelope", envelopeType,
+                "reason", reason,
+                "result", result
+        ).increment();
+        meterRegistry.counter("safespot.cache.regeneration.requested",
+                "service", "api-public-read",
+                "cache", cacheFamily,
+                "reason", reason,
+                "result", result
+        ).increment();
+        meterRegistry.counter("api_read_cache_regen_publish_total",
+                "service", "api-public-read",
+                "endpoint", endpoint,
+                "result", result
+        ).increment();
+    }
+
+    private void recordUnsupportedMetric(String cacheFamily, String reason) {
+        meterRegistry.counter("safespot_cache_regeneration_publish_total",
+                "service", "api-public-read",
+                "cache", cacheFamily,
+                "queue", "unknown",
+                "envelope", "unknown",
+                "reason", reason,
+                "result", "unsupported"
+        ).increment();
     }
 }

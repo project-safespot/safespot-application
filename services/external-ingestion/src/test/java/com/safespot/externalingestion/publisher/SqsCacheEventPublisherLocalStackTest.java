@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.safespot.externalingestion.metrics.IngestionMetrics;
 import com.safespot.externalingestion.publisher.event.DisasterDataCollectedEvent;
+import com.safespot.externalingestion.publisher.event.EnvironmentDataCollectedEvent;
+import com.safespot.externalingestion.publisher.event.ShelterDataCollectedEvent;
 import com.safespot.externalingestion.publisher.impl.SqsCacheEventPublisher;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -27,7 +29,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * LocalStack SQS로 SqsCacheEventPublisher.publish()가 실제 메시지를 queue에 전송하는지 검증.
+ * LocalStack SQS로 SqsCacheEventPublisher.publish()가 3개 queue에 각각 정확히 전송하는지 검증.
  * Docker가 없으면 SKIPPED (빌드는 통과).
  */
 @Testcontainers(disabledWithoutDocker = true)
@@ -40,8 +42,9 @@ class SqsCacheEventPublisherLocalStackTest {
 
     private SqsClient sqsClient;
     private SqsCacheEventPublisher publisher;
-    private String disasterQueueUrl;
-    private String environmentQueueUrl;
+    private String cacheRefreshQueueUrl;
+    private String readmodelRefreshQueueUrl;
+    private String envCacheRefreshQueueUrl;
 
     @BeforeEach
     void setup() {
@@ -52,40 +55,107 @@ class SqsCacheEventPublisherLocalStackTest {
                 AwsBasicCredentials.create("test", "test")))
             .build();
 
-        disasterQueueUrl = sqsClient.createQueue(
-            CreateQueueRequest.builder().queueName("disaster-cache-" + System.nanoTime()).build()
+        long ts = System.nanoTime();
+        cacheRefreshQueueUrl = sqsClient.createQueue(
+            CreateQueueRequest.builder().queueName("cache-refresh-" + ts).build()
         ).queueUrl();
 
-        environmentQueueUrl = sqsClient.createQueue(
-            CreateQueueRequest.builder().queueName("environment-cache-" + System.nanoTime()).build()
+        readmodelRefreshQueueUrl = sqsClient.createQueue(
+            CreateQueueRequest.builder().queueName("readmodel-refresh-" + ts).build()
+        ).queueUrl();
+
+        envCacheRefreshQueueUrl = sqsClient.createQueue(
+            CreateQueueRequest.builder().queueName("env-cache-refresh-" + ts).build()
         ).queueUrl();
 
         ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         IngestionMetrics metrics = new IngestionMetrics(new SimpleMeterRegistry());
         publisher = new SqsCacheEventPublisher(sqsClient, objectMapper, metrics,
-            disasterQueueUrl, environmentQueueUrl);
+            cacheRefreshQueueUrl, readmodelRefreshQueueUrl, envCacheRefreshQueueUrl);
     }
 
     @Test
-    void publish_sendsMessageToDisasterQueue() {
+    void publish_shelterEvent_sendsMessageToCacheRefreshQueue() {
+        ShelterDataCollectedEvent event = new ShelterDataCollectedEvent(
+            "trace-shelter", "EARTHQUAKE", 5,
+            OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
+
+        publisher.publish(event, "cache-refresh");
+
+        ReceiveMessageResponse response = receive(cacheRefreshQueueUrl);
+        assertThat(response.messages()).hasSize(1);
+        String body = response.messages().get(0).body();
+        assertThat(body).contains("ShelterDataCollected");
+        assertThat(body).contains("EARTHQUAKE");
+    }
+
+    @Test
+    void publish_disasterEvent_sendsMessageToReadmodelRefreshQueue() {
         DisasterDataCollectedEvent event = new DisasterDataCollectedEvent(
-            "trace-localstack", "EARTHQUAKE", "seoul", List.of(1L, 2L), false,
+            "trace-disaster", "EARTHQUAKE", "seoul", List.of(1L, 2L), false,
             OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
 
         publisher.publish(event, "disaster-collection");
 
-        ReceiveMessageResponse response = sqsClient.receiveMessage(
-            ReceiveMessageRequest.builder()
-                .queueUrl(disasterQueueUrl)
-                .maxNumberOfMessages(1)
-                .waitTimeSeconds(2)
-                .build()
-        );
-
+        ReceiveMessageResponse response = receive(readmodelRefreshQueueUrl);
         assertThat(response.messages()).hasSize(1);
         String body = response.messages().get(0).body();
         assertThat(body).contains("DisasterDataCollected");
         assertThat(body).contains("\"seoul\"");
         assertThat(body).contains("EARTHQUAKE");
+    }
+
+    @Test
+    void publish_environmentEvent_sendsMessageToEnvCacheRefreshQueue() {
+        EnvironmentDataCollectedEvent event = new EnvironmentDataCollectedEvent(
+            "trace-env", "AIR_QUALITY", "seoul", "1h",
+            OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
+
+        publisher.publish(event, "environment-collection");
+
+        ReceiveMessageResponse response = receive(envCacheRefreshQueueUrl);
+        assertThat(response.messages()).hasSize(1);
+        String body = response.messages().get(0).body();
+        assertThat(body).contains("EnvironmentDataCollected");
+        assertThat(body).contains("AIR_QUALITY");
+    }
+
+    @Test
+    void publish_unknownQueue_doesNotSendToAnyQueue() {
+        DisasterDataCollectedEvent event = new DisasterDataCollectedEvent(
+            "trace-unknown", "EARTHQUAKE", "seoul", List.of(1L), false,
+            OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
+
+        publisher.publish(event, "unknown-queue");
+
+        // none of the 3 queues should receive a message
+        assertThat(receive(cacheRefreshQueueUrl).messages()).isEmpty();
+        assertThat(receive(readmodelRefreshQueueUrl).messages()).isEmpty();
+        assertThat(receive(envCacheRefreshQueueUrl).messages()).isEmpty();
+    }
+
+    @Test
+    void queues_are_independent_each_message_lands_in_correct_queue() {
+        ShelterDataCollectedEvent shelterEvent = new ShelterDataCollectedEvent(
+            "trace-s", "FLOOD", 3,
+            OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
+        DisasterDataCollectedEvent disasterEvent = new DisasterDataCollectedEvent(
+            "trace-d", "LANDSLIDE", "seoul", List.of(10L), false,
+            OffsetDateTime.now().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
+
+        publisher.publish(shelterEvent, "cache-refresh");
+        publisher.publish(disasterEvent, "disaster-collection");
+
+        assertThat(receive(cacheRefreshQueueUrl).messages()).hasSize(1);
+        assertThat(receive(readmodelRefreshQueueUrl).messages()).hasSize(1);
+        assertThat(receive(envCacheRefreshQueueUrl).messages()).isEmpty();
+    }
+
+    private ReceiveMessageResponse receive(String queueUrl) {
+        return sqsClient.receiveMessage(ReceiveMessageRequest.builder()
+            .queueUrl(queueUrl)
+            .maxNumberOfMessages(5)
+            .waitTimeSeconds(2)
+            .build());
     }
 }

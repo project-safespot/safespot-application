@@ -27,6 +27,10 @@ ingestion:
     region: ap-northeast-2
     endpoint-override: ""
     normalization-queue-url: ""
+    cache-refresh-queue-url: ""
+    readmodel-refresh-queue-url: ""
+    environment-cache-refresh-queue-url: ""
+    # deprecated — backward compat for old ConfigMap deployments
     disaster-cache-queue-url: ""
     environment-cache-queue-url: ""
   rate-limit:
