@@ -57,7 +57,7 @@ class AdminEvacuationControllerIntegrationTest {
                 .passwordHash(passwordEncoder.encode("P@ssw0rd!"))
                 .name("관리자")
                 .role(Role.ADMIN)
-                .isActive(true)
+                .active(true)
                 .createdAt(OffsetDateTime.now())
                 .updatedAt(OffsetDateTime.now())
                 .build();

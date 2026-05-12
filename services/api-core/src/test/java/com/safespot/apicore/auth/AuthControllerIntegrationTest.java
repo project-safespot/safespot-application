@@ -42,7 +42,7 @@ class AuthControllerIntegrationTest {
                 .name("홍길동")
                 .phone("01012345678")
                 .role(Role.ADMIN)
-                .isActive(true)
+                .active(true)
                 .createdAt(OffsetDateTime.now())
                 .updatedAt(OffsetDateTime.now())
                 .build();
