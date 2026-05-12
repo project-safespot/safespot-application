@@ -2,9 +2,9 @@ package com.safespot.apicore.auth;
 
 import com.safespot.apicore.auth.dto.LoginRequest;
 import com.safespot.apicore.auth.dto.LoginResponse;
+import com.safespot.apicore.auth.dto.LoginUserProjection;
 import com.safespot.apicore.auth.service.AuthService;
 import com.safespot.apicore.common.exception.ApiException;
-import com.safespot.apicore.domain.entity.AppUser;
 import com.safespot.apicore.domain.enums.Role;
 import com.safespot.apicore.metrics.ApiCoreMetrics;
 import com.safespot.apicore.repository.AppUserRepository;
@@ -17,7 +17,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-import java.time.OffsetDateTime;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,25 +39,22 @@ class AuthServiceTest {
     @InjectMocks
     private AuthService authService;
 
-    private AppUser activeAdmin;
+    private LoginUserProjection activeAdmin;
 
     @BeforeEach
     void setUp() {
-        activeAdmin = AppUser.builder()
-                .userId(1L)
-                .username("admin01")
-                .passwordHash("$2a$10$hash")
-                .name("홍길동")
-                .role(Role.ADMIN)
-                .isActive(true)
-                .createdAt(OffsetDateTime.now())
-                .updatedAt(OffsetDateTime.now())
-                .build();
+        activeAdmin = new TestLoginUserProjection(
+                1L,
+                "admin01",
+                "$2a$10$hash",
+                "홍길동",
+                Role.ADMIN,
+                true);
     }
 
     @Test
     void login_success() {
-        when(appUserRepository.findByUsername("admin01")).thenReturn(Optional.of(activeAdmin));
+        when(appUserRepository.findProjectedByUsername("admin01")).thenReturn(Optional.of(activeAdmin));
         when(passwordEncoder.matches("P@ssw0rd!", "$2a$10$hash")).thenReturn(true);
         when(jwtTokenProvider.generateToken(1L, "admin01", Role.ADMIN)).thenReturn("jwt-token");
         when(jwtTokenProvider.getExpirationSeconds()).thenReturn(1800L);
@@ -77,7 +73,7 @@ class AuthServiceTest {
 
     @Test
     void login_invalidCredentials_wrongPassword() {
-        when(appUserRepository.findByUsername("admin01")).thenReturn(Optional.of(activeAdmin));
+        when(appUserRepository.findProjectedByUsername("admin01")).thenReturn(Optional.of(activeAdmin));
         when(passwordEncoder.matches(any(), any())).thenReturn(false);
 
         LoginRequest req = new LoginRequest();
@@ -91,7 +87,7 @@ class AuthServiceTest {
 
     @Test
     void login_invalidCredentials_userNotFound() {
-        when(appUserRepository.findByUsername("unknown")).thenReturn(Optional.empty());
+        when(appUserRepository.findProjectedByUsername("unknown")).thenReturn(Optional.empty());
 
         LoginRequest req = new LoginRequest();
         setField(req, "loginId", "unknown");
@@ -104,12 +100,14 @@ class AuthServiceTest {
 
     @Test
     void login_accountDisabled() {
-        AppUser disabled = AppUser.builder()
-                .userId(2L).username("disabled").passwordHash("hash")
-                .name("비활성").role(Role.USER).isActive(false)
-                .createdAt(OffsetDateTime.now()).updatedAt(OffsetDateTime.now())
-                .build();
-        when(appUserRepository.findByUsername("disabled")).thenReturn(Optional.of(disabled));
+        LoginUserProjection disabled = new TestLoginUserProjection(
+                2L,
+                "disabled",
+                "hash",
+                "비활성",
+                Role.USER,
+                false);
+        when(appUserRepository.findProjectedByUsername("disabled")).thenReturn(Optional.of(disabled));
 
         LoginRequest req = new LoginRequest();
         setField(req, "loginId", "disabled");
@@ -127,6 +125,44 @@ class AuthServiceTest {
             field.set(obj, value);
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    private record TestLoginUserProjection(
+            Long userId,
+            String username,
+            String passwordHash,
+            String name,
+            Role role,
+            boolean active) implements LoginUserProjection {
+        @Override
+        public Long getUserId() {
+            return userId;
+        }
+
+        @Override
+        public String getUsername() {
+            return username;
+        }
+
+        @Override
+        public String getPasswordHash() {
+            return passwordHash;
+        }
+
+        @Override
+        public String getName() {
+            return name;
+        }
+
+        @Override
+        public Role getRole() {
+            return role;
+        }
+
+        @Override
+        public boolean isActive() {
+            return active;
         }
     }
 }
