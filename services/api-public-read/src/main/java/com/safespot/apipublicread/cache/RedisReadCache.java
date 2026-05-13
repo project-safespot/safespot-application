@@ -12,6 +12,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
@@ -71,6 +74,53 @@ public class RedisReadCache {
             recordRedisRead(cache, "failure", start);
             return new CacheResult<>(null, FallbackReason.PARSE_ERROR, cache);
         }
+    }
+
+    public <T> Map<String, CacheResult<T>> getAll(List<String> keys, TypeReference<T> type) {
+        if (keys == null || keys.isEmpty()) return Map.of();
+        String cache = cacheName(keys.get(0));
+        long start = System.nanoTime();
+        try {
+            List<String> jsonValues = redisTemplate.opsForValue().multiGet(keys);
+            recordRedisRead(cache, "success", start);
+            Map<String, CacheResult<T>> result = new LinkedHashMap<>();
+            for (int i = 0; i < keys.size(); i++) {
+                String key = keys.get(i);
+                String json = (jsonValues != null) ? jsonValues.get(i) : null;
+                if (json == null) {
+                    result.put(key, new CacheResult<>(null, FallbackReason.REDIS_MISS, cache));
+                } else {
+                    try {
+                        T value = objectMapper.readValue(json, type);
+                        result.put(key, new CacheResult<>(value, null, cache));
+                    } catch (Exception e) {
+                        log.warn("Redis parse error for key={}: {}", key, e.getMessage());
+                        result.put(key, new CacheResult<>(null, FallbackReason.PARSE_ERROR, cache));
+                    }
+                }
+            }
+            return result;
+        } catch (RedisConnectionFailureException e) {
+            log.warn("Redis connection failure for MGET (count={}): {}", keys.size(), e.getMessage());
+            recordRedisRead(cache, "failure", start);
+            return buildAllDown(keys, cache);
+        } catch (DataAccessException e) {
+            log.warn("Redis error for MGET (count={}): {}", keys.size(), e.getMessage());
+            recordRedisRead(cache, "failure", start);
+            return buildAllDown(keys, cache);
+        } catch (Exception e) {
+            log.warn("Redis unexpected error for MGET (count={}): {}", keys.size(), e.getMessage());
+            recordRedisRead(cache, "failure", start);
+            return buildAllDown(keys, cache);
+        }
+    }
+
+    private <T> Map<String, CacheResult<T>> buildAllDown(List<String> keys, String cache) {
+        Map<String, CacheResult<T>> result = new LinkedHashMap<>();
+        for (String key : keys) {
+            result.put(key, new CacheResult<>(null, FallbackReason.REDIS_DOWN, cache));
+        }
+        return result;
     }
 
     public void set(String key, Object value, Duration ttl) {

@@ -5,10 +5,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safespot.apipublicread.dto.cache.ShelterStatusCacheDto;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -52,6 +58,73 @@ class RedisReadCacheTest {
                 .tag("cache", "shelter_status")
                 .tag("result", "failure")
                 .timer()).isNotNull();
+    }
+
+    @Test
+    void getAll_allHit() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        String json1 = "{\"currentOccupancy\":10,\"availableCapacity\":90,\"congestionLevel\":\"AVAILABLE\",\"shelterStatus\":\"OPERATING\"}";
+        String json2 = "{\"currentOccupancy\":20,\"availableCapacity\":80,\"congestionLevel\":\"NORMAL\",\"shelterStatus\":\"OPERATING\"}";
+        when(valueOperations.multiGet(List.of("shelter:status:1", "shelter:status:2")))
+                .thenReturn(List.of(json1, json2));
+
+        Map<String, RedisReadCache.CacheResult<ShelterStatusCacheDto>> result =
+                redisReadCache.getAll(List.of("shelter:status:1", "shelter:status:2"), new TypeReference<>() {});
+
+        assertThat(result.get("shelter:status:1").isHit()).isTrue();
+        assertThat(result.get("shelter:status:1").value().currentOccupancy()).isEqualTo(10);
+        assertThat(result.get("shelter:status:2").isHit()).isTrue();
+        assertThat(result.get("shelter:status:2").value().currentOccupancy()).isEqualTo(20);
+    }
+
+    @Test
+    void getAll_partialMiss_nullValueIsMiss() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        String json1 = "{\"currentOccupancy\":10,\"availableCapacity\":90,\"congestionLevel\":\"AVAILABLE\",\"shelterStatus\":\"OPERATING\"}";
+        when(valueOperations.multiGet(List.of("shelter:status:1", "shelter:status:2")))
+                .thenReturn(Arrays.asList(json1, null));
+
+        Map<String, RedisReadCache.CacheResult<ShelterStatusCacheDto>> result =
+                redisReadCache.getAll(List.of("shelter:status:1", "shelter:status:2"), new TypeReference<>() {});
+
+        assertThat(result.get("shelter:status:1").isHit()).isTrue();
+        assertThat(result.get("shelter:status:2").isMiss()).isTrue();
+    }
+
+    @Test
+    void getAll_parseError_onlyAffectedKeyFails() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        String validJson = "{\"currentOccupancy\":10,\"availableCapacity\":90,\"congestionLevel\":\"AVAILABLE\",\"shelterStatus\":\"OPERATING\"}";
+        when(valueOperations.multiGet(List.of("shelter:status:1", "shelter:status:2")))
+                .thenReturn(List.of(validJson, "{not-json"));
+
+        Map<String, RedisReadCache.CacheResult<ShelterStatusCacheDto>> result =
+                redisReadCache.getAll(List.of("shelter:status:1", "shelter:status:2"), new TypeReference<>() {});
+
+        assertThat(result.get("shelter:status:1").isHit()).isTrue();
+        assertThat(result.get("shelter:status:2").isParseError()).isTrue();
+        assertThat(result.get("shelter:status:2").resultLabel()).isEqualTo("parse_error");
+    }
+
+    @Test
+    void getAll_connectionFailure_allDown() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.multiGet(anyList()))
+                .thenThrow(new RedisConnectionFailureException("connection refused"));
+
+        Map<String, RedisReadCache.CacheResult<ShelterStatusCacheDto>> result =
+                redisReadCache.getAll(List.of("shelter:status:1", "shelter:status:2"), new TypeReference<>() {});
+
+        assertThat(result.get("shelter:status:1").isDown()).isTrue();
+        assertThat(result.get("shelter:status:2").isDown()).isTrue();
+    }
+
+    @Test
+    void getAll_emptyList_returnsEmptyMap() {
+        Map<String, RedisReadCache.CacheResult<ShelterStatusCacheDto>> result =
+                redisReadCache.getAll(List.of(), new TypeReference<>() {});
+
+        assertThat(result).isEmpty();
     }
 
     @Test

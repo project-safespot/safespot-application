@@ -26,6 +26,8 @@ import java.math.BigDecimal;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -46,11 +48,13 @@ public class ShelterReadService {
     private final CacheRegenerationPublisher cacheRegenerationPublisher;
     private final MeterRegistry meterRegistry;
 
+    private record ShelterWithDistance(Shelter shelter, int distanceM) {}
+
     public List<ShelterNearbyItem> findNearby(double lat, double lng, int radiusM, String disasterType) {
         double latDelta = CongestionCalculator.metersToDegreeLat(radiusM);
         double lngDelta = CongestionCalculator.metersToDegreeeLng(radiusM, lat);
 
-        List<Shelter> shelters = shelterRepository.findByBoundingBoxAndDisasterType(
+        List<Shelter> candidates = shelterRepository.findByBoundingBoxAndDisasterType(
                 BigDecimal.valueOf(lat - latDelta),
                 BigDecimal.valueOf(lat + latDelta),
                 BigDecimal.valueOf(lng - lngDelta),
@@ -58,25 +62,36 @@ public class ShelterReadService {
                 disasterType
         );
 
-        return shelters.stream()
+        List<ShelterWithDistance> selected = candidates.stream()
                 .map(s -> {
                     int dist = CongestionCalculator.distanceMeters(
                             lat, lng,
                             s.getLatitude().doubleValue(),
                             s.getLongitude().doubleValue()
                     );
-                    if (dist > radiusM) return null;
-
-                    ShelterStatusCache status = getShelterStatusFromCacheOrRds(
-                            s.getShelterId(),
-                            ENDPOINT_NEARBY,
-                            false
-                    );
-                    return toNearbyItem(s, dist, status);
+                    return dist <= radiusM ? new ShelterWithDistance(s, dist) : null;
                 })
-                .filter(item -> item != null)
-                .sorted(Comparator.comparingInt(ShelterNearbyItem::distanceM))
+                .filter(Objects::nonNull)
+                .sorted(Comparator.comparingInt(ShelterWithDistance::distanceM))
                 .limit(MAX_NEARBY_RESULTS)
+                .toList();
+
+        if (selected.isEmpty()) return List.of();
+
+        List<String> keys = selected.stream()
+                .map(sd -> "shelter:status:" + sd.shelter().getShelterId())
+                .toList();
+        Map<String, RedisReadCache.CacheResult<ShelterStatusCacheDto>> statusMap =
+                redisReadCache.getAll(keys, new TypeReference<>() {});
+
+        return selected.stream()
+                .map(sd -> {
+                    String key = "shelter:status:" + sd.shelter().getShelterId();
+                    RedisReadCache.CacheResult<ShelterStatusCacheDto> cached = statusMap.get(key);
+                    ShelterStatusCache status = resolveStatusFromCacheResult(
+                            sd.shelter().getShelterId(), key, cached, ENDPOINT_NEARBY, false);
+                    return toNearbyItem(sd.shelter(), sd.distanceM(), status);
+                })
                 .toList();
     }
 
@@ -91,7 +106,16 @@ public class ShelterReadService {
     private ShelterStatusCache getShelterStatusFromCacheOrRds(Long shelterId, String endpoint, boolean publishRegenerationOnFallback) {
         String key = "shelter:status:" + shelterId;
         RedisReadCache.CacheResult<ShelterStatusCacheDto> cached = redisReadCache.get(key, new TypeReference<>() {});
+        return resolveStatusFromCacheResult(shelterId, key, cached, endpoint, publishRegenerationOnFallback);
+    }
 
+    private ShelterStatusCache resolveStatusFromCacheResult(
+            Long shelterId,
+            String key,
+            RedisReadCache.CacheResult<ShelterStatusCacheDto> cached,
+            String endpoint,
+            boolean publishRegenerationOnFallback
+    ) {
         redisReadCache.recordCacheRequest(cached.cache(), cached.resultLabel());
 
         if (cached.isHit()) {
