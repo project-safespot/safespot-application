@@ -63,12 +63,12 @@ public class DisasterAlertReadService {
         redisReadCache.recordFallback(cached.cache(), cached.fallbackReason());
         requestRegeneration(LIST_KEY, cached.cache(), ENDPOINT_LIST, cached.fallbackReason());
 
-        return filterAlertItems(fallbackSingleFlight.execute(
+        return filterAlerts(fallbackSingleFlight.execute(
                 LIST_KEY,
                 cached.cache(),
                 REPOSITORY_DISASTER_ALERT,
                 () -> loadAlertsFromRds(cached.fallbackReason())
-        ), region, disasterType);
+        ), region, disasterType).stream().map(this::toItem).toList();
     }
 
     public DisasterLatestDto findLatest(String disasterType, String region) {
@@ -88,13 +88,15 @@ public class DisasterAlertReadService {
         redisReadCache.recordFallback(listResult.cache(), listResult.fallbackReason());
         requestRegeneration(LIST_KEY, listResult.cache(), ENDPOINT_LATEST, listResult.fallbackReason());
 
-        String fallbackKey = LIST_KEY + ":latest:" + normalize(region) + ":" + normalize(disasterType);
-        return fallbackSingleFlight.execute(
-                fallbackKey,
+        List<DisasterAlert> alerts = fallbackSingleFlight.execute(
+                LIST_KEY,
                 listResult.cache(),
                 REPOSITORY_DISASTER_ALERT,
-                () -> loadLatestFromRds(disasterType, region, listResult.fallbackReason())
+                () -> loadAlertsFromRds(listResult.fallbackReason())
         );
+        return filterByTypeAndRegion(alerts, disasterType, region)
+                .map(this::toLatestDto)
+                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
     }
 
     private DisasterLatestDto resolveDetail(DisasterMessageCacheDto item, String disasterType, String region) {
@@ -117,12 +119,11 @@ public class DisasterAlertReadService {
         );
     }
 
-    private List<DisasterAlertItem> loadAlertsFromRds(RedisReadCache.FallbackReason fallbackReason) {
+    private List<DisasterAlert> loadAlertsFromRds(RedisReadCache.FallbackReason fallbackReason) {
         redisReadCache.recordDbFallbackQuery(REPOSITORY_DISASTER_ALERT, fallbackReason);
         long start = System.currentTimeMillis();
         try {
-            List<DisasterAlertItem> result = disasterAlertRepository.findAlerts(null, null, FALLBACK_PAGE)
-                    .stream().map(this::toItem).toList();
+            List<DisasterAlert> result = disasterAlertRepository.findAlerts(null, null, FALLBACK_PAGE);
             redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "success", System.currentTimeMillis() - start);
             return result;
         } catch (RuntimeException e) {
@@ -136,21 +137,6 @@ public class DisasterAlertReadService {
         long start = System.currentTimeMillis();
         try {
             Optional<DisasterAlert> maybeAlert = disasterAlertRepository.findById(alertId);
-            redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "success", System.currentTimeMillis() - start);
-            return maybeAlert.map(this::toLatestDto)
-                    .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
-        } catch (RuntimeException e) {
-            redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "failure", System.currentTimeMillis() - start);
-            throw e;
-        }
-    }
-
-    private DisasterLatestDto loadLatestFromRds(String disasterType, String region,
-                                                RedisReadCache.FallbackReason fallbackReason) {
-        redisReadCache.recordDbFallbackQuery(REPOSITORY_DISASTER_ALERT, fallbackReason);
-        long start = System.currentTimeMillis();
-        try {
-            Optional<DisasterAlert> maybeAlert = disasterAlertRepository.findLatest(disasterType, region);
             redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "success", System.currentTimeMillis() - start);
             return maybeAlert.map(this::toLatestDto)
                     .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
@@ -192,11 +178,11 @@ public class DisasterAlertReadService {
                 .toList();
     }
 
-    private static List<DisasterAlertItem> filterAlertItems(List<DisasterAlertItem> items,
-                                                            String region, String disasterType) {
+    private static List<DisasterAlert> filterAlerts(List<DisasterAlert> items,
+                                                    String region, String disasterType) {
         return items.stream()
-                .filter(i -> region == null || region.equals(i.region()))
-                .filter(i -> disasterType == null || disasterType.equals(i.disasterType()))
+                .filter(i -> region == null || region.equals(i.getRegion()))
+                .filter(i -> disasterType == null || disasterType.equals(i.getDisasterType()))
                 .toList();
     }
 
@@ -207,8 +193,13 @@ public class DisasterAlertReadService {
                 .orElse(null);
     }
 
-    private static String normalize(String value) {
-        return value == null ? "all" : value;
+    private static Optional<DisasterAlert> filterByTypeAndRegion(List<DisasterAlert> items,
+                                                                 String disasterType,
+                                                                 String region) {
+        return items.stream()
+                .filter(i -> disasterType.equals(i.getDisasterType()))
+                .filter(i -> region == null || region.equals(i.getRegion()))
+                .findFirst();
     }
 
     private DisasterAlertItem toItem(DisasterAlert a) {

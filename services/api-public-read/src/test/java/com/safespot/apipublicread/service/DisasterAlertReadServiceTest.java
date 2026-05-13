@@ -198,7 +198,7 @@ class DisasterAlertReadServiceTest {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
         DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
-        when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.of(alert));
+        when(disasterAlertRepository.findAlerts(isNull(), isNull(), any(PageRequest.class))).thenReturn(List.of(alert));
         when(suppressWindowService.tryPublish(LIST_KEY)).thenReturn(true);
 
         DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");
@@ -213,7 +213,7 @@ class DisasterAlertReadServiceTest {
     void findLatest_listMiss_notFound_throwsApiException() {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
-        when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.empty());
+        when(disasterAlertRepository.findAlerts(isNull(), isNull(), any(PageRequest.class))).thenReturn(List.of());
         when(suppressWindowService.tryPublish(LIST_KEY)).thenReturn(false);
 
         assertThatThrownBy(() -> disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시"))

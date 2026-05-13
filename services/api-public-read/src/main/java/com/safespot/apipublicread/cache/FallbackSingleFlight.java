@@ -54,12 +54,10 @@ public class FallbackSingleFlight {
             T result = (T) existing.get(timeoutMs, TimeUnit.MILLISECONDS);
             return result;
         } catch (TimeoutException e) {
-            inFlight.remove(flightKey, existing);
             record("fallback_singleflight_timeout_total", cache, repository, "timeout");
             throw new IllegalStateException("Timed out waiting for fallback single-flight key=" + cacheKey, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            inFlight.remove(flightKey, existing);
             throw new IllegalStateException("Interrupted while waiting for fallback single-flight key=" + cacheKey, e);
         } catch (ExecutionException e) {
             throw propagate(e.getCause());

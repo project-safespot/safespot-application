@@ -80,7 +80,7 @@ class FallbackSingleFlightTest {
     }
 
     @Test
-    void followerTimeoutCleansUpWaitingEntry() throws Exception {
+    void followerTimeoutDoesNotRemoveLeaderEntry() throws Exception {
         SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         FallbackSingleFlight singleFlight = new FallbackSingleFlight(meterRegistry, 50);
         CountDownLatch leaderStarted = new CountDownLatch(1);
@@ -108,7 +108,7 @@ class FallbackSingleFlightTest {
             )).isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("Timed out waiting for fallback single-flight");
 
-            assertThat(singleFlight.inFlightSize()).isZero();
+            assertThat(singleFlight.inFlightSize()).isEqualTo(1);
             assertThat(meterRegistry.counter("fallback_singleflight_timeout_total",
                     "service", "api-public-read",
                     "cache", "disaster_detail",
@@ -117,6 +117,7 @@ class FallbackSingleFlightTest {
 
             releaseLeader.countDown();
             assertThat(leader.get(1, TimeUnit.SECONDS)).isEqualTo("leader");
+            assertThat(singleFlight.inFlightSize()).isZero();
         } finally {
             releaseLeader.countDown();
             executor.shutdownNow();
