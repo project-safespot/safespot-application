@@ -1,6 +1,7 @@
 package com.safespot.apipublicread.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.safespot.apipublicread.cache.FallbackSingleFlight;
 import com.safespot.apipublicread.cache.RedisReadCache;
 import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.domain.DisasterAlert;
@@ -43,6 +44,7 @@ public class DisasterAlertReadService {
 
     private final DisasterAlertRepository disasterAlertRepository;
     private final RedisReadCache redisReadCache;
+    private final FallbackSingleFlight fallbackSingleFlight;
     private final SuppressWindowService suppressWindowService;
     private final CacheRegenerationPublisher cacheRegenerationPublisher;
     private final MeterRegistry meterRegistry;
@@ -59,14 +61,14 @@ public class DisasterAlertReadService {
         }
 
         redisReadCache.recordFallback(cached.cache(), cached.fallbackReason());
-        redisReadCache.recordDbFallbackQuery(REPOSITORY_DISASTER_ALERT, cached.fallbackReason());
         requestRegeneration(LIST_KEY, cached.cache(), ENDPOINT_LIST, cached.fallbackReason());
 
-        long start = System.currentTimeMillis();
-        List<DisasterAlertItem> result = disasterAlertRepository.findAlerts(region, disasterType, FALLBACK_PAGE)
-                .stream().map(this::toItem).toList();
-        redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "success", System.currentTimeMillis() - start);
-        return result;
+        return filterAlertItems(fallbackSingleFlight.execute(
+                LIST_KEY,
+                cached.cache(),
+                REPOSITORY_DISASTER_ALERT,
+                () -> loadAlertsFromRds(cached.fallbackReason())
+        ), region, disasterType);
     }
 
     public DisasterLatestDto findLatest(String disasterType, String region) {
@@ -84,14 +86,15 @@ public class DisasterAlertReadService {
         }
 
         redisReadCache.recordFallback(listResult.cache(), listResult.fallbackReason());
-        redisReadCache.recordDbFallbackQuery(REPOSITORY_DISASTER_ALERT, listResult.fallbackReason());
         requestRegeneration(LIST_KEY, listResult.cache(), ENDPOINT_LATEST, listResult.fallbackReason());
 
-        long start = System.currentTimeMillis();
-        Optional<DisasterAlert> maybeAlert = disasterAlertRepository.findLatest(disasterType, region);
-        redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "success", System.currentTimeMillis() - start);
-        return maybeAlert.map(this::toLatestDto)
-                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
+        String fallbackKey = LIST_KEY + ":latest:" + normalize(region) + ":" + normalize(disasterType);
+        return fallbackSingleFlight.execute(
+                fallbackKey,
+                listResult.cache(),
+                REPOSITORY_DISASTER_ALERT,
+                () -> loadLatestFromRds(disasterType, region, listResult.fallbackReason())
+        );
     }
 
     private DisasterLatestDto resolveDetail(DisasterMessageCacheDto item, String disasterType, String region) {
@@ -104,14 +107,57 @@ public class DisasterAlertReadService {
         if (detailResult.isHit()) return toLatestDto(detailResult.value());
 
         redisReadCache.recordFallback(detailResult.cache(), detailResult.fallbackReason());
-        redisReadCache.recordDbFallbackQuery(REPOSITORY_DISASTER_ALERT, detailResult.fallbackReason());
         requestRegeneration(detailKey, detailResult.cache(), ENDPOINT_LATEST, detailResult.fallbackReason());
 
+        return fallbackSingleFlight.execute(
+                detailKey,
+                detailResult.cache(),
+                REPOSITORY_DISASTER_ALERT,
+                () -> loadDetailFromRds(item.alertId(), detailResult.fallbackReason())
+        );
+    }
+
+    private List<DisasterAlertItem> loadAlertsFromRds(RedisReadCache.FallbackReason fallbackReason) {
+        redisReadCache.recordDbFallbackQuery(REPOSITORY_DISASTER_ALERT, fallbackReason);
         long start = System.currentTimeMillis();
-        Optional<DisasterAlert> maybeAlert = disasterAlertRepository.findLatest(disasterType, region);
-        redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "success", System.currentTimeMillis() - start);
-        return maybeAlert.map(this::toLatestDto)
-                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
+        try {
+            List<DisasterAlertItem> result = disasterAlertRepository.findAlerts(null, null, FALLBACK_PAGE)
+                    .stream().map(this::toItem).toList();
+            redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "success", System.currentTimeMillis() - start);
+            return result;
+        } catch (RuntimeException e) {
+            redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "failure", System.currentTimeMillis() - start);
+            throw e;
+        }
+    }
+
+    private DisasterLatestDto loadDetailFromRds(Long alertId, RedisReadCache.FallbackReason fallbackReason) {
+        redisReadCache.recordDbFallbackQuery(REPOSITORY_DISASTER_ALERT, fallbackReason);
+        long start = System.currentTimeMillis();
+        try {
+            Optional<DisasterAlert> maybeAlert = disasterAlertRepository.findById(alertId);
+            redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "success", System.currentTimeMillis() - start);
+            return maybeAlert.map(this::toLatestDto)
+                    .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
+        } catch (RuntimeException e) {
+            redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "failure", System.currentTimeMillis() - start);
+            throw e;
+        }
+    }
+
+    private DisasterLatestDto loadLatestFromRds(String disasterType, String region,
+                                                RedisReadCache.FallbackReason fallbackReason) {
+        redisReadCache.recordDbFallbackQuery(REPOSITORY_DISASTER_ALERT, fallbackReason);
+        long start = System.currentTimeMillis();
+        try {
+            Optional<DisasterAlert> maybeAlert = disasterAlertRepository.findLatest(disasterType, region);
+            redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "success", System.currentTimeMillis() - start);
+            return maybeAlert.map(this::toLatestDto)
+                    .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
+        } catch (RuntimeException e) {
+            redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "failure", System.currentTimeMillis() - start);
+            throw e;
+        }
     }
 
     private void requestRegeneration(String cacheKey, String cache, String endpoint, RedisReadCache.FallbackReason fallbackReason) {
@@ -146,11 +192,23 @@ public class DisasterAlertReadService {
                 .toList();
     }
 
+    private static List<DisasterAlertItem> filterAlertItems(List<DisasterAlertItem> items,
+                                                            String region, String disasterType) {
+        return items.stream()
+                .filter(i -> region == null || region.equals(i.region()))
+                .filter(i -> disasterType == null || disasterType.equals(i.disasterType()))
+                .toList();
+    }
+
     private static DisasterMessageCacheDto filterByType(List<DisasterMessageCacheDto> items, String disasterType) {
         return items.stream()
                 .filter(i -> disasterType.equals(i.disasterType()))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "all" : value;
     }
 
     private DisasterAlertItem toItem(DisasterAlert a) {

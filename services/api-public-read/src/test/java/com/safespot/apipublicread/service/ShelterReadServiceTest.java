@@ -1,6 +1,7 @@
 package com.safespot.apipublicread.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.safespot.apipublicread.cache.FallbackSingleFlight;
 import com.safespot.apipublicread.cache.RedisReadCache;
 import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.domain.Shelter;
@@ -42,6 +43,7 @@ class ShelterReadServiceTest {
     @Mock SuppressWindowService suppressWindowService;
     @Mock CacheRegenerationPublisher cacheRegenerationPublisher;
     @Spy MeterRegistry meterRegistry = new SimpleMeterRegistry();
+    @Spy FallbackSingleFlight fallbackSingleFlight = new FallbackSingleFlight(new SimpleMeterRegistry(), 2_000);
 
     @InjectMocks ShelterReadService shelterReadService;
 

@@ -1,6 +1,7 @@
 package com.safespot.apipublicread.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.safespot.apipublicread.cache.FallbackSingleFlight;
 import com.safespot.apipublicread.cache.RedisReadCache;
 import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.domain.DisasterAlert;
@@ -43,6 +44,7 @@ class DisasterAlertReadServiceTest {
     @Mock SuppressWindowService suppressWindowService;
     @Mock CacheRegenerationPublisher cacheRegenerationPublisher;
     @Spy MeterRegistry meterRegistry = new SimpleMeterRegistry();
+    @Spy FallbackSingleFlight fallbackSingleFlight = new FallbackSingleFlight(new SimpleMeterRegistry(), 2_000);
 
     @InjectMocks DisasterAlertReadService disasterAlertReadService;
 
@@ -86,7 +88,7 @@ class DisasterAlertReadServiceTest {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
         DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
-        when(disasterAlertRepository.findAlerts(eq("서울특별시"), eq("EARTHQUAKE"), any(PageRequest.class)))
+        when(disasterAlertRepository.findAlerts(isNull(), isNull(), any(PageRequest.class)))
                 .thenReturn(List.of(alert));
         when(suppressWindowService.tryPublish(LIST_KEY)).thenReturn(true);
 
@@ -165,7 +167,7 @@ class DisasterAlertReadServiceTest {
         when(redisReadCache.get(eq(DETAIL_KEY_55), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_detail"));
         DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
-        when(disasterAlertRepository.findLatest("EARTHQUAKE", "서울특별시")).thenReturn(Optional.of(alert));
+        when(disasterAlertRepository.findById(55L)).thenReturn(Optional.of(alert));
         when(suppressWindowService.tryPublish(DETAIL_KEY_55)).thenReturn(true);
 
         DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "서울특별시");

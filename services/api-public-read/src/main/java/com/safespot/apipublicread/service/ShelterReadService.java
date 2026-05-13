@@ -1,6 +1,7 @@
 package com.safespot.apipublicread.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.safespot.apipublicread.cache.FallbackSingleFlight;
 import com.safespot.apipublicread.cache.RedisReadCache;
 import com.safespot.apipublicread.cache.RedisReadCache.FallbackReason;
 import com.safespot.apipublicread.cache.SuppressWindowService;
@@ -40,6 +41,7 @@ public class ShelterReadService {
     private final ShelterRepository shelterRepository;
     private final EvacuationEntryRepository evacuationEntryRepository;
     private final RedisReadCache redisReadCache;
+    private final FallbackSingleFlight fallbackSingleFlight;
     private final SuppressWindowService suppressWindowService;
     private final CacheRegenerationPublisher cacheRegenerationPublisher;
     private final MeterRegistry meterRegistry;
@@ -104,17 +106,13 @@ public class ShelterReadService {
 
         FallbackReason reason = cached.fallbackReason();
         redisReadCache.recordFallback(cached.cache(), reason);
-        redisReadCache.recordDbFallbackQuery(REPOSITORY_SHELTER_STATUS, reason);
 
-        long start = System.currentTimeMillis();
-        long occupancy = evacuationEntryRepository.countCurrentOccupancy(shelterId);
-        Shelter shelter = shelterRepository.findById(shelterId).orElse(null);
-        int capacity = shelter != null ? shelter.getCapacity() : 0;
-        int available = Math.max(0, capacity - (int) occupancy);
-        String congestion = CongestionCalculator.calculate(capacity, (int) occupancy);
-        String updatedAt = shelter != null && shelter.getUpdatedAt() != null
-                ? shelter.getUpdatedAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) : null;
-        redisReadCache.recordDbFallbackLatency(REPOSITORY_SHELTER_STATUS, "success", System.currentTimeMillis() - start);
+        ShelterStatusCache fallback = fallbackSingleFlight.execute(
+                key,
+                cached.cache(),
+                REPOSITORY_SHELTER_STATUS,
+                () -> loadShelterStatusFromRds(shelterId, reason)
+        );
 
         if (publishRegenerationOnFallback && reason != FallbackReason.PARSE_ERROR) {
             meterRegistry.counter("api_read_cache_regen_requested_total",
@@ -137,8 +135,27 @@ public class ShelterReadService {
             }
         }
 
-        return new ShelterStatusCache((int) occupancy, available, congestion,
-                shelter != null ? shelter.getShelterStatus() : "OPERATING", updatedAt);
+        return fallback;
+    }
+
+    private ShelterStatusCache loadShelterStatusFromRds(Long shelterId, FallbackReason reason) {
+        redisReadCache.recordDbFallbackQuery(REPOSITORY_SHELTER_STATUS, reason);
+        long start = System.currentTimeMillis();
+        try {
+            long occupancy = evacuationEntryRepository.countCurrentOccupancy(shelterId);
+            Shelter shelter = shelterRepository.findById(shelterId).orElse(null);
+            int capacity = shelter != null ? shelter.getCapacity() : 0;
+            int available = Math.max(0, capacity - (int) occupancy);
+            String congestion = CongestionCalculator.calculate(capacity, (int) occupancy);
+            String updatedAt = shelter != null && shelter.getUpdatedAt() != null
+                    ? shelter.getUpdatedAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) : null;
+            redisReadCache.recordDbFallbackLatency(REPOSITORY_SHELTER_STATUS, "success", System.currentTimeMillis() - start);
+            return new ShelterStatusCache((int) occupancy, available, congestion,
+                    shelter != null ? shelter.getShelterStatus() : "OPERATING", updatedAt);
+        } catch (RuntimeException e) {
+            redisReadCache.recordDbFallbackLatency(REPOSITORY_SHELTER_STATUS, "failure", System.currentTimeMillis() - start);
+            throw e;
+        }
     }
 
     private ShelterNearbyItem toNearbyItem(Shelter s, int distanceM, ShelterStatusCache status) {
