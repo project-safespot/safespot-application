@@ -1,6 +1,9 @@
 package com.safespot.asyncworker.context;
 
 import com.safespot.asyncworker.config.LambdaConfig;
+import com.safespot.asyncworker.dispatcher.EventDispatcher;
+import com.safespot.asyncworker.envelope.EventType;
+import com.safespot.asyncworker.handler.readmodel.DisasterReadModelWarmupRequestedHandler;
 import com.safespot.asyncworker.service.disaster.DisasterReadModelService;
 import com.safespot.asyncworker.service.environment.EnvironmentCacheService;
 import org.junit.jupiter.api.Test;
@@ -46,5 +49,28 @@ class ReadModelWorkerContextTest {
     void cache_worker_전용_빈_미등록() {
         assertThatThrownBy(() -> ctx.getBean(EnvironmentCacheService.class))
             .isInstanceOf(NoSuchBeanDefinitionException.class);
+    }
+
+    @Test
+    void DisasterReadModelWarmupRequestedHandler_bean_등록됨() {
+        assertThat(ctx.getBean(DisasterReadModelWarmupRequestedHandler.class)).isNotNull();
+    }
+
+    @Test
+    void EventDispatcher_DisasterReadModelWarmupRequested_핸들러_등록됨() {
+        EventDispatcher dispatcher = ctx.getBean(EventDispatcher.class);
+        assertThat(dispatcher.getRegisteredEventTypes())
+            .contains(EventType.DisasterReadModelWarmupRequested);
+    }
+
+    @Test
+    void EventDispatcher_등록된_handler_목록_3개_정확히_일치() {
+        EventDispatcher dispatcher = ctx.getBean(EventDispatcher.class);
+        assertThat(dispatcher.getRegisteredEventTypes())
+            .containsExactlyInAnyOrder(
+                EventType.DisasterDataCollected,
+                EventType.CacheRegenerationRequested,
+                EventType.DisasterReadModelWarmupRequested
+            );
     }
 }

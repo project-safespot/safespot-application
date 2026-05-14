@@ -12,10 +12,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-// TODO: 이 handler는 @Profile("readmodel-worker")로 제한된다.
-//       Lambda 실행 환경변수 SPRING_PROFILES_ACTIVE=readmodel-worker 설정이
-//       k8s-manifest 또는 Terraform Lambda function 환경변수에 포함되어 있어야 한다.
-@Profile("readmodel-worker")
+// readmodel-worker: ReadModelWorkerHandler Lambda (readmodel-refresh queue 전용)
+// async-worker: AsyncWorkerHandler Lambda (all queues 통합)
+// DisasterDataCollectedHandler와 동일한 profile 패턴을 따른다.
+@Profile({"readmodel-worker", "async-worker"})
 @Slf4j
 @Component
 @RequiredArgsConstructor

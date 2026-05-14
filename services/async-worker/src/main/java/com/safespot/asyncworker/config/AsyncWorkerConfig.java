@@ -10,6 +10,7 @@ import com.safespot.asyncworker.handler.cache.EvacuationEntryUpdatedHandler;
 import com.safespot.asyncworker.handler.cache.ShelterStatusWarmupRequestedHandler;
 import com.safespot.asyncworker.handler.cache.ShelterUpdatedHandler;
 import com.safespot.asyncworker.handler.readmodel.DisasterDataCollectedHandler;
+import com.safespot.asyncworker.handler.readmodel.DisasterReadModelWarmupRequestedHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -29,7 +30,8 @@ public class AsyncWorkerConfig {
         EnvironmentDataCollectedHandler environmentHandler,
         DisasterDataCollectedHandler disasterHandler,
         CacheRegenerationAsyncWorkerHandler cacheRegenerationHandler,
-        ShelterStatusWarmupRequestedHandler shelterStatusWarmupHandler
+        ShelterStatusWarmupRequestedHandler shelterStatusWarmupHandler,
+        DisasterReadModelWarmupRequestedHandler disasterWarmupHandler
     ) {
         List<EventHandler> handlers = List.of(
             evacuationCreatedHandler,
@@ -39,7 +41,8 @@ public class AsyncWorkerConfig {
             environmentHandler,
             disasterHandler,
             cacheRegenerationHandler,
-            shelterStatusWarmupHandler
+            shelterStatusWarmupHandler,
+            disasterWarmupHandler
         );
         return new EventDispatcher(handlers);
     }

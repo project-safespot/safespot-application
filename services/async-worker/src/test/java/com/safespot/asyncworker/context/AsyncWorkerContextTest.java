@@ -2,9 +2,11 @@ package com.safespot.asyncworker.context;
 
 import com.safespot.asyncworker.config.LambdaConfig;
 import com.safespot.asyncworker.dispatcher.EventDispatcher;
+import com.safespot.asyncworker.envelope.EventType;
 import com.safespot.asyncworker.handler.CacheRegenerationAsyncWorkerHandler;
 import com.safespot.asyncworker.handler.cache.CacheRegenerationCacheWorkerHandler;
 import com.safespot.asyncworker.handler.readmodel.CacheRegenerationReadModelWorkerHandler;
+import com.safespot.asyncworker.handler.readmodel.DisasterReadModelWarmupRequestedHandler;
 import com.safespot.asyncworker.service.disaster.DisasterReadModelService;
 import com.safespot.asyncworker.service.environment.EnvironmentCacheService;
 import org.junit.jupiter.api.Test;
@@ -82,5 +84,34 @@ class AsyncWorkerContextTest {
         // CacheRegenerationAsyncWorkerHandler가 disaster 키 처리를 대신한다
         assertThatThrownBy(() -> ctx.getBean(CacheRegenerationReadModelWorkerHandler.class))
             .isInstanceOf(NoSuchBeanDefinitionException.class);
+    }
+
+    @Test
+    void DisasterReadModelWarmupRequestedHandler_bean_등록됨() {
+        assertThat(ctx.getBean(DisasterReadModelWarmupRequestedHandler.class)).isNotNull();
+    }
+
+    @Test
+    void EventDispatcher_DisasterReadModelWarmupRequested_핸들러_등록됨() {
+        EventDispatcher dispatcher = ctx.getBean(EventDispatcher.class);
+        assertThat(dispatcher.getRegisteredEventTypes())
+            .contains(EventType.DisasterReadModelWarmupRequested);
+    }
+
+    @Test
+    void EventDispatcher_등록된_handler_목록_9개_정확히_일치() {
+        EventDispatcher dispatcher = ctx.getBean(EventDispatcher.class);
+        assertThat(dispatcher.getRegisteredEventTypes())
+            .containsExactlyInAnyOrder(
+                EventType.EvacuationEntryCreated,
+                EventType.EvacuationEntryExited,
+                EventType.EvacuationEntryUpdated,
+                EventType.ShelterUpdated,
+                EventType.EnvironmentDataCollected,
+                EventType.DisasterDataCollected,
+                EventType.CacheRegenerationRequested,
+                EventType.ShelterStatusWarmupRequested,
+                EventType.DisasterReadModelWarmupRequested
+            );
     }
 }

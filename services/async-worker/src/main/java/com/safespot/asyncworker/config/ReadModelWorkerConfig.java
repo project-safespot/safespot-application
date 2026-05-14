@@ -4,6 +4,7 @@ import com.safespot.asyncworker.dispatcher.EventDispatcher;
 import com.safespot.asyncworker.handler.EventHandler;
 import com.safespot.asyncworker.handler.readmodel.CacheRegenerationReadModelWorkerHandler;
 import com.safespot.asyncworker.handler.readmodel.DisasterDataCollectedHandler;
+import com.safespot.asyncworker.handler.readmodel.DisasterReadModelWarmupRequestedHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -17,9 +18,14 @@ public class ReadModelWorkerConfig {
     @Bean
     public EventDispatcher readModelWorkerDispatcher(
         DisasterDataCollectedHandler disasterHandler,
-        CacheRegenerationReadModelWorkerHandler cacheRegenerationHandler
+        CacheRegenerationReadModelWorkerHandler cacheRegenerationHandler,
+        DisasterReadModelWarmupRequestedHandler warmupHandler
     ) {
-        List<EventHandler> handlers = List.of(disasterHandler, cacheRegenerationHandler);
+        List<EventHandler> handlers = List.of(
+            disasterHandler,
+            cacheRegenerationHandler,
+            warmupHandler
+        );
         return new EventDispatcher(handlers);
     }
 }
