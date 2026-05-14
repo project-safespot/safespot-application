@@ -1,6 +1,7 @@
 package com.safespot.asyncworker.redis;
 
 import java.time.Duration;
+import java.util.concurrent.ThreadLocalRandom;
 
 public final class RedisTtlConstants {
 
@@ -10,11 +11,23 @@ public final class RedisTtlConstants {
     public static final Duration SHELTER_STATUS            = Duration.ofMinutes(10);
 
     public static final Duration DISASTER_DETAIL           = Duration.ofSeconds(3600);
-    public static final Duration DISASTER_MESSAGES_RECENT  = Duration.ofSeconds(300);
-    public static final Duration DISASTER_MESSAGE_CORE     = Duration.ofSeconds(300);
-    public static final Duration DISASTER_MESSAGES_LIST    = Duration.ofSeconds(300);
+    public static final Duration DISASTER_MESSAGES_RECENT  = Duration.ofSeconds(600);
+    public static final Duration DISASTER_MESSAGE_CORE     = Duration.ofSeconds(600);
+    public static final Duration DISASTER_MESSAGES_LIST    = Duration.ofSeconds(600);
 
     public static final Duration ENVIRONMENT_WEATHER       = Duration.ofSeconds(7200);
     public static final Duration ENVIRONMENT_AIR_QUALITY   = Duration.ofSeconds(7200);
     public static final Duration ENVIRONMENT_WEATHER_ALERT = Duration.ofSeconds(7200);
+
+    /**
+     * base TTL에 ±jitterFraction 범위의 random offset을 적용한다.
+     * 여러 키가 동시에 SET될 때 만료 시점이 분산되어 thundering herd를 완화한다.
+     * 최소 1,000ms가 보장된다.
+     */
+    public static Duration withJitter(Duration base, double jitterFraction) {
+        long baseMs = base.toMillis();
+        long maxJitterMs = (long) (baseMs * jitterFraction);
+        long jitterMs = ThreadLocalRandom.current().nextLong(-maxJitterMs, maxJitterMs);
+        return Duration.ofMillis(Math.max(1_000, baseMs + jitterMs));
+    }
 }

@@ -27,7 +27,7 @@ public class RedisCacheWriter {
     // Shelter
 
     public void setShelterStatus(Long shelterId, ShelterStatusValue value) {
-        set(RedisKeyConstants.shelterStatus(shelterId), value, RedisTtlConstants.SHELTER_STATUS);
+        set(RedisKeyConstants.shelterStatus(shelterId), value, RedisTtlConstants.withJitter(RedisTtlConstants.SHELTER_STATUS, 0.1));
     }
 
     // Disaster read models
@@ -37,21 +37,25 @@ public class RedisCacheWriter {
     }
 
     public void setDisasterMessagesRecent(List<DisasterMessageItem> items) {
-        setWithSizeMetric(RedisKeyConstants.DISASTER_MESSAGES_RECENT, items, RedisTtlConstants.DISASTER_MESSAGES_RECENT, "disaster_messages_recent");
+        Duration ttl = RedisTtlConstants.withJitter(RedisTtlConstants.DISASTER_MESSAGES_RECENT, 0.1);
+        setWithSizeMetric(RedisKeyConstants.DISASTER_MESSAGES_RECENT, items, ttl, "disaster_messages_recent");
     }
 
     public void setDisasterMessageCore(DisasterMessageItem item) {
-        setWithSizeMetric(RedisKeyConstants.DISASTER_MESSAGE_CORE, item, RedisTtlConstants.DISASTER_MESSAGE_CORE, "disaster_message_core");
+        Duration ttl = RedisTtlConstants.withJitter(RedisTtlConstants.DISASTER_MESSAGE_CORE, 0.1);
+        setWithSizeMetric(RedisKeyConstants.DISASTER_MESSAGE_CORE, item, ttl, "disaster_message_core");
     }
 
     public void setDisasterMessageCoreEmpty() {
         // core candidate 없음 — schemaVersion=1, 나머지 null인 empty wrapper
         DisasterMessageItem empty = new DisasterMessageItem(1, null, null, null, null, null, null, null, null, null, null, null, null);
-        setWithSizeMetric(RedisKeyConstants.DISASTER_MESSAGE_CORE, empty, RedisTtlConstants.DISASTER_MESSAGE_CORE, "disaster_message_core");
+        Duration ttl = RedisTtlConstants.withJitter(RedisTtlConstants.DISASTER_MESSAGE_CORE, 0.1);
+        setWithSizeMetric(RedisKeyConstants.DISASTER_MESSAGE_CORE, empty, ttl, "disaster_message_core");
     }
 
     public void setDisasterMessagesList(List<DisasterMessageItem> items) {
-        setWithSizeMetric(RedisKeyConstants.DISASTER_MESSAGES_LIST, items, RedisTtlConstants.DISASTER_MESSAGES_LIST, "disaster_messages_list");
+        Duration ttl = RedisTtlConstants.withJitter(RedisTtlConstants.DISASTER_MESSAGES_LIST, 0.1);
+        setWithSizeMetric(RedisKeyConstants.DISASTER_MESSAGES_LIST, items, ttl, "disaster_messages_list");
     }
 
     // Environment read models

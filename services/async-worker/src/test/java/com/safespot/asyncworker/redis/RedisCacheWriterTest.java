@@ -37,13 +37,13 @@ class RedisCacheWriterTest {
     }
 
     @Test
-    void setShelterStatus_정상_SET() {
+    void setShelterStatus_정상_SET_withJitterTtl() {
         cacheWriter.setShelterStatus(101L, new ShelterStatusValue(5, 45, "LOW", "OPEN"));
 
         verify(valueOps).set(
             eq(RedisKeyConstants.shelterStatus(101L)),
             anyString(),
-            eq(RedisTtlConstants.SHELTER_STATUS)
+            argThat(ttl -> isWithinJitterRange(ttl, RedisTtlConstants.SHELTER_STATUS, 0.1))
         );
     }
 
@@ -64,25 +64,58 @@ class RedisCacheWriterTest {
     }
 
     @Test
-    void setDisasterMessagesRecent_canonical_key_SET() {
+    void setDisasterMessagesRecent_canonical_key_SET_withJitterTtl() {
         cacheWriter.setDisasterMessagesRecent(List.of());
 
         verify(valueOps).set(
             eq(RedisKeyConstants.DISASTER_MESSAGES_RECENT),
             anyString(),
-            eq(RedisTtlConstants.DISASTER_MESSAGES_RECENT)
+            argThat(ttl -> isWithinJitterRange(ttl, RedisTtlConstants.DISASTER_MESSAGES_RECENT, 0.1))
         );
     }
 
     @Test
-    void setDisasterMessagesList_canonical_key_SET() {
+    void setDisasterMessageCore_canonical_key_SET_withJitterTtl() {
+        DisasterMessageItem item = new DisasterMessageItem(
+            1, 42L, "FLOOD", null, "ALERT", "WARNING", 3,
+            "서울", "2026-04-22T10:00:00", null, "홍수 경보", "KMA", true
+        );
+
+        cacheWriter.setDisasterMessageCore(item);
+
+        verify(valueOps).set(
+            eq(RedisKeyConstants.DISASTER_MESSAGE_CORE),
+            anyString(),
+            argThat(ttl -> isWithinJitterRange(ttl, RedisTtlConstants.DISASTER_MESSAGE_CORE, 0.1))
+        );
+    }
+
+    @Test
+    void setDisasterMessageCoreEmpty_canonical_key_SET_withJitterTtl() {
+        cacheWriter.setDisasterMessageCoreEmpty();
+
+        verify(valueOps).set(
+            eq(RedisKeyConstants.DISASTER_MESSAGE_CORE),
+            anyString(),
+            argThat(ttl -> isWithinJitterRange(ttl, RedisTtlConstants.DISASTER_MESSAGE_CORE, 0.1))
+        );
+    }
+
+    @Test
+    void setDisasterMessagesList_canonical_key_SET_withJitterTtl() {
         cacheWriter.setDisasterMessagesList(List.of());
 
         verify(valueOps).set(
             eq(RedisKeyConstants.DISASTER_MESSAGES_LIST),
             anyString(),
-            eq(RedisTtlConstants.DISASTER_MESSAGES_LIST)
+            argThat(ttl -> isWithinJitterRange(ttl, RedisTtlConstants.DISASTER_MESSAGES_LIST, 0.1))
         );
+    }
+
+    private static boolean isWithinJitterRange(Duration actual, Duration base, double fraction) {
+        long baseMs = base.toMillis();
+        long maxJitterMs = (long) (baseMs * fraction);
+        return actual.toMillis() >= baseMs - maxJitterMs && actual.toMillis() < baseMs + maxJitterMs;
     }
 
     @Test
