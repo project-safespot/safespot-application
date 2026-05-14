@@ -27,34 +27,36 @@ public class RedisCacheWriter {
     // Shelter
 
     public void setShelterStatus(Long shelterId, ShelterStatusValue value) {
-        set(RedisKeyConstants.shelterStatus(shelterId), value, RedisTtlConstants.withJitter(RedisTtlConstants.SHELTER_STATUS, 0.1));
+        set(RedisKeyConstants.shelterStatus(shelterId), value,
+                RedisTtlConstants.withAddedJitter(RedisTtlConstants.SHELTER_STATUS, RedisTtlConstants.SHELTER_DISASTER_JITTER));
     }
 
     // Disaster read models
 
     public void setDisasterDetail(Long alertId, DisasterDetailCacheValue value) {
-        setWithSizeMetric(RedisKeyConstants.disasterDetail(alertId), value, RedisTtlConstants.DISASTER_DETAIL, "disaster_detail");
+        Duration ttl = RedisTtlConstants.withAddedJitter(RedisTtlConstants.DISASTER_DETAIL, RedisTtlConstants.SHELTER_DISASTER_JITTER);
+        setWithSizeMetric(RedisKeyConstants.disasterDetail(alertId), value, ttl, "disaster_detail");
     }
 
     public void setDisasterMessagesRecent(List<DisasterMessageItem> items) {
-        Duration ttl = RedisTtlConstants.withJitter(RedisTtlConstants.DISASTER_MESSAGES_RECENT, 0.1);
+        Duration ttl = RedisTtlConstants.withAddedJitter(RedisTtlConstants.DISASTER_MESSAGES_RECENT, RedisTtlConstants.SHELTER_DISASTER_JITTER);
         setWithSizeMetric(RedisKeyConstants.DISASTER_MESSAGES_RECENT, items, ttl, "disaster_messages_recent");
     }
 
     public void setDisasterMessageCore(DisasterMessageItem item) {
-        Duration ttl = RedisTtlConstants.withJitter(RedisTtlConstants.DISASTER_MESSAGE_CORE, 0.1);
+        Duration ttl = RedisTtlConstants.withAddedJitter(RedisTtlConstants.DISASTER_MESSAGE_CORE, RedisTtlConstants.SHELTER_DISASTER_JITTER);
         setWithSizeMetric(RedisKeyConstants.DISASTER_MESSAGE_CORE, item, ttl, "disaster_message_core");
     }
 
     public void setDisasterMessageCoreEmpty() {
         // core candidate 없음 — schemaVersion=1, 나머지 null인 empty wrapper
         DisasterMessageItem empty = new DisasterMessageItem(1, null, null, null, null, null, null, null, null, null, null, null, null);
-        Duration ttl = RedisTtlConstants.withJitter(RedisTtlConstants.DISASTER_MESSAGE_CORE, 0.1);
+        Duration ttl = RedisTtlConstants.withAddedJitter(RedisTtlConstants.DISASTER_MESSAGE_CORE, RedisTtlConstants.SHELTER_DISASTER_JITTER);
         setWithSizeMetric(RedisKeyConstants.DISASTER_MESSAGE_CORE, empty, ttl, "disaster_message_core");
     }
 
     public void setDisasterMessagesList(List<DisasterMessageItem> items) {
-        Duration ttl = RedisTtlConstants.withJitter(RedisTtlConstants.DISASTER_MESSAGES_LIST, 0.1);
+        Duration ttl = RedisTtlConstants.withAddedJitter(RedisTtlConstants.DISASTER_MESSAGES_LIST, RedisTtlConstants.SHELTER_DISASTER_JITTER);
         setWithSizeMetric(RedisKeyConstants.DISASTER_MESSAGES_LIST, items, ttl, "disaster_messages_list");
     }
 

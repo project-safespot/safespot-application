@@ -8,13 +8,13 @@ RDS는 원천 데이터로 남는다. TTL은 fallback freshness protection이며
 
 | Key pattern | TTL | 이유 |
 | --- | --- | --- |
-| `shelter:status:{shelterId}` | 10분 ±10% jitter (실제 범위: 약 9~11분) | async-worker에서 다수 key가 동시에 rebuild될 때 동시 만료를 완화하기 위해 jitter를 적용한다. |
+| `shelter:status:{shelterId}` | 3600초 + 0~120초 jitter (실제 범위: 3600~3720초) | TTL은 freshness 보장 수단이 아니라 safety cap이다. 최신성은 ingestion/update event 기반 regeneration이 담당한다. 다수 key 동시 만료 분산 목적으로 additive jitter를 적용한다. |
 | `shelter:list:seoul:{shelterType}:{disasterType}` | 600 seconds | shelter list membership은 shelter status보다 덜 자주 바뀐다. |
 | `shelter:list:{region}:{shelterType}:{disasterType}` | 600 seconds | Seoul namespace와 같은 future list-model policy. |
-| `disaster:messages:recent:seoul` | 600 seconds ±10% jitter | rebuild 시 동시 만료로 인한 thundering herd를 방지하기 위해 jitter를 적용한다. |
-| `disaster:message:core:seoul` | 600 seconds ±10% jitter | rebuild 시 동시 만료로 인한 thundering herd를 방지하기 위해 jitter를 적용한다. |
-| `disaster:messages:list:seoul` | 600 seconds ±10% jitter | rebuild 시 동시 만료로 인한 thundering herd를 방지하기 위해 jitter를 적용한다. |
-| `disaster:detail:{alertId}` | 3600 seconds | detail payload는 normalization 후 거의 변경되지 않는다. |
+| `disaster:messages:recent:seoul` | 3600초 + 0~120초 jitter (실제 범위: 3600~3720초) | TTL은 safety cap이다. rebuild 시 동시 만료 분산 목적으로 additive jitter를 적용한다. |
+| `disaster:message:core:seoul` | 3600초 + 0~120초 jitter (실제 범위: 3600~3720초) | TTL은 safety cap이다. rebuild 시 동시 만료 분산 목적으로 additive jitter를 적용한다. |
+| `disaster:messages:list:seoul` | 3600초 + 0~120초 jitter (실제 범위: 3600~3720초) | TTL은 safety cap이다. rebuild 시 동시 만료 분산 목적으로 additive jitter를 적용한다. |
+| `disaster:detail:{alertId}` | 3600초 + 0~120초 jitter (실제 범위: 3600~3720초) | detail payload는 normalization 후 거의 변경되지 않는다. TTL은 safety cap이다. |
 | `environment:weather:seoul` | 7200 seconds | environment TTL은 data freshness가 아니라 fallback stability protection이다. |
 | `environment:air-quality:seoul` | 7200 seconds | environment TTL은 data freshness가 아니라 fallback stability protection이다. |
 | `environment:weather-alert:seoul` | 7200 seconds | environment TTL은 data freshness가 아니라 fallback stability protection이다. |
@@ -65,3 +65,4 @@ suppress key는 실제 regeneration target key를 hash input으로 사용해야 
 | 2026-04-24 | v1.1 | disaster message read model TTL을 `recent/core/list/detail` 구조로 전환. suppress window TTL 30초와 fallback freshness 원칙 명시 |
 | 2026-05-14 | v1.2 | `disaster:messages:*` TTL 300s → 600s로 상향. rebuild 시 동시 만료 thundering herd 방지 목적으로 ±10% jitter 추가. |
 | 2026-05-14 | v1.3 | 코드 기준 TTL 10분과 문서 불일치 수정 (30초 → 10분). 동시 만료 완화를 위해 `shelter:status:{shelterId}` ±10% jitter 추가. |
+| 2026-05-15 | v1.4 | shelter/disaster cache TTL 1시간(3600초)으로 확대. jitter를 ±10%에서 0~120초 단방향 additive 방식으로 변경. TTL은 safety cap이며 최신성은 event-driven regeneration이 담당함을 명시. |

@@ -21,6 +21,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+// warmup path는 rebuild/regeneration path와 동일한 RedisCacheWriter를 통해 Redis에 기록한다.
+// TTL 정책(3600s + 0~120s jitter)은 cacheWriter 내부에서 적용되므로 서비스 계층에서 별도 처리 없다.
+// TTL 범위 검증은 RedisCacheWriterTest 및 RedisTtlConstantsTest에서 수행한다.
 @ExtendWith(MockitoExtension.class)
 class DisasterReadModelServiceTest {
 
@@ -142,6 +145,51 @@ class DisasterReadModelServiceTest {
 
         verify(cacheWriter).deleteDisasterDetail(999L);
         verify(cacheWriter, never()).setDisasterDetail(eq(999L), any());
+    }
+
+    @Test
+    void warmupAll_includeDetails_true_detail_recent_core_list_순서로_재생성() {
+        DisasterAlertRecord record = sampleRecord(42L);
+        when(disasterAlertRepository.findInScopeOrderByIssuedAtDesc(10)).thenReturn(List.of(record));
+        when(disasterAlertRepository.findInScopeOrderByIssuedAtDesc(5)).thenReturn(List.of(record));
+        when(disasterAlertRepository.findInScopeOrderByIssuedAtDesc(50)).thenReturn(List.of(record));
+        when(disasterAlertRepository.findCoreMessage()).thenReturn(Optional.of(record));
+
+        service.warmupAll(10, true);
+
+        var inOrder = inOrder(cacheWriter);
+        inOrder.verify(cacheWriter).setDisasterDetail(eq(42L), any(DisasterDetailCacheValue.class));
+        inOrder.verify(cacheWriter).setDisasterMessagesRecent(anyList());
+        inOrder.verify(cacheWriter).setDisasterMessageCore(any(DisasterMessageItem.class));
+        inOrder.verify(cacheWriter).setDisasterMessagesList(anyList());
+    }
+
+    @Test
+    void warmupAll_includeDetails_false_detail_SET_없음() {
+        when(disasterAlertRepository.findInScopeOrderByIssuedAtDesc(anyInt())).thenReturn(List.of());
+        when(disasterAlertRepository.findCoreMessage()).thenReturn(Optional.empty());
+
+        service.warmupAll(10, false);
+
+        verify(cacheWriter, never()).setDisasterDetail(anyLong(), any());
+        verify(cacheWriter).setDisasterMessagesRecent(anyList());
+        verify(cacheWriter).setDisasterMessageCoreEmpty();
+        verify(cacheWriter).setDisasterMessagesList(anyList());
+    }
+
+    @Test
+    void warmupAll_includeDetails_true_DB_결과_없으면_detail_SET_없음() {
+        when(disasterAlertRepository.findInScopeOrderByIssuedAtDesc(10)).thenReturn(List.of());
+        when(disasterAlertRepository.findInScopeOrderByIssuedAtDesc(5)).thenReturn(List.of());
+        when(disasterAlertRepository.findInScopeOrderByIssuedAtDesc(50)).thenReturn(List.of());
+        when(disasterAlertRepository.findCoreMessage()).thenReturn(Optional.empty());
+
+        service.warmupAll(10, true);
+
+        verify(cacheWriter, never()).setDisasterDetail(anyLong(), any());
+        verify(cacheWriter).setDisasterMessagesRecent(anyList());
+        verify(cacheWriter).setDisasterMessageCoreEmpty();
+        verify(cacheWriter).setDisasterMessagesList(anyList());
     }
 
     @Test

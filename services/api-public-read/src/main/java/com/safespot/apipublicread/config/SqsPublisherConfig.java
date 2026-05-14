@@ -6,6 +6,7 @@ import com.safespot.apipublicread.event.CacheRegenerationEnvelopeFactory;
 import com.safespot.apipublicread.event.CacheRegenerationPublishFailureRecorder;
 import com.safespot.apipublicread.event.CacheRegenerationRouteResolver;
 import com.safespot.apipublicread.event.SqsCacheRegenerationPublisher;
+import com.safespot.apipublicread.event.SqsDisasterWarmupPublisher;
 import com.safespot.apipublicread.event.SqsQueueUrlProvider;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
@@ -67,5 +68,14 @@ public class SqsPublisherConfig {
             MeterRegistry meterRegistry) {
         return new SqsCacheRegenerationPublisher(sqsClient, queueUrlProvider, objectMapper,
                 familyResolver, routeResolver, envelopeFactory, failureRecorder, meterRegistry);
+    }
+
+    @Bean
+    public SqsDisasterWarmupPublisher sqsDisasterWarmupPublisher(
+            SqsClient sqsClient,
+            SqsQueueUrlProvider queueUrlProvider,
+            ObjectMapper objectMapper,
+            MeterRegistry meterRegistry) {
+        return new SqsDisasterWarmupPublisher(sqsClient, queueUrlProvider, objectMapper, meterRegistry);
     }
 }

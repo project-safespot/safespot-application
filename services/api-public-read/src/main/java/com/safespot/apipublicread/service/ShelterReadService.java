@@ -98,12 +98,10 @@ public class ShelterReadService {
                 if (reason == FallbackReason.REDIS_MISS) {
                     missIds.add(shelterId);
                 }
-                status = fallbackSingleFlight.execute(
-                        "shelter:status:" + shelterId,
-                        "shelter_status",
-                        REPOSITORY_SHELTER_STATUS,
-                        () -> loadShelterStatusFromRds(shelterId, reason)
-                );
+                // nearby는 hot path라 miss 시 DB fallback하지 않는다.
+                // miss shelter도 응답에는 포함하되 status는 기본값으로 처리하고,
+                // missing shelterIds는 batch CacheRegenerationRequested 이벤트로 발행한다.
+                status = new ShelterStatusCache(0, sd.shelter().getCapacity(), null, null, null);
             }
             items.add(toNearbyItem(sd.shelter(), sd.distanceM(), status));
         }

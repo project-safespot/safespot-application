@@ -8,7 +8,8 @@ public enum EventType {
     DisasterDataCollected,
     EnvironmentDataCollected,
     CacheRegenerationRequested,
-    ShelterStatusWarmupRequested;
+    ShelterStatusWarmupRequested,
+    DisasterReadModelWarmupRequested;
 
     public static EventType from(String value) {
         try {

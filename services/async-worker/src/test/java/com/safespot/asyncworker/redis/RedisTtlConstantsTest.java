@@ -29,40 +29,44 @@ class RedisTtlConstantsTest {
         }
     }
 
-    @RepeatedTest(50)
-    void withJitter_notAlwaysSameValue() {
-        // 200번 중 적어도 값이 분산되는지 확인 — 고정값이 아님을 검증
-        Duration base = Duration.ofSeconds(600);
-        Duration r1 = RedisTtlConstants.withJitter(base, 0.1);
-        Duration r2 = RedisTtlConstants.withJitter(base, 0.1);
-        // 두 값이 반드시 다를 수는 없지만(확률 극히 낮음), 둘 다 범위 안에 있어야 함
-        assertThat(r1.toMillis()).isBetween(540_000L, 659_999L);
-        assertThat(r2.toMillis()).isBetween(540_000L, 659_999L);
-    }
+    @RepeatedTest(200)
+    void withAddedJitter_shelter_disaster_producesValuesInRange_3600to3720s() {
+        Duration result = RedisTtlConstants.withAddedJitter(
+                RedisTtlConstants.SHELTER_STATUS, RedisTtlConstants.SHELTER_DISASTER_JITTER);
 
-    @Test
-    void shelterStatus_baseTtl_is600s() {
-        assertThat(RedisTtlConstants.SHELTER_STATUS.getSeconds()).isEqualTo(600L);
+        assertThat(result.toMillis())
+                .isGreaterThanOrEqualTo(3_600_000L)
+                .isLessThanOrEqualTo(3_720_000L);
     }
 
     @RepeatedTest(200)
-    void withJitter_shelterStatus_10percent_producesValuesWithinRange() {
-        Duration result = RedisTtlConstants.withJitter(RedisTtlConstants.SHELTER_STATUS, 0.1);
+    void withAddedJitter_neverBelowBase() {
+        Duration base = Duration.ofSeconds(3600);
+        Duration jitter = Duration.ofSeconds(120);
+        Duration result = RedisTtlConstants.withAddedJitter(base, jitter);
 
-        assertThat(result.toMillis())
-                .isGreaterThanOrEqualTo(540_000L)
-                .isLessThan(660_000L);
+        assertThat(result.toMillis()).isGreaterThanOrEqualTo(base.toMillis());
     }
 
     @Test
-    void disasterMessages_baseTtl_is600s() {
-        assertThat(RedisTtlConstants.DISASTER_MESSAGES_LIST.getSeconds()).isEqualTo(600L);
-        assertThat(RedisTtlConstants.DISASTER_MESSAGES_RECENT.getSeconds()).isEqualTo(600L);
-        assertThat(RedisTtlConstants.DISASTER_MESSAGE_CORE.getSeconds()).isEqualTo(600L);
+    void shelterStatus_baseTtl_is3600s() {
+        assertThat(RedisTtlConstants.SHELTER_STATUS.getSeconds()).isEqualTo(3600L);
     }
 
     @Test
-    void disasterDetail_baseTtl_unchanged_3600s() {
+    void shelterDisasterJitter_is120s() {
+        assertThat(RedisTtlConstants.SHELTER_DISASTER_JITTER.getSeconds()).isEqualTo(120L);
+    }
+
+    @Test
+    void disasterMessages_baseTtl_is3600s() {
+        assertThat(RedisTtlConstants.DISASTER_MESSAGES_LIST.getSeconds()).isEqualTo(3600L);
+        assertThat(RedisTtlConstants.DISASTER_MESSAGES_RECENT.getSeconds()).isEqualTo(3600L);
+        assertThat(RedisTtlConstants.DISASTER_MESSAGE_CORE.getSeconds()).isEqualTo(3600L);
+    }
+
+    @Test
+    void disasterDetail_baseTtl_is3600s() {
         assertThat(RedisTtlConstants.DISASTER_DETAIL.getSeconds()).isEqualTo(3600L);
     }
 }

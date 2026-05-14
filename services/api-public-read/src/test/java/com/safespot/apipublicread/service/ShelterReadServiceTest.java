@@ -150,6 +150,7 @@ class ShelterReadServiceTest {
     }
 
     // ── /shelters/nearby MGET 경로 ───────────────────────────────────────────
+    // nearby는 hot path라 miss 시 DB fallback하지 않는다.
 
     @Test
     void findNearby_usesMgetNotIndividualGets() {
@@ -222,23 +223,59 @@ class ShelterReadServiceTest {
     }
 
     @Test
-    void findNearby_mgetCacheMiss_fallsBackToRdsAndPublishesBatchEvent() {
+    // nearby는 hot path라 miss 시 DB fallback하지 않는다
+    void findNearby_allStatusMiss_noDbFallback() {
+        Shelter s1 = shelterAt(101L, 37.5687, 126.9081);
+        Shelter s2 = shelterAt(102L, 37.5690, 126.9081);
+        Shelter s3 = shelterAt(103L, 37.5695, 126.9081);
+
+        when(shelterRepository.findByBoundingBoxAndDisasterType(
+                any(BigDecimal.class), any(BigDecimal.class), any(BigDecimal.class), any(BigDecimal.class), anyString()
+        )).thenReturn(List.of(s1, s2, s3));
+        when(redisReadCache.multiGetShelterStatus(anyList()))
+                .thenReturn(Map.of(
+                        101L, miss(),
+                        102L, miss(),
+                        103L, miss()
+                ));
+        when(suppressWindowService.tryPublish("shelter:status:batch")).thenReturn(true);
+
+        List<ShelterNearbyItem> result = shelterReadService.findNearby(37.5687, 126.9081, 1_000, "EARTHQUAKE");
+
+        assertThat(result).hasSize(3);
+        verify(evacuationEntryRepository, never()).countCurrentOccupancy(anyLong());
+        verify(shelterRepository, never()).findById(anyLong());
+        result.forEach(item -> {
+            assertThat(item.currentOccupancy()).isEqualTo(0);
+            assertThat(item.congestionLevel()).isNull();
+            assertThat(item.shelterStatus()).isNull();
+        });
+        verify(cacheRegenerationPublisher).publishBatch(
+                eq("SHELTER_STATUS"),
+                argThat(ids -> ids.size() == 3 && ids.containsAll(List.of(101L, 102L, 103L))),
+                eq(CacheRegenerationReason.CACHE_MISS),
+                anyString());
+    }
+
+    @Test
+    void findNearby_cacheMiss_noDbFallback_publishesBatchEvent() {
         when(shelterRepository.findByBoundingBoxAndDisasterType(
                 any(BigDecimal.class), any(BigDecimal.class),
                 any(BigDecimal.class), any(BigDecimal.class), eq("EARTHQUAKE")
         )).thenReturn(List.of(shelter));
         when(redisReadCache.multiGetShelterStatus(List.of(101L)))
                 .thenReturn(Map.of(101L, new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_status")));
-        when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
-        when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenReturn(10L);
         when(suppressWindowService.tryPublish("shelter:status:batch")).thenReturn(true);
 
         List<ShelterNearbyItem> result = shelterReadService.findNearby(37.5687, 126.9081, 1_000, "EARTHQUAKE");
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).currentOccupancy()).isEqualTo(10);
+        assertThat(result.get(0).currentOccupancy()).isEqualTo(0);
+        assertThat(result.get(0).congestionLevel()).isNull();
+        assertThat(result.get(0).shelterStatus()).isNull();
+        assertThat(result.get(0).availableCapacity()).isEqualTo(120); // shelter capacity
+        verify(evacuationEntryRepository, never()).countCurrentOccupancy(anyLong());
         verify(redisReadCache).recordFallback(eq("shelter_status"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
-        verify(redisReadCache).recordDbFallbackQuery("shelter_status_repository", RedisReadCache.FallbackReason.REDIS_MISS);
         verify(cacheRegenerationPublisher).publishBatch(
                 eq("SHELTER_STATUS"), eq(List.of(101L)), eq(CacheRegenerationReason.CACHE_MISS), eq("/shelters/nearby"));
         verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
@@ -252,17 +289,17 @@ class ShelterReadServiceTest {
         )).thenReturn(List.of(shelter));
         when(redisReadCache.multiGetShelterStatus(List.of(101L)))
                 .thenReturn(Map.of(101L, new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_status")));
-        when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
-        when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenReturn(10L);
         when(suppressWindowService.tryPublish("shelter:status:batch")).thenReturn(false);
 
-        shelterReadService.findNearby(37.5687, 126.9081, 1_000, "EARTHQUAKE");
+        List<ShelterNearbyItem> result = shelterReadService.findNearby(37.5687, 126.9081, 1_000, "EARTHQUAKE");
 
+        assertThat(result).hasSize(1);
+        verify(evacuationEntryRepository, never()).countCurrentOccupancy(anyLong());
         verify(cacheRegenerationPublisher, never()).publishBatch(any(), any(), any(), anyString());
     }
 
     @Test
-    void findNearby_partialCacheMiss_onlyMissedSheltersFallsBack() {
+    void findNearby_partialMiss_hitUsesCache_missUsesDefault() {
         Shelter s1 = shelterAt(101L, 37.5687, 126.9081);
         Shelter s2 = shelterAt(102L, 37.5690, 126.9081);
 
@@ -276,16 +313,25 @@ class ShelterReadServiceTest {
                         101L, hit(dto),
                         102L, miss()
                 ));
-        when(shelterRepository.findById(102L)).thenReturn(Optional.of(s2));
-        when(evacuationEntryRepository.countCurrentOccupancy(102L)).thenReturn(20L);
         when(suppressWindowService.tryPublish("shelter:status:batch")).thenReturn(true);
 
         List<ShelterNearbyItem> result = shelterReadService.findNearby(37.5687, 126.9081, 1_000, "EARTHQUAKE");
 
         assertThat(result).hasSize(2);
-        verify(evacuationEntryRepository, never()).countCurrentOccupancy(101L);
-        verify(evacuationEntryRepository).countCurrentOccupancy(102L);
-        verify(redisReadCache).recordFallback(eq("shelter_status"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
+        // DB는 어떤 shelter에도 호출되지 않는다
+        verify(evacuationEntryRepository, never()).countCurrentOccupancy(anyLong());
+        verify(shelterRepository, never()).findById(anyLong());
+        // s1 (hit): cached status
+        ShelterNearbyItem item1 = result.stream().filter(i -> i.shelterId() == 101L).findFirst().orElseThrow();
+        assertThat(item1.currentOccupancy()).isEqualTo(10);
+        assertThat(item1.congestionLevel()).isEqualTo("AVAILABLE");
+        assertThat(item1.shelterStatus()).isEqualTo("OPERATING");
+        // s2 (miss): default status
+        ShelterNearbyItem item2 = result.stream().filter(i -> i.shelterId() == 102L).findFirst().orElseThrow();
+        assertThat(item2.currentOccupancy()).isEqualTo(0);
+        assertThat(item2.congestionLevel()).isNull();
+        assertThat(item2.shelterStatus()).isNull();
+        // missId만 batch event에 포함된다
         verify(cacheRegenerationPublisher).publishBatch(
                 eq("SHELTER_STATUS"), eq(List.of(102L)), eq(CacheRegenerationReason.CACHE_MISS), anyString());
     }
@@ -298,11 +344,13 @@ class ShelterReadServiceTest {
         )).thenReturn(List.of(shelter));
         when(redisReadCache.multiGetShelterStatus(List.of(101L)))
                 .thenReturn(Map.of(101L, new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.PARSE_ERROR, "shelter_status")));
-        when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
-        when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenReturn(5L);
 
-        shelterReadService.findNearby(37.5687, 126.9081, 1_000, "EARTHQUAKE");
+        List<ShelterNearbyItem> result = shelterReadService.findNearby(37.5687, 126.9081, 1_000, "EARTHQUAKE");
 
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).currentOccupancy()).isEqualTo(0);
+        assertThat(result.get(0).congestionLevel()).isNull();
+        verify(evacuationEntryRepository, never()).countCurrentOccupancy(anyLong());
         verify(suppressWindowService, never()).tryPublish(anyString());
         verify(cacheRegenerationPublisher, never()).publishBatch(any(), any(), any(), anyString());
     }
@@ -322,12 +370,14 @@ class ShelterReadServiceTest {
                         101L, hit(dto),
                         102L, parseError()
                 ));
-        when(shelterRepository.findById(102L)).thenReturn(Optional.of(s2));
-        when(evacuationEntryRepository.countCurrentOccupancy(102L)).thenReturn(5L);
 
         List<ShelterNearbyItem> result = shelterReadService.findNearby(37.5687, 126.9081, 1_000, "EARTHQUAKE");
 
         assertThat(result).hasSize(2);
+        ShelterNearbyItem item2 = result.stream().filter(i -> i.shelterId() == 102L).findFirst().orElseThrow();
+        assertThat(item2.currentOccupancy()).isEqualTo(0);
+        assertThat(item2.congestionLevel()).isNull();
+        verify(evacuationEntryRepository, never()).countCurrentOccupancy(anyLong());
         verify(redisReadCache).recordFallback(eq("shelter_status"), eq(RedisReadCache.FallbackReason.PARSE_ERROR));
         verify(suppressWindowService, never()).tryPublish(anyString());
         verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
@@ -389,12 +439,11 @@ class ShelterReadServiceTest {
                         101L, new RedisReadCache.CacheResult<>(hitDto, null, "shelter_status"),
                         202L, new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_status")
                 ));
-        when(shelterRepository.findById(202L)).thenReturn(Optional.of(shelter2));
-        when(evacuationEntryRepository.countCurrentOccupancy(202L)).thenReturn(20L);
         when(suppressWindowService.tryPublish("shelter:status:batch")).thenReturn(true);
 
         shelterReadService.findNearby(37.5687, 126.9081, 1_000, "EARTHQUAKE");
 
+        verify(evacuationEntryRepository, never()).countCurrentOccupancy(anyLong());
         verify(cacheRegenerationPublisher).publishBatch(
                 eq("SHELTER_STATUS"), eq(List.of(202L)), eq(CacheRegenerationReason.CACHE_MISS), anyString());
     }

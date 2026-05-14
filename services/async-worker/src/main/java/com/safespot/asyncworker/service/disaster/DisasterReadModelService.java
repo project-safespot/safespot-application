@@ -37,6 +37,20 @@ public class DisasterReadModelService {
         log.info("Disaster read model rebuilt: affectedAlertIds={}", payload.affectedAlertIds());
     }
 
+    // DisasterReadModelWarmupRequested 처리 진입점.
+    // 기존 Redis writer를 재사용하므로 warmup path와 regeneration path가 동일 TTL 정책을 쓴다.
+    // TTL은 safety cap(3600s + 0~120s jitter)이며 freshness 보장 수단이 아니다.
+    // 최신성은 ingestion/update event 기반 regeneration이 담당한다.
+    public void warmupAll(int limit, boolean includeDetails) {
+        if (includeDetails) {
+            rebuildAllDetails(limit);
+        }
+        rebuildRecent();
+        rebuildCore();
+        rebuildList();
+        log.info("Disaster read model warmed up: limit={}, includeDetails={}", limit, includeDetails);
+    }
+
     // CacheRegenerationRequested 처리 — key별 개별 rebuild
     public void rebuildDetail(Long alertId) {
         rebuildDetails(List.of(alertId));
@@ -67,6 +81,14 @@ public class DisasterReadModelService {
         List<DisasterMessageItem> items = records.stream().map(this::toMessageItem).toList();
         cacheWriter.setDisasterMessagesList(items);
         log.info("disaster:messages:list:seoul SET: count={}", items.size());
+    }
+
+    private void rebuildAllDetails(int limit) {
+        List<DisasterAlertRecord> records = disasterAlertRepository.findInScopeOrderByIssuedAtDesc(limit);
+        for (DisasterAlertRecord r : records) {
+            cacheWriter.setDisasterDetail(r.alertId(), toDetailValue(r));
+            log.info("disaster:detail:{} SET (warmup)", r.alertId());
+        }
     }
 
     private void rebuildDetails(List<Long> alertIds) {

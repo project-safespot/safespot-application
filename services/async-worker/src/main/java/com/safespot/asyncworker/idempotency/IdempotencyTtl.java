@@ -16,17 +16,19 @@ public final class IdempotencyTtl {
     // cache-ttl.md: suppress:cache-regeneration TTL 30s에 맞춤
     public static final Duration CACHE_REGENERATION  = Duration.ofSeconds(30);
     public static final Duration SHELTER_WARMUP      = Duration.ofMinutes(5);
+    public static final Duration DISASTER_WARMUP     = Duration.ofMinutes(5);
 
     public static Duration forEventType(EventType eventType) {
         return switch (eventType) {
             case EvacuationEntryCreated,
                  EvacuationEntryExited,
                  EvacuationEntryUpdated -> EVACUATION;
-            case ShelterUpdated                    -> SHELTER;
-            case DisasterDataCollected             -> DISASTER;
-            case EnvironmentDataCollected          -> ENVIRONMENT;
-            case CacheRegenerationRequested        -> CACHE_REGENERATION;
-            case ShelterStatusWarmupRequested      -> SHELTER_WARMUP;
+            case ShelterUpdated                      -> SHELTER;
+            case DisasterDataCollected               -> DISASTER;
+            case EnvironmentDataCollected            -> ENVIRONMENT;
+            case CacheRegenerationRequested          -> CACHE_REGENERATION;
+            case ShelterStatusWarmupRequested        -> SHELTER_WARMUP;
+            case DisasterReadModelWarmupRequested    -> DISASTER_WARMUP;
         };
     }
 }
