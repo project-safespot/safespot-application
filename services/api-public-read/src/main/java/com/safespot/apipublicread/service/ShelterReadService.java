@@ -24,10 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 @Slf4j
 @Service
@@ -48,8 +48,6 @@ public class ShelterReadService {
     private final CacheRegenerationPublisher cacheRegenerationPublisher;
     private final MeterRegistry meterRegistry;
 
-    private record ShelterWithDistance(Shelter shelter, int distanceM) {}
-
     public List<ShelterNearbyItem> findNearby(double lat, double lng, int radiusM, String disasterType) {
         double latDelta = CongestionCalculator.metersToDegreeLat(radiusM);
         double lngDelta = CongestionCalculator.metersToDegreeeLng(radiusM, lat);
@@ -62,37 +60,81 @@ public class ShelterReadService {
                 disasterType
         );
 
-        List<ShelterWithDistance> selected = candidates.stream()
-                .map(s -> {
-                    int dist = CongestionCalculator.distanceMeters(
-                            lat, lng,
-                            s.getLatitude().doubleValue(),
-                            s.getLongitude().doubleValue()
-                    );
-                    return dist <= radiusM ? new ShelterWithDistance(s, dist) : null;
-                })
-                .filter(Objects::nonNull)
-                .sorted(Comparator.comparingInt(ShelterWithDistance::distanceM))
+        record ShelterDist(Shelter shelter, int distanceM) {}
+        List<ShelterDist> inRadius = candidates.stream()
+                .map(s -> new ShelterDist(s, CongestionCalculator.distanceMeters(
+                        lat, lng, s.getLatitude().doubleValue(), s.getLongitude().doubleValue())))
+                .filter(sd -> sd.distanceM() <= radiusM)
+                .toList();
+
+        if (inRadius.isEmpty()) return List.of();
+
+        List<Long> ids = inRadius.stream().map(sd -> sd.shelter().getShelterId()).toList();
+        Map<Long, RedisReadCache.CacheResult<ShelterStatusCacheDto>> statusMap =
+                redisReadCache.multiGetShelterStatus(ids);
+
+        List<Long> missIds = new ArrayList<>();
+        List<ShelterNearbyItem> items = new ArrayList<>();
+
+        for (ShelterDist sd : inRadius) {
+            Long shelterId = sd.shelter().getShelterId();
+            RedisReadCache.CacheResult<ShelterStatusCacheDto> cacheResult = statusMap.get(shelterId);
+
+            ShelterStatusCache status;
+            if (cacheResult != null && cacheResult.isHit()) {
+                redisReadCache.recordCacheRequest(cacheResult.cache(), cacheResult.resultLabel());
+                status = new ShelterStatusCache(
+                        cacheResult.value().currentOccupancy(),
+                        cacheResult.value().availableCapacity(),
+                        cacheResult.value().congestionLevel(),
+                        cacheResult.value().shelterStatus(),
+                        null
+                );
+            } else {
+                FallbackReason reason = (cacheResult != null) ? cacheResult.fallbackReason() : FallbackReason.REDIS_MISS;
+                String cache = (cacheResult != null) ? cacheResult.cache() : "shelter_status";
+                redisReadCache.recordCacheRequest(cache, cacheResult != null ? cacheResult.resultLabel() : "miss");
+                redisReadCache.recordFallback(cache, reason);
+                if (reason == FallbackReason.REDIS_MISS) {
+                    missIds.add(shelterId);
+                }
+                status = fallbackSingleFlight.execute(
+                        "shelter:status:" + shelterId,
+                        "shelter_status",
+                        REPOSITORY_SHELTER_STATUS,
+                        () -> loadShelterStatusFromRds(shelterId, reason)
+                );
+            }
+            items.add(toNearbyItem(sd.shelter(), sd.distanceM(), status));
+        }
+
+        if (!missIds.isEmpty()) {
+            publishBatchRegenerationIfAllowed(missIds, ENDPOINT_NEARBY);
+        }
+
+        return items.stream()
+                .sorted(Comparator.comparingInt(ShelterNearbyItem::distanceM))
                 .limit(MAX_NEARBY_RESULTS)
                 .toList();
+    }
 
-        if (selected.isEmpty()) return List.of();
-
-        List<String> keys = selected.stream()
-                .map(sd -> "shelter:status:" + sd.shelter().getShelterId())
-                .toList();
-        Map<String, RedisReadCache.CacheResult<ShelterStatusCacheDto>> statusMap =
-                redisReadCache.getAll(keys, new TypeReference<>() {});
-
-        return selected.stream()
-                .map(sd -> {
-                    String key = "shelter:status:" + sd.shelter().getShelterId();
-                    RedisReadCache.CacheResult<ShelterStatusCacheDto> cached = statusMap.get(key);
-                    ShelterStatusCache status = resolveStatusFromCacheResult(
-                            sd.shelter().getShelterId(), key, cached, ENDPOINT_NEARBY, false);
-                    return toNearbyItem(sd.shelter(), sd.distanceM(), status);
-                })
-                .toList();
+    private void publishBatchRegenerationIfAllowed(List<Long> missIds, String endpoint) {
+        String batchSuppressKey = "shelter:status:batch";
+        meterRegistry.counter("safespot.cache.regeneration.requested",
+                "service", "api-public-read",
+                "cache", "shelter_status",
+                "reason", CacheRegenerationReason.CACHE_MISS.value(),
+                "result", "requested").increment();
+        if (suppressWindowService.tryPublish(batchSuppressKey)) {
+            cacheRegenerationPublisher.publishBatch(
+                    "SHELTER_STATUS", missIds, CacheRegenerationReason.CACHE_MISS, endpoint);
+        } else {
+            meterRegistry.counter("safespot.cache.regeneration.requested",
+                    "service", "api-public-read",
+                    "cache", "shelter_status",
+                    "reason", CacheRegenerationReason.CACHE_MISS.value(),
+                    "result", "suppressed").increment();
+        }
     }
 
     public ShelterDetailDto findById(Long shelterId) {

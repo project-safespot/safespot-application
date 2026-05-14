@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Slf4j
@@ -73,6 +75,80 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
             failureRecorder.record(envelope, body, queueType, envelopeType);
             recordMetric(cacheFamily, queueType.label(), envelopeType, reason.value(), endpoint, "failure");
         }
+    }
+
+    private static final Map<String, String> TARGET_TYPE_TO_FAMILY = Map.of(
+            "SHELTER_STATUS", "shelter_status"
+    );
+
+    @Override
+    public void publishBatch(String targetType, List<Long> targetIds, CacheRegenerationReason reason, String endpoint) {
+        if (targetIds == null || targetIds.isEmpty()) {
+            log.warn("[CacheRegen] publishBatch called with empty targetIds: targetType={} endpoint={}", targetType, endpoint);
+            return;
+        }
+
+        String cacheFamily = TARGET_TYPE_TO_FAMILY.get(targetType);
+        if (cacheFamily == null) {
+            log.warn("[CacheRegen] publishBatch unsupported targetType={} endpoint={}", targetType, endpoint);
+            return;
+        }
+
+        Optional<CacheRegenerationRoute> routeOpt = routeResolver.resolve(cacheFamily);
+        if (routeOpt.isEmpty()) {
+            log.warn("[CacheRegen] publishBatch no queue route for cacheFamily={} targetType={}", cacheFamily, targetType);
+            return;
+        }
+        QueueType queueType = routeOpt.get().queueType();
+        String queueUrl = queueUrlProvider.get(queueType);
+
+        CacheRegenerationEnvelope envelope = envelopeFactory.buildBatch(cacheFamily, targetType, targetIds, reason);
+        String body;
+        try {
+            body = objectMapper.writeValueAsString(envelope);
+        } catch (Exception e) {
+            log.error("[CacheRegen] batch serialization failed targetType={} count={} endpoint={}: {}",
+                    targetType, targetIds.size(), endpoint, e.getMessage(), e);
+            return;
+        }
+
+        try {
+            sqsClient.sendMessage(SendMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .messageBody(body)
+                    .build());
+            log.info("[CacheRegen] batch published cacheFamily={} targetType={} count={} endpoint={} traceId={} idempotencyKey={}",
+                    cacheFamily, targetType, targetIds.size(), endpoint, envelope.traceId(), envelope.idempotencyKey());
+            recordBatchMetric(cacheFamily, queueType.label(), reason.value(), endpoint, "success");
+        } catch (Exception e) {
+            log.error("[CacheRegen] batch SQS send failed cacheFamily={} targetType={} count={} endpoint={} traceId={} idempotencyKey={}: {}",
+                    cacheFamily, targetType, targetIds.size(), endpoint,
+                    envelope.traceId(), envelope.idempotencyKey(), e.getMessage());
+            failureRecorder.record(envelope, body, queueType, "batch");
+            recordBatchMetric(cacheFamily, queueType.label(), reason.value(), endpoint, "failure");
+        }
+    }
+
+    private void recordBatchMetric(String cacheFamily, String queue, String reason, String endpoint, String result) {
+        meterRegistry.counter("safespot_cache_regeneration_publish_total",
+                "service", "api-public-read",
+                "cache", cacheFamily,
+                "queue", queue,
+                "envelope", "batch",
+                "reason", reason,
+                "result", result
+        ).increment();
+        meterRegistry.counter("safespot.cache.regeneration.requested",
+                "service", "api-public-read",
+                "cache", cacheFamily,
+                "reason", reason,
+                "result", result
+        ).increment();
+        meterRegistry.counter("api_read_cache_regen_publish_total",
+                "service", "api-public-read",
+                "endpoint", endpoint,
+                "result", result
+        ).increment();
     }
 
     private void recordMetric(String cacheFamily, String queue, String envelopeType,

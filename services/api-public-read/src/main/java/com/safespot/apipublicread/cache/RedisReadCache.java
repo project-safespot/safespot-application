@@ -2,6 +2,7 @@ package com.safespot.apipublicread.cache;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.safespot.apipublicread.dto.cache.ShelterStatusCacheDto;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
@@ -12,6 +13,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -119,6 +121,64 @@ public class RedisReadCache {
         Map<String, CacheResult<T>> result = new LinkedHashMap<>();
         for (String key : keys) {
             result.put(key, new CacheResult<>(null, FallbackReason.REDIS_DOWN, cache));
+        }
+        return result;
+    }
+
+    public Map<Long, CacheResult<ShelterStatusCacheDto>> multiGetShelterStatus(List<Long> shelterIds) {
+        if (shelterIds == null || shelterIds.isEmpty()) return Map.of();
+
+        List<Long> distinctIds = shelterIds.stream().distinct().toList();
+        List<String> keys = distinctIds.stream()
+                .map(id -> "shelter:status:" + id)
+                .toList();
+
+        long start = System.nanoTime();
+        List<String> values;
+        try {
+            values = redisTemplate.opsForValue().multiGet(keys);
+            recordRedisRead("shelter_status", "success", start);
+        } catch (RedisConnectionFailureException e) {
+            log.warn("Redis MGET connection failure for shelter_status: {}", e.getMessage());
+            recordRedisRead("shelter_status", "failure", start);
+            return allDown(distinctIds);
+        } catch (DataAccessException e) {
+            log.warn("Redis MGET error for shelter_status: {}", e.getMessage());
+            recordRedisRead("shelter_status", "failure", start);
+            return allDown(distinctIds);
+        }
+
+        if (values == null) values = Collections.nCopies(distinctIds.size(), null);
+
+        Map<Long, CacheResult<ShelterStatusCacheDto>> result = new LinkedHashMap<>();
+        int parseErrors = 0;
+        for (int i = 0; i < distinctIds.size(); i++) {
+            Long id = distinctIds.get(i);
+            String json = (i < values.size()) ? values.get(i) : null;
+            if (json == null) {
+                result.put(id, new CacheResult<>(null, FallbackReason.REDIS_MISS, "shelter_status"));
+            } else {
+                try {
+                    ShelterStatusCacheDto dto = objectMapper.readValue(json, ShelterStatusCacheDto.class);
+                    result.put(id, new CacheResult<>(dto, null, "shelter_status"));
+                } catch (Exception e) {
+                    parseErrors++;
+                    log.warn("Redis MGET parse error for shelter:status:{}: {}", id, e.getMessage());
+                    result.put(id, new CacheResult<>(null, FallbackReason.PARSE_ERROR, "shelter_status"));
+                }
+            }
+        }
+        if (parseErrors > 0) {
+            meterRegistry.counter("safespot.cache.shelter_status.mget.parse_error",
+                    "service", "api-public-read").increment(parseErrors);
+        }
+        return result;
+    }
+
+    private Map<Long, CacheResult<ShelterStatusCacheDto>> allDown(List<Long> ids) {
+        Map<Long, CacheResult<ShelterStatusCacheDto>> result = new LinkedHashMap<>();
+        for (Long id : ids) {
+            result.put(id, new CacheResult<>(null, FallbackReason.REDIS_DOWN, "shelter_status"));
         }
         return result;
     }

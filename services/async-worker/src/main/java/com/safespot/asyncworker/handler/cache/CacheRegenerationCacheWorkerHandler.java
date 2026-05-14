@@ -15,6 +15,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 @Profile("cache-worker")
 @Slf4j
 @Component
@@ -36,9 +38,57 @@ public class CacheRegenerationCacheWorkerHandler implements EventHandler {
     @Override
     public void handle(EventEnvelope envelope) {
         CacheRegenerationRequestedPayload payload = parsePayload(envelope);
+
+        List<Long> targetIds = payload.targetIds();
+        if (targetIds != null && !targetIds.isEmpty()) {
+            handleBatch(payload, envelope);
+            return;
+        }
+
+        handleLegacy(payload, envelope);
+    }
+
+    private void handleBatch(CacheRegenerationRequestedPayload payload, EventEnvelope envelope) {
+        String targetType = payload.targetType();
+        List<Long> targetIds = payload.targetIds();
+        String cacheKeyFamily = payload.cacheKeyFamily() != null ? payload.cacheKeyFamily() : "unknown";
+        String schemaVersion = payload.schemaVersion() != null ? String.valueOf(payload.schemaVersion()) : "unknown";
+
+        if (targetType == null) {
+            log.warn("CacheRegenerationRequested batch: targetType is null, skipping: traceId={}", envelope.getTraceId());
+            return;
+        }
+
+        log.info("Handling CacheRegenerationRequested batch (cache-worker): targetType={}, count={}, traceId={}",
+            targetType, targetIds.size(), envelope.getTraceId());
+
+        workerMetrics.incrementCacheRegenerationRequested(
+            cacheKeyFamily, EventType.CacheRegenerationRequested.name(),
+            payload.reason(), schemaVersion);
+
+        try {
+            if ("SHELTER_STATUS".equals(targetType)) {
+                shelterStatusService.recalculateBatch(targetIds);
+                workerMetrics.incrementCacheRegenerationCompleted(cacheKeyFamily);
+                return;
+            }
+            log.warn("CacheRegenerationRequested batch: unsupported targetType={}, traceId={}",
+                targetType, envelope.getTraceId());
+        } catch (Exception e) {
+            workerMetrics.incrementCacheRegenerationFailed(cacheKeyFamily, e.getClass().getSimpleName());
+            throw e;
+        }
+    }
+
+    private void handleLegacy(CacheRegenerationRequestedPayload payload, EventEnvelope envelope) {
         String cacheKey = payload.cacheKey();
         String cacheKeyFamily = payload.cacheKeyFamily();
         String schemaVersion = payload.schemaVersion() != null ? String.valueOf(payload.schemaVersion()) : "unknown";
+
+        if (cacheKey == null) {
+            log.warn("CacheRegenerationRequested: cacheKey and targetIds both absent, skipping: traceId={}", envelope.getTraceId());
+            return;
+        }
 
         log.info("Handling CacheRegenerationRequested (cache-worker): cacheKey={}, cacheKeyFamily={}, traceId={}",
             cacheKey, cacheKeyFamily, envelope.getTraceId());

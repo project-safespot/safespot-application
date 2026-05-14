@@ -128,6 +128,74 @@ class RedisReadCacheTest {
     }
 
     @Test
+    void multiGetShelterStatus_partialHit() throws Exception {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        String hitJson = new ObjectMapper().writeValueAsString(
+                new ShelterStatusCacheDto(30, 70, "LOW", "OPERATING"));
+        when(valueOperations.multiGet(List.of("shelter:status:1", "shelter:status:2")))
+                .thenReturn(Arrays.asList(hitJson, null));
+
+        Map<Long, RedisReadCache.CacheResult<ShelterStatusCacheDto>> result =
+                redisReadCache.multiGetShelterStatus(List.of(1L, 2L));
+
+        assertThat(result.get(1L).isHit()).isTrue();
+        assertThat(result.get(1L).value().currentOccupancy()).isEqualTo(30);
+        assertThat(result.get(2L).isMiss()).isTrue();
+        assertThat(result.get(2L).fallbackReason()).isEqualTo(RedisReadCache.FallbackReason.REDIS_MISS);
+    }
+
+    @Test
+    void multiGetShelterStatus_allMiss() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.multiGet(List.of("shelter:status:10", "shelter:status:20")))
+                .thenReturn(Arrays.asList(null, null));
+
+        Map<Long, RedisReadCache.CacheResult<ShelterStatusCacheDto>> result =
+                redisReadCache.multiGetShelterStatus(List.of(10L, 20L));
+
+        assertThat(result.get(10L).isMiss()).isTrue();
+        assertThat(result.get(20L).isMiss()).isTrue();
+    }
+
+    @Test
+    void multiGetShelterStatus_parseError_isDistinctFromMiss() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.multiGet(List.of("shelter:status:5")))
+                .thenReturn(List.of("{bad-json"));
+
+        Map<Long, RedisReadCache.CacheResult<ShelterStatusCacheDto>> result =
+                redisReadCache.multiGetShelterStatus(List.of(5L));
+
+        assertThat(result.get(5L).isParseError()).isTrue();
+        assertThat(result.get(5L).isMiss()).isFalse();
+        assertThat(meterRegistry.find("safespot.cache.shelter_status.mget.parse_error").counter())
+                .isNotNull();
+    }
+
+    @Test
+    void multiGetShelterStatus_emptyInput_returnsEmptyMap() {
+        Map<Long, RedisReadCache.CacheResult<ShelterStatusCacheDto>> result =
+                redisReadCache.multiGetShelterStatus(List.of());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void multiGetShelterStatus_deduplicatesIds() throws Exception {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        String hitJson = new ObjectMapper().writeValueAsString(
+                new ShelterStatusCacheDto(10, 90, "LOW", "OPERATING"));
+        when(valueOperations.multiGet(List.of("shelter:status:7")))
+                .thenReturn(List.of(hitJson));
+
+        Map<Long, RedisReadCache.CacheResult<ShelterStatusCacheDto>> result =
+                redisReadCache.multiGetShelterStatus(List.of(7L, 7L));
+
+        assertThat(result).hasSize(1);
+        assertThat(result.get(7L).isHit()).isTrue();
+    }
+
+    @Test
     void customMetrics_useLowCardinalityTags() {
         redisReadCache.recordCacheRequest("disaster_detail", "miss");
         redisReadCache.recordFallback("disaster_detail", RedisReadCache.FallbackReason.REDIS_MISS);

@@ -8,4 +8,6 @@ public interface ShelterRepository {
     Optional<ShelterInfo> findById(Long shelterId);
 
     List<ShelterInfo> findAllForStatusWarmup();
+
+    List<ShelterInfo> findByIds(List<Long> shelterIds);
 }

@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record CacheRegenerationEnvelope(
@@ -31,7 +32,36 @@ public record CacheRegenerationEnvelope(
                 cacheKeyFamily,
                 now.toString(),
                 reason.value(),
-                SCHEMA_VERSION
+                SCHEMA_VERSION,
+                null,
+                null
+        );
+
+        return new CacheRegenerationEnvelope(
+                EVENT_TYPE,
+                UUID.randomUUID().toString(),
+                now.toString(),
+                PRODUCER,
+                UUID.randomUUID().toString(),
+                idempotencyKey,
+                payload
+        );
+    }
+
+    public static CacheRegenerationEnvelope buildBatch(String cacheKeyFamily, String targetType,
+                                                        List<Long> targetIds, CacheRegenerationReason reason) {
+        Instant now = Instant.now();
+        long windowStart = (now.getEpochSecond() / 30) * 30;
+        String idempotencyKey = "cache-regen:batch:" + targetType.toLowerCase() + ":" + windowStart;
+
+        CacheRegenerationPayload payload = new CacheRegenerationPayload(
+                null,
+                cacheKeyFamily,
+                now.toString(),
+                reason.value(),
+                SCHEMA_VERSION,
+                targetType,
+                List.copyOf(targetIds)
         );
 
         return new CacheRegenerationEnvelope(

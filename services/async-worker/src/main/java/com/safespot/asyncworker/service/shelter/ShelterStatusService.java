@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Profile({"cache-worker", "async-worker"})
 @Slf4j
@@ -31,6 +32,26 @@ public class ShelterStatusService {
         writeStatus(shelter, currentOccupancy);
         log.info("Shelter status recalculated: shelterId={}, occupancy={}, level={}",
             shelterId, currentOccupancy, CongestionLevel.of(currentOccupancy, shelter.capacity()));
+    }
+
+    public void recalculateBatch(List<Long> shelterIds) {
+        if (shelterIds == null || shelterIds.isEmpty()) {
+            log.warn("recalculateBatch called with empty shelterIds, skipping");
+            return;
+        }
+        List<Long> distinctIds = shelterIds.stream().distinct().toList();
+        List<ShelterInfo> shelters = shelterRepository.findByIds(distinctIds);
+        if (shelters.isEmpty()) {
+            log.warn("recalculateBatch: no shelters found for ids={}", distinctIds);
+            return;
+        }
+        List<Long> foundIds = shelters.stream().map(ShelterInfo::shelterId).collect(Collectors.toList());
+        Map<Long, Integer> occupancyMap = entryRepository.countEnteredByShelterIds(foundIds);
+        for (ShelterInfo shelter : shelters) {
+            int occupancy = occupancyMap.getOrDefault(shelter.shelterId(), 0);
+            writeStatus(shelter, occupancy);
+        }
+        log.info("Shelter status recalculated (batch): count={}", shelters.size());
     }
 
     public int warmUpAll() {

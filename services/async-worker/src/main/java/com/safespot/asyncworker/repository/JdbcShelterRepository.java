@@ -21,6 +21,9 @@ public class JdbcShelterRepository implements ShelterRepository {
     private static final String FIND_ALL_FOR_STATUS_WARMUP_SQL =
         "SELECT shelter_id, capacity, shelter_status FROM shelter";
 
+    private static final String FIND_BY_IDS_SQL =
+        "SELECT shelter_id, capacity, shelter_status FROM shelter WHERE shelter_id IN (:shelterIds)";
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     @Override
@@ -45,6 +48,22 @@ public class JdbcShelterRepository implements ShelterRepository {
     public List<ShelterInfo> findAllForStatusWarmup() {
         return jdbcTemplate.query(
             FIND_ALL_FOR_STATUS_WARMUP_SQL,
+            (rs, rowNum) -> new ShelterInfo(
+                rs.getLong("shelter_id"),
+                rs.getObject("capacity", Integer.class),
+                rs.getString("shelter_status")
+            )
+        );
+    }
+
+    @Override
+    public List<ShelterInfo> findByIds(List<Long> shelterIds) {
+        if (shelterIds == null || shelterIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbcTemplate.query(
+            FIND_BY_IDS_SQL,
+            Map.of("shelterIds", shelterIds),
             (rs, rowNum) -> new ShelterInfo(
                 rs.getLong("shelter_id"),
                 rs.getObject("capacity", Integer.class),

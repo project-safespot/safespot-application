@@ -6,6 +6,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Slf4j
@@ -20,6 +22,10 @@ public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPubli
 
     private final CacheKeyFamilyResolver resolver;
     private final MeterRegistry meterRegistry;
+
+    private static final Map<String, String> TARGET_TYPE_TO_FAMILY = Map.of(
+            "SHELTER_STATUS", "shelter_status"
+    );
 
     @Override
     public void publish(String cacheKey, CacheRegenerationReason reason, String endpoint) {
@@ -41,6 +47,29 @@ public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPubli
         meterRegistry.counter("safespot.cache.regeneration.requested",
                 "service", "api-public-read",
                 "cache", family.get(),
+                "reason", reason.value(),
+                "result", "success"
+        ).increment();
+    }
+
+    @Override
+    public void publishBatch(String targetType, List<Long> targetIds, CacheRegenerationReason reason, String endpoint) {
+        if (targetIds == null || targetIds.isEmpty()) {
+            return;
+        }
+        String cacheFamily = TARGET_TYPE_TO_FAMILY.getOrDefault(targetType, targetType.toLowerCase());
+        CacheRegenerationEnvelope e = CacheRegenerationEnvelope.buildBatch(cacheFamily, targetType, targetIds, reason);
+        log.info("[CacheRegen] batch eventType={} eventId={} targetType={} count={} reason={} endpoint={} traceId={} idempotencyKey={}",
+                e.eventType(), e.eventId(), targetType, targetIds.size(), reason.value(), endpoint,
+                e.traceId(), e.idempotencyKey());
+        meterRegistry.counter("api_read_cache_regen_publish_total",
+                "service", "api-public-read",
+                "endpoint", endpoint,
+                "result", "success"
+        ).increment();
+        meterRegistry.counter("safespot.cache.regeneration.requested",
+                "service", "api-public-read",
+                "cache", cacheFamily,
                 "reason", reason.value(),
                 "result", "success"
         ).increment();
