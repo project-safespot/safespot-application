@@ -13,14 +13,16 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.geo.Point;
+import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.core.GeoOperations;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
 import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
-import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -33,6 +35,8 @@ class RedisCacheWriterTest {
     @Mock private StringRedisTemplate redisTemplate;
     @Mock private ValueOperations<String, String> valueOps;
     @Mock private GeoOperations<String, String> geoOps;
+    @Mock private RedisConnection redisConnection;
+    @Mock private Cursor<byte[]> cursor;
 
     private RedisCacheWriter cacheWriter;
 
@@ -178,12 +182,32 @@ class RedisCacheWriterTest {
     }
 
     @Test
+    void geoAddShelterToKey_GEOADD_지정_key를_사용한다() {
+        cacheWriter.geoAddShelterToKey("shelter:geo:tmp:run:seoul:FLOOD:DESIGNATED", 126.9780, 37.5665, 101L);
+
+        verify(geoOps).add(eq("shelter:geo:tmp:run:seoul:FLOOD:DESIGNATED"), any(Point.class), eq("101"));
+    }
+
+    @Test
     void setShelterMapTile_shelterId_오름차순_JSON_array로_저장한다() {
         cacheWriter.setShelterMapTile(13, 7285, 3172, "FLOOD", "DESIGNATED", List.of(9L, 3L, 5L));
 
         ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
         verify(valueOps).set(
             eq(RedisKeyConstants.shelterMapTile(13, 7285, 3172, "FLOOD", "DESIGNATED")),
+            jsonCaptor.capture(),
+            eq(RedisTtlConstants.SHELTER_MAP_TILE)
+        );
+        assertThat(jsonCaptor.getValue()).isEqualTo("[3,5,9]");
+    }
+
+    @Test
+    void setShelterMapTileToKey_지정_key에_오름차순_JSON_array로_저장한다() {
+        cacheWriter.setShelterMapTileToKey("shelter:map:tmp:tile:run:13:7285:3172:FLOOD:DESIGNATED", List.of(9L, 3L, 5L));
+
+        ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
+        verify(valueOps).set(
+            eq("shelter:map:tmp:tile:run:13:7285:3172:FLOOD:DESIGNATED"),
             jsonCaptor.capture(),
             eq(RedisTtlConstants.SHELTER_MAP_TILE)
         );
@@ -201,12 +225,41 @@ class RedisCacheWriterTest {
     }
 
     @Test
-    void deleteByPattern_매칭된_키를_삭제한다() {
-        when(redisTemplate.keys("shelter:map:tile:*")).thenReturn(Set.of("k1", "k2"));
+    void deleteByPattern_매칭된_경우_execute를_통해_삭제한다() {
+        when(redisTemplate.execute(any(RedisCallback.class))).thenReturn(2L);
 
         cacheWriter.deleteByPattern("shelter:map:tile:*");
 
-        verify(redisTemplate).delete(Set.of("k1", "k2"));
+        verify(redisTemplate).execute(any(RedisCallback.class));
+    }
+
+    @Test
+    void deleteByPattern_매칭_없으면_no_op() {
+        when(redisTemplate.execute(any(RedisCallback.class))).thenReturn(0L);
+
+        cacheWriter.deleteByPattern("shelter:map:tile:*");
+
+        verify(redisTemplate).execute(any(RedisCallback.class));
+    }
+
+    @Test
+    void deleteByPattern_SCAN_실패시_RedisCacheException() {
+        when(redisTemplate.execute(any(RedisCallback.class))).thenThrow(new RuntimeException("scan failed"));
+
+        assertThatThrownBy(() -> cacheWriter.deleteByPattern("shelter:map:tile:*"))
+            .isInstanceOf(RedisCacheException.class)
+            .hasMessageContaining("Redis DEL by pattern failed");
+    }
+
+    @Test
+    void renameKey_RENAME을_호출한다() {
+        when(redisTemplate.execute(any(RedisCallback.class))).thenAnswer(invocation -> {
+            RedisCallback<?> callback = invocation.getArgument(0);
+            return callback.doInRedis(redisConnection);
+        });
+        cacheWriter.renameKey("source", "target");
+
+        verify(redisConnection).rename(bytes("source"), bytes("target"));
     }
 
     @Test
@@ -239,5 +292,9 @@ class RedisCacheWriterTest {
         long baseMs = base.toMillis();
         long maxJitterMs = maxJitter.toMillis();
         return actual.toMillis() >= baseMs && actual.toMillis() <= baseMs + maxJitterMs;
+    }
+
+    private static byte[] bytes(String value) {
+        return value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 }

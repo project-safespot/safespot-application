@@ -48,11 +48,13 @@ class ShelterMapReadModelServiceTest {
 
         service.rebuildGeoIndex();
 
-        verify(cacheWriter).deleteKeys(argThat(keys -> keys.size() == 16 && keys.contains("shelter:geo:seoul:all:all")));
-        verify(cacheWriter).geoAddShelter("all", "all", 126.98, 37.55, 101L);
-        verify(cacheWriter).geoAddShelter("FLOOD", "all", 126.98, 37.55, 101L);
-        verify(cacheWriter).geoAddShelter("all", "DESIGNATED", 126.98, 37.55, 101L);
-        verify(cacheWriter).geoAddShelter("FLOOD", "DESIGNATED", 126.98, 37.55, 101L);
+        verify(cacheWriter).deleteKeys(argThat(keys -> keys.size() == 16 && keys.stream().allMatch(key -> key.startsWith("shelter:geo:tmp:"))));
+        verify(cacheWriter).geoAddShelterToKey(matches("shelter:geo:tmp:.*:seoul:all:all"), eq(126.98), eq(37.55), eq(101L));
+        verify(cacheWriter).geoAddShelterToKey(matches("shelter:geo:tmp:.*:seoul:FLOOD:all"), eq(126.98), eq(37.55), eq(101L));
+        verify(cacheWriter).geoAddShelterToKey(matches("shelter:geo:tmp:.*:seoul:all:DESIGNATED"), eq(126.98), eq(37.55), eq(101L));
+        verify(cacheWriter).geoAddShelterToKey(matches("shelter:geo:tmp:.*:seoul:FLOOD:DESIGNATED"), eq(126.98), eq(37.55), eq(101L));
+        verify(cacheWriter).deleteKeys(argThat(keys -> keys.size() == 12 && keys.stream().allMatch(key -> key.startsWith("shelter:geo:seoul:"))));
+        verify(cacheWriter, times(4)).renameKey(matches("shelter:geo:tmp:.*"), startsWith("shelter:geo:seoul:"));
     }
 
     @Test
@@ -65,12 +67,37 @@ class ShelterMapReadModelServiceTest {
         service.rebuildMapTiles();
 
         verify(cacheWriter).deleteByPattern("shelter:map:tile:*");
-        verify(cacheWriter, atLeast(24)).setShelterMapTile(anyInt(), anyInt(), anyInt(), anyString(), anyString(), anyList());
+        verify(cacheWriter, atLeast(24)).setShelterMapTileToKey(matches("shelter:map:tmp:tile:.*"), anyList());
+        verify(cacheWriter, atLeast(24)).renameKey(matches("shelter:map:tmp:tile:.*"), matches("shelter:map:tile:.*"));
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<Long>> idsCaptor = ArgumentCaptor.forClass(List.class);
-        verify(cacheWriter, atLeastOnce()).setShelterMapTile(eq(11), anyInt(), anyInt(), eq("FLOOD"), eq("DESIGNATED"), idsCaptor.capture());
+        verify(cacheWriter, atLeastOnce()).setShelterMapTileToKey(matches("shelter:map:tmp:tile:.*:11:.*:.*:FLOOD:DESIGNATED"), idsCaptor.capture());
         assertThat(idsCaptor.getValue()).containsExactly(101L, 202L);
+    }
+
+    @Test
+    void unsupported_shelter_type_EARTHQUAKE는_mapItem_write에서_제외된다() {
+        when(shelterRepository.findByIdsForMapItems(List.of(101L))).thenReturn(List.of(
+            source(101L, "EARTHQUAKE", "EARTHQUAKE", 37.55, 126.98)
+        ));
+
+        service.rebuildMapItems(List.of(101L));
+
+        verify(cacheWriter, never()).setShelterMapItem(anyLong(), any());
+    }
+
+    @Test
+    void unsupported_shelter_type_EARTHQUAKE는_geo_tile_write에서_제외된다() {
+        when(shelterRepository.findAllForMapReadModel()).thenReturn(List.of(
+            source(101L, "EARTHQUAKE", "EARTHQUAKE", 37.55, 126.98)
+        ));
+
+        service.rebuildGeoIndex();
+        service.rebuildMapTiles();
+
+        verify(cacheWriter, never()).geoAddShelterToKey(anyString(), anyDouble(), anyDouble(), anyLong());
+        verify(cacheWriter, never()).setShelterMapTileToKey(anyString(), anyList());
     }
 
     private ShelterMapSource source(Long shelterId, String shelterType, String disasterType, double latitude, double longitude) {

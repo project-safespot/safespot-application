@@ -15,12 +15,14 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.TreeSet;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Profile({"cache-worker", "async-worker"})
@@ -59,27 +61,47 @@ public class ShelterMapReadModelService {
     public void rebuildGeoIndex() {
         List<ShelterMapSource> sources = shelterRepository.findAllForMapReadModel();
         List<NormalizedShelter> normalizedShelters = normalizeAll(sources);
+        String runId = newRunId();
+        Map<String, String> geoKeySwaps = geoKeySwaps(runId);
+        List<String> tempKeys = new ArrayList<>(geoKeySwaps.keySet());
+        Collection<String> populatedTempKeys = new HashSet<>();
 
-        cacheWriter.deleteKeys(allGeoKeys());
-        for (NormalizedShelter shelter : normalizedShelters) {
-            for (Dimension dimension : dimensionsFor(shelter.disasterType(), shelter.shelterType())) {
-                cacheWriter.geoAddShelter(
-                    dimension.disasterType(),
-                    dimension.shelterType(),
-                    shelter.longitude(),
-                    shelter.latitude(),
-                    shelter.shelterId()
-                );
+        try {
+            cacheWriter.deleteKeys(tempKeys);
+            for (NormalizedShelter shelter : normalizedShelters) {
+                for (GeoKeyTarget target : geoTargetsFor(geoKeySwaps, shelter.disasterType(), shelter.shelterType())) {
+                    populatedTempKeys.add(target.tempKey());
+                    cacheWriter.geoAddShelterToKey(
+                        target.tempKey(),
+                        shelter.longitude(),
+                        shelter.latitude(),
+                        shelter.shelterId()
+                    );
+                }
             }
+            List<String> emptyActiveKeys = geoKeySwaps.entrySet().stream()
+                .filter(entry -> !populatedTempKeys.contains(entry.getKey()))
+                .map(Map.Entry::getValue)
+                .toList();
+            cacheWriter.deleteKeys(emptyActiveKeys);
+            for (Map.Entry<String, String> entry : geoKeySwaps.entrySet()) {
+                if (!populatedTempKeys.contains(entry.getKey())) {
+                    continue;
+                }
+                cacheWriter.renameKey(entry.getKey(), entry.getValue());
+            }
+            log.info("Shelter GEO index rebuilt with temp swap: runId={}, count={}, keyCount={}",
+                runId, normalizedShelters.size(), populatedTempKeys.size());
+        } catch (RuntimeException e) {
+            cleanupTempKeys(tempKeys, "geo", runId);
+            throw e;
         }
-        log.info("Shelter GEO index rebuilt: count={}", normalizedShelters.size());
     }
 
     public void rebuildMapTiles() {
         List<ShelterMapSource> sources = shelterRepository.findAllForMapReadModel();
         List<NormalizedShelter> normalizedShelters = normalizeAll(sources);
-
-        cacheWriter.deleteByPattern("shelter:map:tile:*");
+        String runId = newRunId();
 
         Map<TileBucketKey, TreeSet<Long>> tileBuckets = normalizedShelters.stream()
             .flatMap(shelter -> tileBucketEntries(shelter).stream())
@@ -88,15 +110,31 @@ public class ShelterMapReadModelService {
                 Collectors.mapping(TileBucketEntry::shelterId, Collectors.toCollection(TreeSet::new))
             ));
 
-        tileBuckets.forEach((key, shelterIds) -> cacheWriter.setShelterMapTile(
-            key.z(),
-            key.x(),
-            key.y(),
-            key.disasterType(),
-            key.shelterType(),
-            new ArrayList<>(shelterIds)
-        ));
-        log.info("Shelter map tiles rebuilt: shelterCount={}, tileCount={}", normalizedShelters.size(), tileBuckets.size());
+        Map<String, String> tileKeySwaps = tileBuckets.entrySet().stream()
+            .collect(Collectors.toMap(
+                entry -> tempTileKey(runId, entry.getKey()),
+                entry -> activeTileKey(entry.getKey()),
+                (left, right) -> left,
+                LinkedHashMap::new
+            ));
+        List<String> tempKeys = new ArrayList<>(tileKeySwaps.keySet());
+
+        try {
+            cacheWriter.deleteKeys(tempKeys);
+            tileBuckets.forEach((key, shelterIds) -> cacheWriter.setShelterMapTileToKey(
+                tempTileKey(runId, key),
+                new ArrayList<>(shelterIds)
+            ));
+            cacheWriter.deleteByPattern("shelter:map:tile:*");
+            for (Map.Entry<String, String> entry : tileKeySwaps.entrySet()) {
+                cacheWriter.renameKey(entry.getKey(), entry.getValue());
+            }
+            log.info("Shelter map tiles rebuilt with temp swap: runId={}, shelterCount={}, tileCount={}",
+                runId, normalizedShelters.size(), tileBuckets.size());
+        } catch (RuntimeException e) {
+            cleanupTempKeys(tempKeys, "tile", runId);
+            throw e;
+        }
     }
 
     private List<NormalizedShelter> normalizeAll(List<ShelterMapSource> sources) {
@@ -198,12 +236,65 @@ public class ShelterMapReadModelService {
         return switch (trimmed) {
             case "지정대피소" -> "DESIGNATED";
             case "임시대피소" -> "TEMPORARY";
-            case "EARTHQUAKE" -> "WIDE";
             default -> null;
         };
     }
 
+    private Map<String, String> geoKeySwaps(String runId) {
+        return allGeoKeys().stream()
+            .collect(Collectors.toMap(
+                activeKey -> tempGeoKey(runId, activeKey),
+                activeKey -> activeKey,
+                (left, right) -> left,
+                LinkedHashMap::new
+            ));
+    }
+
+    private List<GeoKeyTarget> geoTargetsFor(Map<String, String> geoKeySwaps, String disasterType, String shelterType) {
+        return dimensionsFor(disasterType, shelterType).stream()
+            .map(dimension -> {
+                String activeKey = RedisKeyConstants.shelterGeo(dimension.disasterType(), dimension.shelterType());
+                return new GeoKeyTarget(geoKeySwaps.entrySet().stream()
+                    .filter(entry -> entry.getValue().equals(activeKey))
+                    .map(Map.Entry::getKey)
+                    .findFirst()
+                    .orElseThrow(), activeKey);
+            })
+            .toList();
+    }
+
+    private String tempGeoKey(String runId, String activeKey) {
+        String suffix = activeKey.substring("shelter:geo:".length());
+        return "shelter:geo:tmp:" + runId + ":" + suffix;
+    }
+
+    private String activeTileKey(TileBucketKey key) {
+        return RedisKeyConstants.shelterMapTile(
+            key.z(), key.x(), key.y(), key.disasterType(), key.shelterType()
+        );
+    }
+
+    private String tempTileKey(String runId, TileBucketKey key) {
+        return "shelter:map:tmp:tile:" + runId + ":" +
+            key.z() + ":" + key.x() + ":" + key.y() + ":" + key.disasterType() + ":" + key.shelterType();
+    }
+
+    private void cleanupTempKeys(Collection<String> tempKeys, String family, String runId) {
+        try {
+            cacheWriter.deleteKeys(tempKeys);
+        } catch (RuntimeException cleanupFailure) {
+            log.warn("Failed to clean up temporary {} keys after rebuild failure: runId={}, keyCount={}",
+                family, runId, tempKeys.size(), cleanupFailure);
+        }
+    }
+
+    private String newRunId() {
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
     private record Dimension(String disasterType, String shelterType) {}
+
+    private record GeoKeyTarget(String tempKey, String activeKey) {}
 
     private record TileBucketKey(int z, int x, int y, String disasterType, String shelterType) {}
 

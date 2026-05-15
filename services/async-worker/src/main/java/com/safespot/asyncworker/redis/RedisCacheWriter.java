@@ -10,13 +10,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.data.geo.Point;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
-import java.util.Set;
 
 @Slf4j
 @Component
@@ -43,7 +47,10 @@ public class RedisCacheWriter {
     }
 
     public void geoAddShelter(String disasterType, String shelterType, double longitude, double latitude, Long shelterId) {
-        String key = RedisKeyConstants.shelterGeo(disasterType, shelterType);
+        geoAddShelterToKey(RedisKeyConstants.shelterGeo(disasterType, shelterType), longitude, latitude, shelterId);
+    }
+
+    public void geoAddShelterToKey(String key, double longitude, double latitude, Long shelterId) {
         String eventType = currentEventType();
         try {
             redisTemplate.opsForGeo().add(key, new Point(longitude, latitude), String.valueOf(shelterId));
@@ -56,14 +63,16 @@ public class RedisCacheWriter {
     }
 
     public void setShelterMapTile(int z, int x, int y, String disasterType, String shelterType, List<Long> shelterIds) {
+        setShelterMapTileToKey(
+            RedisKeyConstants.shelterMapTile(z, x, y, disasterType, shelterType),
+            shelterIds
+        );
+    }
+
+    public void setShelterMapTileToKey(String key, List<Long> shelterIds) {
         Duration ttl = RedisTtlConstants.SHELTER_MAP_TILE;
         List<Long> sortedShelterIds = shelterIds.stream().sorted().toList();
-        setWithSizeMetric(
-            RedisKeyConstants.shelterMapTile(z, x, y, disasterType, shelterType),
-            sortedShelterIds,
-            ttl,
-            "shelter_map_tile"
-        );
+        setWithSizeMetric(key, sortedShelterIds, ttl, "shelter_map_tile");
     }
 
     // Disaster read models
@@ -131,12 +140,25 @@ public class RedisCacheWriter {
     public void deleteByPattern(String pattern) {
         String eventType = currentEventType();
         try {
-            Set<String> keys = redisTemplate.keys(pattern);
-            if (keys == null || keys.isEmpty()) {
-                return;
-            }
-            redisTemplate.delete(keys);
+            Long deletedCount = redisTemplate.execute((RedisConnection connection) -> {
+                ScanOptions options = ScanOptions.scanOptions().match(pattern).count(500).build();
+                long totalDeleted = 0L;
+                List<byte[]> batch = new ArrayList<>(500);
+                try (Cursor<byte[]> cursor = connection.scan(options)) {
+                    while (cursor.hasNext()) {
+                        batch.add(cursor.next());
+                        if (batch.size() >= 500) {
+                            totalDeleted += deleteBatch(connection, batch);
+                        }
+                    }
+                    totalDeleted += deleteBatch(connection, batch);
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+                return totalDeleted;
+            });
             workerMetrics.incrementRedisWrite(eventType, "DEL", "success");
+            log.info("Redis DEL by pattern completed: pattern={}, deletedCount={}", pattern, deletedCount != null ? deletedCount : 0L);
         } catch (Exception e) {
             workerMetrics.incrementRedisWrite(eventType, "DEL", "failure");
             log.error("Redis DEL by pattern failed: pattern={}", pattern, e);
@@ -144,7 +166,37 @@ public class RedisCacheWriter {
         }
     }
 
+    public void renameKey(String sourceKey, String targetKey) {
+        String eventType = currentEventType();
+        try {
+            redisTemplate.execute((RedisConnection connection) -> {
+                // RENAME은 기존 target key를 덮어쓴다. Phase 2 full rebuild swap에서는 이 동작을 의도적으로 사용한다.
+                connection.rename(bytes(sourceKey), bytes(targetKey));
+                return null;
+            });
+            workerMetrics.incrementRedisWrite(eventType, "RENAME", "success");
+        } catch (Exception e) {
+            workerMetrics.incrementRedisWrite(eventType, "RENAME", "failure");
+            log.error("Redis RENAME failed: sourceKey={}, targetKey={}", sourceKey, targetKey, e);
+            throw new RedisCacheException("Redis RENAME failed: sourceKey=" + sourceKey + ", targetKey=" + targetKey, e);
+        }
+    }
+
     // private
+
+    private long deleteBatch(RedisConnection connection, List<byte[]> batch) {
+        if (batch.isEmpty()) {
+            return 0L;
+        }
+        byte[][] keyBytes = batch.toArray(byte[][]::new);
+        long deleted = connection.del(keyBytes);
+        batch.clear();
+        return deleted;
+    }
+
+    private byte[] bytes(String key) {
+        return key.getBytes(StandardCharsets.UTF_8);
+    }
 
     private void setWithSizeMetric(String key, Object value, Duration ttl, String cacheKeyFamily) {
         String eventType = currentEventType();
