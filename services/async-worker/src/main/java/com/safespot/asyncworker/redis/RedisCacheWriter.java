@@ -39,11 +39,7 @@ public class RedisCacheWriter {
     }
 
     public void setShelterMapItem(Long shelterId, ShelterMapItemValue value) {
-        Duration ttl = RedisTtlConstants.withAddedJitter(
-            RedisTtlConstants.SHELTER_MAP_ITEM,
-            RedisTtlConstants.SHELTER_DISASTER_JITTER
-        );
-        setWithSizeMetric(RedisKeyConstants.shelterMapItem(shelterId), value, ttl, "shelter_map_item");
+        setPersistentWithSizeMetric(RedisKeyConstants.shelterMapItem(shelterId), value, "shelter_map_item");
     }
 
     public void geoAddShelter(String disasterType, String shelterType, double longitude, double latitude, Long shelterId) {
@@ -70,9 +66,8 @@ public class RedisCacheWriter {
     }
 
     public void setShelterMapTileToKey(String key, List<Long> shelterIds) {
-        Duration ttl = RedisTtlConstants.SHELTER_MAP_TILE;
         List<Long> sortedShelterIds = shelterIds.stream().sorted().toList();
-        setWithSizeMetric(key, sortedShelterIds, ttl, "shelter_map_tile");
+        setPersistentWithSizeMetric(key, sortedShelterIds, "shelter_map_tile");
     }
 
     // Disaster read models
@@ -203,6 +198,24 @@ public class RedisCacheWriter {
         try {
             String json = objectMapper.writeValueAsString(value);
             redisTemplate.opsForValue().set(key, json, ttl);
+            workerMetrics.incrementRedisWrite(eventType, "SET", "success");
+            workerMetrics.recordRedisPayloadSize(cacheKeyFamily, json.length());
+        } catch (JsonProcessingException e) {
+            workerMetrics.incrementRedisWrite(eventType, "SET", "failure");
+            log.error("Redis SET serialization failed: key={}", key, e);
+            throw new EventProcessingException("Redis SET serialization failed: key=" + key, e);
+        } catch (Exception e) {
+            workerMetrics.incrementRedisWrite(eventType, "SET", "failure");
+            log.error("Redis SET failed: key={}", key, e);
+            throw new RedisCacheException("Redis SET failed: key=" + key, e);
+        }
+    }
+
+    private void setPersistentWithSizeMetric(String key, Object value, String cacheKeyFamily) {
+        String eventType = currentEventType();
+        try {
+            String json = objectMapper.writeValueAsString(value);
+            redisTemplate.opsForValue().set(key, json);
             workerMetrics.incrementRedisWrite(eventType, "SET", "success");
             workerMetrics.recordRedisPayloadSize(cacheKeyFamily, json.length());
         } catch (JsonProcessingException e) {

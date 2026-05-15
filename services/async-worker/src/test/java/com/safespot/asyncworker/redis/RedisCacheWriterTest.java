@@ -153,7 +153,7 @@ class RedisCacheWriterTest {
     }
 
     @Test
-    void setShelterMapItem_withAddedJitterTtl_3600to3720s() {
+    void setShelterMapItem_persistent_SET_withoutTtl() {
         cacheWriter.setShelterMapItem(
             101L,
             new ShelterMapItemValue(1, 101L, "테스트 대피소", "DESIGNATED", "FLOOD", "서울", 120, 37.55, 126.98, "2026-05-15T10:00:00Z")
@@ -161,10 +161,9 @@ class RedisCacheWriterTest {
 
         verify(valueOps).set(
             eq(RedisKeyConstants.shelterMapItem(101L)),
-            anyString(),
-            argThat(ttl -> isWithinAddedJitterRange(ttl,
-                RedisTtlConstants.SHELTER_MAP_ITEM, RedisTtlConstants.SHELTER_DISASTER_JITTER))
+            anyString()
         );
+        verify(valueOps, never()).set(eq(RedisKeyConstants.shelterMapItem(101L)), anyString(), any(Duration.class));
     }
 
     @Test
@@ -189,27 +188,25 @@ class RedisCacheWriterTest {
     }
 
     @Test
-    void setShelterMapTile_shelterId_오름차순_JSON_array로_저장한다() {
+    void setShelterMapTile_shelterId_오름차순_JSON_array로_지속저장한다() {
         cacheWriter.setShelterMapTile(13, 7285, 3172, "FLOOD", "DESIGNATED", List.of(9L, 3L, 5L));
 
         ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
         verify(valueOps).set(
             eq(RedisKeyConstants.shelterMapTile(13, 7285, 3172, "FLOOD", "DESIGNATED")),
-            jsonCaptor.capture(),
-            eq(RedisTtlConstants.SHELTER_MAP_TILE)
+            jsonCaptor.capture()
         );
         assertThat(jsonCaptor.getValue()).isEqualTo("[3,5,9]");
     }
 
     @Test
-    void setShelterMapTileToKey_지정_key에_오름차순_JSON_array로_저장한다() {
+    void setShelterMapTileToKey_지정_key에_오름차순_JSON_array로_지속저장한다() {
         cacheWriter.setShelterMapTileToKey("shelter:map:tmp:tile:run:13:7285:3172:FLOOD:DESIGNATED", List.of(9L, 3L, 5L));
 
         ArgumentCaptor<String> jsonCaptor = ArgumentCaptor.forClass(String.class);
         verify(valueOps).set(
             eq("shelter:map:tmp:tile:run:13:7285:3172:FLOOD:DESIGNATED"),
-            jsonCaptor.capture(),
-            eq(RedisTtlConstants.SHELTER_MAP_TILE)
+            jsonCaptor.capture()
         );
         assertThat(jsonCaptor.getValue()).isEqualTo("[3,5,9]");
     }
