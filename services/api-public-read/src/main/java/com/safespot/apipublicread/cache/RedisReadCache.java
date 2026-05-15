@@ -2,17 +2,27 @@ package com.safespot.apipublicread.cache;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.safespot.apipublicread.dto.cache.ShelterMapItemCacheDto;
 import com.safespot.apipublicread.dto.cache.ShelterStatusCacheDto;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.geo.GeoResults;
 import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.connection.RedisGeoCommands.GeoLocation;
+import org.springframework.data.redis.connection.RedisGeoCommands.GeoSearchCommandArgs;
+import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.domain.geo.GeoReference;
+import org.springframework.data.geo.Distance;
+import org.springframework.data.geo.Metrics;
+import org.springframework.data.geo.Point;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -50,6 +60,8 @@ public class RedisReadCache {
             };
         }
     }
+
+    public record GeoSearchHit(Long shelterId, double distanceM) {}
 
     public <T> CacheResult<T> get(String key, TypeReference<T> type) {
         String cache = cacheName(key);
@@ -175,10 +187,147 @@ public class RedisReadCache {
         return result;
     }
 
+    public CacheResult<List<GeoSearchHit>> geoSearchShelterIds(String key, double longitude, double latitude, double radiusM, int limit) {
+        long start = System.nanoTime();
+        try {
+            GeoResults<RedisGeoCommands.GeoLocation<String>> results = redisTemplate.opsForGeo().search(
+                    key,
+                    GeoReference.fromCoordinate(new Point(longitude, latitude)),
+                    new Distance(radiusM / 1000d, Metrics.KILOMETERS),
+                    GeoSearchCommandArgs.newGeoSearchArgs().includeDistance().sortAscending().limit(limit)
+            );
+            List<GeoSearchHit> hits = new ArrayList<>();
+            if (results != null) {
+                results.forEach(result -> {
+                    String member = result.getContent().getName();
+                    try {
+                        hits.add(new GeoSearchHit(Long.parseLong(member), result.getDistance() != null ? result.getDistance().getValue() : 0d));
+                    } catch (NumberFormatException e) {
+                        throw new IllegalArgumentException("Invalid GEO member: " + member, e);
+                    }
+                });
+            }
+            if (!hits.isEmpty()) {
+                recordRedisRead("shelter_geo_index", "success", start);
+                return new CacheResult<>(hits, null, "shelter_geo_index");
+            }
+
+            Boolean hasKey = redisTemplate.hasKey(key);
+            recordRedisRead("shelter_geo_index", "success", start);
+            if (Boolean.TRUE.equals(hasKey)) {
+                return new CacheResult<>(List.of(), null, "shelter_geo_index");
+            }
+            return new CacheResult<>(null, FallbackReason.REDIS_MISS, "shelter_geo_index");
+        } catch (RedisConnectionFailureException e) {
+            log.warn("Redis GEOSEARCH connection failure for key={}: {}", key, e.getMessage());
+            recordRedisRead("shelter_geo_index", "failure", start);
+            return new CacheResult<>(null, FallbackReason.REDIS_DOWN, "shelter_geo_index");
+        } catch (DataAccessException e) {
+            log.warn("Redis GEOSEARCH error for key={}: {}", key, e.getMessage());
+            recordRedisRead("shelter_geo_index", "failure", start);
+            return new CacheResult<>(null, FallbackReason.REDIS_DOWN, "shelter_geo_index");
+        } catch (Exception e) {
+            log.warn("Redis GEOSEARCH parse/error for key={}: {}", key, e.getMessage());
+            recordRedisRead("shelter_geo_index", "failure", start);
+            return new CacheResult<>(null, FallbackReason.PARSE_ERROR, "shelter_geo_index");
+        }
+    }
+
+    public Map<Long, CacheResult<ShelterMapItemCacheDto>> multiGetShelterMapItems(List<Long> shelterIds) {
+        if (shelterIds == null || shelterIds.isEmpty()) return Map.of();
+
+        List<Long> distinctIds = shelterIds.stream().distinct().toList();
+        List<String> keys = distinctIds.stream()
+                .map(id -> "shelter:map:item:" + id)
+                .toList();
+
+        long start = System.nanoTime();
+        List<String> values;
+        try {
+            values = redisTemplate.opsForValue().multiGet(keys);
+            recordRedisRead("shelter_map_item", "success", start);
+        } catch (RedisConnectionFailureException e) {
+            log.warn("Redis MGET connection failure for shelter_map_item: {}", e.getMessage());
+            recordRedisRead("shelter_map_item", "failure", start);
+            return allDown(distinctIds, "shelter_map_item");
+        } catch (DataAccessException e) {
+            log.warn("Redis MGET error for shelter_map_item: {}", e.getMessage());
+            recordRedisRead("shelter_map_item", "failure", start);
+            return allDown(distinctIds, "shelter_map_item");
+        }
+
+        if (values == null) values = Collections.nCopies(distinctIds.size(), null);
+
+        Map<Long, CacheResult<ShelterMapItemCacheDto>> result = new LinkedHashMap<>();
+        for (int i = 0; i < distinctIds.size(); i++) {
+            Long id = distinctIds.get(i);
+            String json = (i < values.size()) ? values.get(i) : null;
+            if (json == null) {
+                result.put(id, new CacheResult<>(null, FallbackReason.REDIS_MISS, "shelter_map_item"));
+            } else {
+                try {
+                    ShelterMapItemCacheDto dto = objectMapper.readValue(json, ShelterMapItemCacheDto.class);
+                    result.put(id, new CacheResult<>(dto, null, "shelter_map_item"));
+                } catch (Exception e) {
+                    log.warn("Redis MGET parse error for shelter:map:item:{}: {}", id, e.getMessage());
+                    result.put(id, new CacheResult<>(null, FallbackReason.PARSE_ERROR, "shelter_map_item"));
+                }
+            }
+        }
+        return result;
+    }
+
+    public Map<String, CacheResult<List<Long>>> multiGetShelterMapTiles(List<String> tileKeys) {
+        if (tileKeys == null || tileKeys.isEmpty()) {
+            return Map.of();
+        }
+        long start = System.nanoTime();
+        List<String> values;
+        try {
+            values = redisTemplate.opsForValue().multiGet(tileKeys);
+            recordRedisRead("shelter_map_tile", "success", start);
+        } catch (RedisConnectionFailureException e) {
+            log.warn("Redis MGET connection failure for shelter_map_tile: {}", e.getMessage());
+            recordRedisRead("shelter_map_tile", "failure", start);
+            return buildAllDown(tileKeys, "shelter_map_tile");
+        } catch (DataAccessException e) {
+            log.warn("Redis MGET error for shelter_map_tile: {}", e.getMessage());
+            recordRedisRead("shelter_map_tile", "failure", start);
+            return buildAllDown(tileKeys, "shelter_map_tile");
+        }
+
+        if (values == null) values = Collections.nCopies(tileKeys.size(), null);
+        Map<String, CacheResult<List<Long>>> result = new LinkedHashMap<>();
+        for (int i = 0; i < tileKeys.size(); i++) {
+            String key = tileKeys.get(i);
+            String json = (i < values.size()) ? values.get(i) : null;
+            if (json == null) {
+                result.put(key, new CacheResult<>(null, FallbackReason.REDIS_MISS, "shelter_map_tile"));
+            } else {
+                try {
+                    List<Long> ids = objectMapper.readValue(json, new TypeReference<List<Long>>() {});
+                    result.put(key, new CacheResult<>(ids, null, "shelter_map_tile"));
+                } catch (Exception e) {
+                    log.warn("Redis MGET parse error for {}: {}", key, e.getMessage());
+                    result.put(key, new CacheResult<>(null, FallbackReason.PARSE_ERROR, "shelter_map_tile"));
+                }
+            }
+        }
+        return result;
+    }
+
     private Map<Long, CacheResult<ShelterStatusCacheDto>> allDown(List<Long> ids) {
         Map<Long, CacheResult<ShelterStatusCacheDto>> result = new LinkedHashMap<>();
         for (Long id : ids) {
             result.put(id, new CacheResult<>(null, FallbackReason.REDIS_DOWN, "shelter_status"));
+        }
+        return result;
+    }
+
+    private <T> Map<Long, CacheResult<T>> allDown(List<Long> ids, String cache) {
+        Map<Long, CacheResult<T>> result = new LinkedHashMap<>();
+        for (Long id : ids) {
+            result.put(id, new CacheResult<>(null, FallbackReason.REDIS_DOWN, cache));
         }
         return result;
     }
@@ -258,6 +407,9 @@ public class RedisReadCache {
         if (key.equals("disaster:message:core:seoul")) return "disaster_messages";
         if (key.startsWith("disaster:detail:")) return "disaster_detail";
         if (key.startsWith("shelter:status:")) return "shelter_status";
+        if (key.startsWith("shelter:geo:")) return "shelter_geo_index";
+        if (key.startsWith("shelter:map:item:")) return "shelter_map_item";
+        if (key.startsWith("shelter:map:tile:")) return "shelter_map_tile";
         if (key.equals("environment:weather:seoul")) return "weather";
         if (key.equals("environment:air-quality:seoul")) return "air_quality";
         return "unknown";

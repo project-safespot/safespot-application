@@ -30,6 +30,18 @@ class CacheRegenerationRouteResolverTest {
                 .hasValueSatisfying(r -> assertThat(r.queueType()).isEqualTo(QueueType.CACHE_REFRESH));
     }
 
+    @ParameterizedTest(name = "{0} -> CACHE_REFRESH")
+    @CsvSource({
+            "shelter_map_item",
+            "shelter_geo_index",
+            "shelter_map_tile",
+    })
+    void resolve_shelterMapFamily_returnsCacheRefreshRoute(String family) {
+        assertThat(resolver.resolve(family))
+                .isPresent()
+                .hasValueSatisfying(r -> assertThat(r.queueType()).isEqualTo(QueueType.CACHE_REFRESH));
+    }
+
     @ParameterizedTest(name = "{0} -> ENVIRONMENT_CACHE_REFRESH")
     @CsvSource({
             "environment_weather",

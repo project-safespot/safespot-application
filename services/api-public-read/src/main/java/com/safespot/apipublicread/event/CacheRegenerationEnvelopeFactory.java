@@ -20,4 +20,9 @@ public class CacheRegenerationEnvelopeFactory {
                                                 List<Long> targetIds, CacheRegenerationReason reason) {
         return CacheRegenerationEnvelope.buildBatch(cacheFamily, targetType, targetIds, reason);
     }
+
+    public CacheRegenerationEnvelope buildTarget(String cacheFamily, String targetType,
+                                                 CacheRegenerationReason reason) {
+        return CacheRegenerationEnvelope.buildTarget(cacheFamily, targetType, reason);
+    }
 }

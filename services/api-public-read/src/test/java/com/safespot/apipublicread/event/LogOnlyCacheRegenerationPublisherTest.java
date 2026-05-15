@@ -47,4 +47,12 @@ class LogOnlyCacheRegenerationPublisherTest {
 
         verify(resolver).resolve("shelter:status:42");
     }
+
+    @Test
+    void publishTarget_supportedTarget_completesWithoutException() {
+        LogOnlyCacheRegenerationPublisher publisher = new LogOnlyCacheRegenerationPublisher(resolver, meterRegistry);
+
+        assertThatCode(() -> publisher.publishTarget("SHELTER_GEO_INDEX", CacheRegenerationReason.CACHE_MISS, "/shelters/nearby"))
+                .doesNotThrowAnyException();
+    }
 }
