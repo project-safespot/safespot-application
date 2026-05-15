@@ -76,14 +76,15 @@ public class CacheRegenerationCacheWorkerHandler implements EventHandler {
                         Long shelterId = parseId(idStr, cacheKey);
                         shelterStatusService.recalculate(shelterId);
                     } else {
-                        throw new EventProcessingException("SHELTER_STATUS requires targetIds or cacheKey");
+                        shelterStatusService.warmUpAll();
                     }
                 }
                 case SHELTER_MAP_ITEMS -> {
                     if (payload.targetIds() == null || payload.targetIds().isEmpty()) {
-                        throw new EventProcessingException("SHELTER_MAP_ITEMS requires non-empty targetIds");
+                        shelterMapReadModelService.rebuildAllMapItems();
+                    } else {
+                        shelterMapReadModelService.rebuildMapItems(payload.targetIds());
                     }
-                    shelterMapReadModelService.rebuildMapItems(payload.targetIds());
                 }
                 case SHELTER_GEO_INDEX -> shelterMapReadModelService.rebuildGeoIndex();
                 case SHELTER_MAP_TILES -> shelterMapReadModelService.rebuildMapTiles();

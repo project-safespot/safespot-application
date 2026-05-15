@@ -85,11 +85,13 @@ public class CacheRegenerationAsyncWorkerHandler implements EventHandler {
                     shelterStatusService.recalculate(shelterId);
                     return;
                 }
-                throw new EventProcessingException("SHELTER_STATUS requires targetIds or legacy cacheKey");
+                shelterStatusService.warmUpAll();
+                return;
             }
             case SHELTER_MAP_ITEMS -> {
                 if (payload.targetIds() == null || payload.targetIds().isEmpty()) {
-                    throw new EventProcessingException("SHELTER_MAP_ITEMS requires non-empty targetIds");
+                    shelterMapReadModelService.rebuildAllMapItems();
+                    return;
                 }
                 shelterMapReadModelService.rebuildMapItems(payload.targetIds());
             }

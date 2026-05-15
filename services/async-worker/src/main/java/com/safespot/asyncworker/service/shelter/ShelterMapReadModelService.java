@@ -41,6 +41,20 @@ public class ShelterMapReadModelService {
     private final ShelterRepository shelterRepository;
     private final RedisCacheWriter cacheWriter;
 
+    public void rebuildAllMapItems() {
+        List<ShelterMapSource> sources = shelterRepository.findAllForMapReadModel();
+        int writtenCount = 0;
+        for (ShelterMapSource source : sources) {
+            NormalizedShelter normalized = normalize(source);
+            if (normalized == null) {
+                continue;
+            }
+            cacheWriter.setShelterMapItem(normalized.shelterId(), normalized.toMapItemValue());
+            writtenCount++;
+        }
+        log.info("Shelter map items rebuilt (all): sourceCount={}, writtenCount={}", sources.size(), writtenCount);
+    }
+
     public void rebuildMapItems(List<Long> shelterIds) {
         if (shelterIds == null || shelterIds.isEmpty()) {
             throw new EventProcessingException("SHELTER_MAP_ITEMS requires non-empty targetIds");

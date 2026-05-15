@@ -14,6 +14,8 @@ DEFAULT_SCOPE="all"
 DEFAULT_ONLY="all"
 DEFAULT_REGION="ap-northeast-2"
 DEFAULT_CHUNK_SIZE="200"
+DEFAULT_K8S_NAMESPACE="application"
+DEFAULT_POSTGRES_IMAGE="postgres:16-alpine"
 
 SCOPE="${SCOPE:-}"
 ONLY="${ONLY:-}"
@@ -21,9 +23,12 @@ SHELTER_IDS_FILE="${SHELTER_IDS_FILE:-}"
 DISASTER_ALERT_IDS_FILE="${DISASTER_ALERT_IDS_FILE:-}"
 CACHE_REFRESH_QUEUE_URL="${CACHE_REFRESH_QUEUE_URL:-}"
 READMODEL_REFRESH_QUEUE_URL="${READMODEL_REFRESH_QUEUE_URL:-}"
+readonly SSM_PREFIX="/safespot/dev"
 AWS_REGION_VALUE="${AWS_REGION:-$DEFAULT_REGION}"
 CHUNK_SIZE_VALUE="${CHUNK_SIZE:-$DEFAULT_CHUNK_SIZE}"
 DRY_RUN_VALUE="${DRY_RUN:-false}"
+K8S_NAMESPACE="${K8S_NAMESPACE:-$DEFAULT_K8S_NAMESPACE}"
+POSTGRES_IMAGE="${POSTGRES_IMAGE:-$DEFAULT_POSTGRES_IMAGE}"
 
 usage() {
   cat <<'EOF'
@@ -37,9 +42,9 @@ Options:
       허용값: shelter-map-items, shelter-status, shelter-geo, shelter-tiles, disaster-recent, disaster-core, disaster-list, disaster-detail, all
       기본값: all
   --shelter-ids-file <path>
-      shelter_id 목록 파일. 한 줄에 하나의 shelter_id. 빈 줄과 # comment는 무시.
+      shelter_id 목록 파일. 선택 사항. 없으면 DB에서 전체 shelter_id를 자동 조회한다.
   --disaster-alert-ids-file <path>
-      disaster detail rebuild용 alert_id 목록 파일. 한 줄에 하나의 alert_id. 빈 줄과 # comment는 무시.
+      disaster detail rebuild용 alert_id 목록 파일. 선택 사항. 없으면 DB에서 전체 alert_id를 자동 조회한다.
   --cache-refresh-queue-url <url>
       shelter warmup용 cache-refresh queue URL.
   --readmodel-refresh-queue-url <url>
@@ -57,24 +62,22 @@ Environment variables:
   AWS_REGION
   CACHE_REFRESH_QUEUE_URL
   READMODEL_REFRESH_QUEUE_URL
+  K8S_NAMESPACE
+  POSTGRES_IMAGE
   CHUNK_SIZE
   DRY_RUN
 
 Examples:
   1) 전체 warmup dry-run
      scripts/cache/warmup-readmodels.sh \
-       --scope all \
-       --shelter-ids-file shelter-ids.txt \
-       --disaster-alert-ids-file disaster-alert-ids.txt \
+      --scope all \
        --cache-refresh-queue-url "$CACHE_REFRESH_QUEUE_URL" \
        --readmodel-refresh-queue-url "$READMODEL_REFRESH_QUEUE_URL" \
        --dry-run
 
   2) 전체 warmup 실행
      scripts/cache/warmup-readmodels.sh \
-       --scope all \
-       --shelter-ids-file shelter-ids.txt \
-       --disaster-alert-ids-file disaster-alert-ids.txt \
+      --scope all \
        --cache-refresh-queue-url "$CACHE_REFRESH_QUEUE_URL" \
        --readmodel-refresh-queue-url "$READMODEL_REFRESH_QUEUE_URL"
 
@@ -92,9 +95,8 @@ Examples:
 
   5) disaster detail만 warmup
      scripts/cache/warmup-readmodels.sh \
-       --scope disaster \
-       --only disaster-detail \
-       --disaster-alert-ids-file disaster-alert-ids.txt \
+      --scope disaster \
+      --only disaster-detail \
        --readmodel-refresh-queue-url "$READMODEL_REFRESH_QUEUE_URL"
 
   6) shelter GEO/TILE만 warmup
@@ -107,12 +109,20 @@ Examples:
        --scope shelter \
        --only shelter-tiles \
        --cache-refresh-queue-url "$CACHE_REFRESH_QUEUE_URL"
+  7) SSM prefix 고정값 자동 로드
+     scripts/cache/warmup-readmodels.sh \
+       --scope all \
+       --dry-run
 EOF
 }
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
+}
+
+log() {
+  printf '%s\n' "$*" >&2
 }
 
 trim() {
@@ -135,6 +145,16 @@ is_truthy() {
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die "$1 명령을 찾을 수 없습니다."
+}
+
+fetch_ssm() {
+  local name="$1"
+  aws ssm get-parameter \
+    --region "$AWS_REGION_VALUE" \
+    --name "$name" \
+    --with-decryption \
+    --query "Parameter.Value" \
+    --output text
 }
 
 new_uuid() {
@@ -168,6 +188,99 @@ sorted_unique_integer_ids_from_file() {
   done < "$file"
 
   ((${#ids[@]} > 0)) || die "$label에 유효한 id가 없습니다: $file"
+
+  mapfile -t ids < <(printf '%s\n' "${ids[@]}" | sort -n | uniq)
+  printf '%s\n' "${ids[@]}"
+}
+
+load_ids() {
+  local file="$1"
+  local label="$2"
+  local sql="$3"
+  if [[ -n "$file" ]]; then
+    sorted_unique_integer_ids_from_file "$file" "$label"
+  else
+    query_ids_from_db "$sql" "$label"
+  fi
+}
+
+query_ids_from_db() {
+  local sql="$1"
+  local label="$2"
+
+  log "$label 조회 중 (kubectl 우선, 실패 시 psql 보조)..."
+  if try_query_ids_with_kubectl "$sql"; then
+    log "$label 조회 완료 (kubectl)"
+    return 0
+  fi
+  if try_query_ids_with_psql "$sql"; then
+    log "$label 조회 완료 (psql)"
+    return 0
+  fi
+  die "$label를 DB에서 조회하지 못했습니다."
+}
+
+try_query_ids_with_psql() {
+  local sql="$1"
+  if ! command -v psql >/dev/null 2>&1; then
+    return 1
+  fi
+  [[ -n "${DB_HOST:-}" ]] || return 1
+  [[ -n "${DB_NAME:-}" ]] || return 1
+  [[ -n "${DB_USER:-}" ]] || return 1
+
+  local output
+  if ! output="$(
+    PGPASSWORD="${DB_PASSWORD:-}" psql \
+      -X -q -t -A -v ON_ERROR_STOP=1 \
+      -h "$DB_HOST" \
+      -p "${DB_PORT:-5432}" \
+      -U "$DB_USER" \
+      -d "$DB_NAME" \
+      -c "$sql" 2>/dev/null
+  )"; then
+    return 1
+  fi
+  print_sorted_unique_ids "$output"
+}
+
+try_query_ids_with_kubectl() {
+  local sql="$1"
+  command -v kubectl >/dev/null 2>&1 || return 1
+  [[ -n "${DB_HOST:-}" ]] || return 1
+  [[ -n "${DB_NAME:-}" ]] || return 1
+  [[ -n "${DB_USER:-}" ]] || return 1
+
+  local output
+  if ! output="$(
+    kubectl -n "$K8S_NAMESPACE" run warmup-psql-$$ \
+      --rm --restart=Never --image="$POSTGRES_IMAGE" --attach \
+      --env="PGPASSWORD=${DB_PASSWORD:-}" \
+      --command -- psql \
+      -X -q -t -A -v ON_ERROR_STOP=1 \
+      -h "$DB_HOST" \
+      -p "${DB_PORT:-5432}" \
+      -U "$DB_USER" \
+      -d "$DB_NAME" \
+      -c "$sql" 2>/dev/null
+  )"; then
+    return 1
+  fi
+  print_sorted_unique_ids "$output"
+}
+
+print_sorted_unique_ids() {
+  local output="$1"
+  local ids=()
+  local line
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="$(trim "$line")"
+    [[ -z "$line" ]] && continue
+    [[ "$line" =~ ^[0-9]+$ ]] || continue
+    ids+=("$line")
+  done <<< "$output"
+
+  ((${#ids[@]} > 0)) || return 1
 
   mapfile -t ids < <(printf '%s\n' "${ids[@]}" | sort -n | uniq)
   printf '%s\n' "${ids[@]}"
@@ -353,50 +466,6 @@ scope_allows_only() {
   esac
 }
 
-needs_shelter_ids_file() {
-  local scope_value="$1"
-  local only_value="$2"
-  case "$scope_value" in
-    shelter)
-      case "$only_value" in
-        all|shelter-map-items|shelter-status) return 0 ;;
-        *) return 1 ;;
-      esac
-      ;;
-    disaster)
-      return 1
-      ;;
-    all)
-      case "$only_value" in
-        all|shelter-map-items|shelter-status) return 0 ;;
-        *) return 1 ;;
-      esac
-      ;;
-  esac
-}
-
-needs_disaster_ids_file() {
-  local scope_value="$1"
-  local only_value="$2"
-  case "$scope_value" in
-    shelter)
-      return 1
-      ;;
-    disaster)
-      case "$only_value" in
-        disaster-detail) return 0 ;;
-        *) return 1 ;;
-      esac
-      ;;
-    all)
-      case "$only_value" in
-        disaster-detail) return 0 ;;
-        *) return 1 ;;
-      esac
-      ;;
-  esac
-}
-
 main() {
   while (($# > 0)); do
     case "$1" in
@@ -470,6 +539,29 @@ main() {
 
   require_command aws
   require_command jq
+  local ssm_root="${SSM_PREFIX%/}"
+  log "SSM 값 조회 중: ${ssm_root}"
+  if [[ -z "$CACHE_REFRESH_QUEUE_URL" ]]; then
+    CACHE_REFRESH_QUEUE_URL="$(fetch_ssm "$ssm_root/async-worker/cache-refresh-queue-url")"
+  fi
+  if [[ -z "$READMODEL_REFRESH_QUEUE_URL" ]]; then
+    READMODEL_REFRESH_QUEUE_URL="$(fetch_ssm "$ssm_root/async-worker/readmodel-refresh-queue-url")"
+  fi
+  if [[ -z "${DB_HOST:-}" ]]; then
+    DB_HOST="$(fetch_ssm "$ssm_root/data/aurora-cluster-endpoint")"
+  fi
+  if [[ -z "${DB_PORT:-}" ]]; then
+    DB_PORT="$(fetch_ssm "$ssm_root/data/aurora-port")"
+  fi
+  if [[ -z "${DB_NAME:-}" ]]; then
+    DB_NAME="$(fetch_ssm "$ssm_root/data/aurora-db-name")"
+  fi
+  if [[ -z "${DB_USER:-}" ]]; then
+    DB_USER="$(fetch_ssm "$ssm_root/secret/rds/username")"
+  fi
+  if [[ -z "${DB_PASSWORD:-}" ]]; then
+    DB_PASSWORD="$(fetch_ssm "$ssm_root/secret/rds/password")"
+  fi
 
   if [[ "$SCOPE" == "shelter" || "$SCOPE" == "all" ]]; then
     [[ -n "$CACHE_REFRESH_QUEUE_URL" ]] || die "shelter warmup에는 cache-refresh queue URL이 필요합니다."
@@ -481,16 +573,6 @@ main() {
   local -a shelter_ids=()
   local -a disaster_alert_ids=()
 
-  if needs_shelter_ids_file "$SCOPE" "$ONLY"; then
-    [[ -n "$SHELTER_IDS_FILE" ]] || die "shelter warmup에는 --shelter-ids-file이 필요합니다."
-    mapfile -t shelter_ids < <(sorted_unique_integer_ids_from_file "$SHELTER_IDS_FILE" "shelter_id")
-  fi
-
-  if needs_disaster_ids_file "$SCOPE" "$ONLY"; then
-    [[ -n "$DISASTER_ALERT_IDS_FILE" ]] || die "disaster detail warmup에는 --disaster-alert-ids-file이 필요합니다."
-    mapfile -t disaster_alert_ids < <(sorted_unique_integer_ids_from_file "$DISASTER_ALERT_IDS_FILE" "alert_id")
-  fi
-
   local run_id_value
   local timestamp
   local trace_id
@@ -499,6 +581,7 @@ main() {
   trace_id="manual-warmup:${run_id_value}"
 
   if [[ "$SCOPE" == "shelter" || "$SCOPE" == "all" ]]; then
+    log "shelter warmup 시작"
     local include_map_items=0
     local include_status=0
     local include_geo=0
@@ -526,6 +609,17 @@ main() {
     esac
 
     if (( include_map_items || include_status )); then
+      local shelter_sql="SELECT shelter_id FROM shelter ORDER BY shelter_id"
+      local shelter_ids_output
+      local -a shelter_ids=()
+      if ! shelter_ids_output="$(load_ids "$SHELTER_IDS_FILE" "shelter_id" "$shelter_sql")"; then
+        die "shelter_id를 DB에서 조회하지 못했습니다."
+      fi
+      if [[ -n "$shelter_ids_output" ]]; then
+        mapfile -t shelter_ids <<< "$shelter_ids_output"
+      fi
+      log "shelter_id ${#shelter_ids[@]}개 로드 완료"
+
       local chunk_index=0
       local offset=0
       while (( offset < ${#shelter_ids[@]} )); do
@@ -557,6 +651,7 @@ main() {
   fi
 
   if [[ "$SCOPE" == "disaster" || "$SCOPE" == "all" ]]; then
+    log "disaster warmup 시작"
     local include_recent=0
     local include_core=0
     local include_list=0
@@ -567,6 +662,7 @@ main() {
         include_recent=1
         include_core=1
         include_list=1
+        include_detail=1
         ;;
       disaster-recent)
         include_recent=1
@@ -592,6 +688,17 @@ main() {
       publish_disaster_cache_key "$READMODEL_REFRESH_QUEUE_URL" "disaster:messages:list:seoul" "disaster_messages" "disaster_messages_list" "$run_id_value" "$timestamp" "$trace_id"
     fi
     if (( include_detail )); then
+      local disaster_sql="SELECT alert_id FROM disaster_alert ORDER BY alert_id"
+      local disaster_alert_ids_output
+      local -a disaster_alert_ids=()
+      if ! disaster_alert_ids_output="$(load_ids "$DISASTER_ALERT_IDS_FILE" "alert_id" "$disaster_sql")"; then
+        die "alert_id를 DB에서 조회하지 못했습니다."
+      fi
+      if [[ -n "$disaster_alert_ids_output" ]]; then
+        mapfile -t disaster_alert_ids <<< "$disaster_alert_ids_output"
+      fi
+      log "alert_id ${#disaster_alert_ids[@]}개 로드 완료"
+
       local offset=0
       while (( offset < ${#disaster_alert_ids[@]} )); do
         local end=$((offset + CHUNK_SIZE_VALUE))

@@ -73,10 +73,35 @@ class CacheRegenerationAsyncWorkerHandlerTest {
     }
 
     @Test
-    void SHELTER_MAP_ITEMS_targetIds_empty이면_EventProcessingException() {
-        assertThatThrownBy(() ->
-            handler.handle(buildTargetEnvelope("SHELTER_MAP_ITEMS", "shelter_map_item", null, List.of()))
-        ).isInstanceOf(EventProcessingException.class);
+    void SHELTER_STATUS_targetIds_empty이고_cacheKey없으면_warmUpAll() {
+        handler.handle(buildTargetEnvelope("SHELTER_STATUS", "shelter_status", null, List.of()));
+
+        verify(shelterStatusService).warmUpAll();
+        verifyNoInteractions(shelterMapReadModelService, environmentCacheService, disasterReadModelService);
+    }
+
+    @Test
+    void SHELTER_STATUS_targetIds_없고_cacheKey없으면_warmUpAll() {
+        handler.handle(buildTargetEnvelope("SHELTER_STATUS", "shelter_status", null, null));
+
+        verify(shelterStatusService).warmUpAll();
+        verifyNoInteractions(shelterMapReadModelService, environmentCacheService, disasterReadModelService);
+    }
+
+    @Test
+    void SHELTER_MAP_ITEMS_targetIds_empty이면_rebuildAllMapItems() {
+        handler.handle(buildTargetEnvelope("SHELTER_MAP_ITEMS", "shelter_map_item", null, List.of()));
+
+        verify(shelterMapReadModelService).rebuildAllMapItems();
+        verifyNoInteractions(shelterStatusService, environmentCacheService, disasterReadModelService);
+    }
+
+    @Test
+    void SHELTER_MAP_ITEMS_targetIds_없으면_rebuildAllMapItems() {
+        handler.handle(buildTargetEnvelope("SHELTER_MAP_ITEMS", "shelter_map_item", null, null));
+
+        verify(shelterMapReadModelService).rebuildAllMapItems();
+        verifyNoInteractions(shelterStatusService, environmentCacheService, disasterReadModelService);
     }
 
     @Test

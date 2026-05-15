@@ -45,6 +45,22 @@ class ShelterMapReadModelServiceTest {
     }
 
     @Test
+    void rebuildAllMapItems는_전체_source를_조회하고_valid_item만_쓴다() {
+        when(shelterRepository.findAllForMapReadModel()).thenReturn(List.of(
+            source(101L, "지정대피소", "FLOOD", 120, 37.55, 126.98),
+            source(202L, "EARTHQUAKE", "EARTHQUAKE", 80, 37.56, 126.99)
+        ));
+
+        service.rebuildAllMapItems();
+
+        verify(shelterRepository).findAllForMapReadModel();
+        ArgumentCaptor<ShelterMapItemValue> valueCaptor = ArgumentCaptor.forClass(ShelterMapItemValue.class);
+        verify(cacheWriter).setShelterMapItem(eq(101L), valueCaptor.capture());
+        verify(cacheWriter, never()).setShelterMapItem(eq(202L), any());
+        assertThat(valueCaptor.getValue().capacityTotal()).isEqualTo(120);
+    }
+
+    @Test
     void rebuildGeoIndex_all_disaster_shelter_dimension에_GEOADD한다() {
         when(shelterRepository.findAllForMapReadModel()).thenReturn(List.of(
             source(101L, "지정대피소", "FLOOD", 120, 37.55, 126.98)
