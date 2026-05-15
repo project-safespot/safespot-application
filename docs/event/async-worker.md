@@ -18,6 +18,7 @@
 - admin write
 - external API collection
 - disaster message reclassification
+- public read hot path의 RDS candidate lookup
 
 ## 2. 현재 구현 vs 목표 상태
 
@@ -43,8 +44,9 @@
 Shelter:
 
 - `shelter:status:{shelterId}`
-- `shelter:list:seoul:{shelterType}:{disasterType}` (near-term planned contract, not fully implemented yet)
-- `shelter:list:{region}:{shelterType}:{disasterType}` (near-term planned contract, not fully implemented yet)
+- `shelter:map:item:{shelterId}`
+- `shelter:geo:seoul:{disasterType}:{shelterType}`
+- `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
 
 Disaster message read models:
 
@@ -77,7 +79,13 @@ Trigger:
 
 - RDS state를 읽는다.
 - `shelter:status:{shelterId}`를 rebuild한다.
-- near-term planned contract: `CacheRegenerationRequested`가 `shelter:list:seoul:{shelterType}:{disasterType}` 및 `shelter:list:{region}:{shelterType}:{disasterType}`도 rebuild할 수 있다.
+- `shelter:map:item:{shelterId}`를 rebuild한다.
+- `shelter:geo:seoul:{disasterType}:{shelterType}`를 rebuild한다.
+- `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`를 rebuild한다.
+- `CacheRegenerationRequested`는 target family 또는 explicit targetIds 기준으로 batch collapse한다.
+- `shelter:geo`와 `shelter:map:tile`은 서울 전체 또는 관련 tile batch rebuild를 허용한다.
+- 1차에서는 Seoul 전체 rebuild를 허용한다.
+- nearby/map hot path에서 RDS candidate lookup fallback을 수행하지 않는다.
 - `congestionLevel`은 informational only다.
 - capacity는 admission을 거절하지 않는다.
 
@@ -131,6 +139,8 @@ Trigger:
 - `api-public-read`가 regeneration request를 emit한다.
 - worker가 요청된 key family를 rebuild한다.
 - suppress-window behavior는 정확한 target `cacheKey`를 기준으로 한다.
+- shelter miss와 parse error는 개별 shelter 수만큼 이벤트를 fan-out하지 말고 batch로 collapse한다.
+- `CacheRegenerationRequested`는 `SHELTER_STATUS`, `SHELTER_MAP_ITEMS`, `SHELTER_GEO_INDEX`, `SHELTER_MAP_TILES` 같은 target을 명시적으로 표현할 수 있다.
 
 권장 disaster `cacheKeyFamily` handling:
 
@@ -138,6 +148,13 @@ Trigger:
 - `disaster_messages_recent`
 - `disaster_message_core`
 - `disaster_messages_list`
+
+권장 shelter `cacheKeyFamily` handling:
+
+- `shelter_status`
+- `shelter_map_item`
+- `shelter_geo_index`
+- `shelter_map_tile`
 
 ## 7. Retry 및 DLQ
 
@@ -154,7 +171,7 @@ Trigger:
 
 | Queue | AWS QueueName | 처리 이벤트 |
 |---|---|---|
-| Cache Refresh | `safespot-{env}-async-worker-sqs-cache-refresh` | `EvacuationEntryCreated`, `EvacuationEntryExited`, `EvacuationEntryUpdated`, `ShelterUpdated`, `CacheRegenerationRequested` (shelter keys) |
+| Cache Refresh | `safespot-{env}-async-worker-sqs-cache-refresh` | `EvacuationEntryCreated`, `EvacuationEntryExited`, `EvacuationEntryUpdated`, `ShelterUpdated`, `CacheRegenerationRequested` (shelter status/item/geo/tile) |
 | Readmodel Refresh | `safespot-{env}-async-worker-sqs-readmodel-refresh` | `DisasterDataCollected`, `CacheRegenerationRequested` (disaster message keys) |
 | Environment Cache Refresh | `safespot-{env}-async-worker-sqs-environment-cache-refresh` | `EnvironmentDataCollected`, `CacheRegenerationRequested` (environment keys) |
 

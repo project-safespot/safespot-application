@@ -156,27 +156,123 @@ environment key는 disaster message key와 분리되어 유지된다.
 - `environment:weather:seoul` payload는 temperature 외에 precipitation, wind, humidity context를 포함할 수 있다.
 - `environment:air-quality:seoul` payload는 CAI 외에 PM10, PM2.5, O3 context를 포함할 수 있다.
 
-## 5. Shelter Key Precision
+## 5. Shelter Key Contract
 
-이 문서는 shelter key를 redesign하지 않는다.
+이 문서는 shelter key를 최신 read model 계약으로 정의한다.
 
-기존 shelter key family는 유지한다.
+현재 shelter key family는 다음을 사용한다.
 
+- `shelter:geo:seoul:{disasterType}:{shelterType}`
+- `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
+- `shelter:map:item:{shelterId}`
 - `shelter:status:{shelterId}`
-- `shelter:list:seoul:{shelterType}:{disasterType}`
-- `shelter:list:{region}:{shelterType}:{disasterType}`
 
-Precision rule:
+규칙:
 
-- `shelter:list:*`와 `disaster:messages:list:seoul`은 서로 다른 list concept다.
-- shelter list는 key semantics의 일부로 `disasterType`을 유지할 수 있다.
-- disaster message list는 MVP에서 `{disasterType}`, `{category}`, `{district}` key dimension을 추가하면 안 된다.
+- MVP region namespace는 `seoul`이다.
+- `disasterType` canonical enum은 `EARTHQUAKE`, `FLOOD`, `LANDSLIDE`다.
+- `shelterType` canonical enum은 `DESIGNATED`, `TEMPORARY`, `WIDE`다.
+- key dimension에 한글 표시값을 사용하면 안 된다.
+- unspecified dimension이 필요하면 `all`을 사용할 수 있다.
+- `shelter:geo`는 일반 response cache가 아니라 nearby read path의 필수 GEO index다.
+- GEO member는 `shelterId`다.
+- GEO coordinate 순서는 longitude, latitude다.
+- 정상 운영 상태에서 GEO key miss 또는 empty는 없어야 한다.
+- `shelter:status`는 동적 상태 read model이다.
+- `shelter:map:item`은 정적 marker/item read model이다.
+- `shelter:map:tile`은 tile-scoped marker reference read model이다.
+- legacy `shelter:list:*`는 retired 또는 historical warning 이외의 active contract로 사용하면 안 된다.
+
+예:
+
+- `shelter:geo:seoul:all:all`
+- `shelter:geo:seoul:FLOOD:all`
+- `shelter:map:tile:13:7285:3172:FLOOD:DESIGNATED`
+
+### 5.1 `shelter:map:item:{shelterId}`
+
+목적:
+
+- map marker 렌더링에 필요한 정적 shelter item을 저장한다.
+
+최소 payload field:
+
+- `schemaVersion`
+- `shelterId`
+- `shelterName`
+- `shelterType`
+- `disasterType`
+- `address`
+- `latitude`
+- `longitude`
+- `updatedAt`
+
+규칙:
+
+- 정적 marker 정보만 저장한다.
+- 동적 상태는 `shelter:status:{shelterId}`로 분리한다.
+- CDN/API cache reuse를 위해 stable payload를 유지한다.
+
+### 5.2 `shelter:status:{shelterId}`
+
+목적:
+
+- 현재 인원, 가용 용량, 혼잡도, 운영 상태를 저장한다.
+
+동적 payload field:
+
+- `currentOccupancy`
+- `availableCapacity`
+- `congestionLevel`
+- `shelterStatus`
+
+규칙:
+
+- 동적 상태만 저장한다.
+- `shelter:map:item`의 정적 marker payload와 분리한다.
+
+### 5.3 `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
+
+목적:
+
+- `/shelters/map/tiles`에서 viewport tile 단위 shelter 후보를 제공한다.
+
+규칙:
+
+- payload는 `shelterId` 목록 또는 marker item ref 목록이다.
+- 같은 `z/x/y/disasterType/shelterType` 조합은 CDN/API cache 재사용 가능해야 한다.
+- bbox query를 key dimension으로 사용하면 안 된다.
+- 1차 권장 zoom 범위는 `z=11..16`이다.
+- `z<11`은 unsupported, bounded response, 또는 확대 필요 응답으로 처리할 수 있다.
+
+### 5.4 `shelter:geo:seoul:{disasterType}:{shelterType}`
+
+목적:
+
+- `/shelters/nearby`의 필수 위치 index다.
+
+규칙:
+
+- Redis GEO index는 derived read model이다.
+- RDS 후보 조회를 대체하는 hot path index다.
+- normal operation에서 GEO miss는 없어야 한다.
+- GEO miss는 개별 cache miss가 아니라 read model bootstrap 또는 rebuild 문제로 취급한다.
+- GEO miss 시 RDS fallback을 사용하면 안 된다.
+- GEO miss는 degraded 또는 503 정책과 `SHELTER_GEO_INDEX` regeneration request로 처리한다.
 
 ## 6. Miss Handling 규칙
 
 - Redis hit -> cached value 반환
 - Redis miss/down/parse error -> 필요 시 consuming service가 정의한 degraded-mode fallback behavior 사용
 - degraded-mode fallback 또는 stale detection 후 suppress window 계약에 따라 `CacheRegenerationRequested` publish
+
+Shelter key miss 규칙:
+
+- `shelter:status:{shelterId}` miss -> `SHELTER_STATUS` regeneration 요청
+- `shelter:map:item:{shelterId}` miss -> `SHELTER_MAP_ITEMS` batch regeneration 요청
+- `shelter:geo:seoul:*` miss 또는 empty -> `SHELTER_GEO_INDEX` regeneration 요청
+- `shelter:map:tile:*` miss -> `SHELTER_MAP_TILES` regeneration 요청
+- parse error는 shelter 개수만큼 개별 이벤트를 fan-out하지 말고 batch collapse한다.
 
 Disaster message miss 규칙:
 
@@ -208,6 +304,8 @@ Example:
 
 | Consumer 또는 page | Redis key |
 | --- | --- |
+| shelter nearby list | `shelter:geo:seoul:{disasterType}:{shelterType}`, `shelter:map:item:{shelterId}`, `shelter:status:{shelterId}` |
+| shelter map tiles | `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`, `shelter:map:item:{shelterId}`, `shelter:status:{shelterId}` |
 | disaster overview recent messages | `disaster:messages:recent:seoul` |
 | global 또는 menu core message | `disaster:message:core:seoul` |
 | disaster message page list | `disaster:messages:list:seoul` |
@@ -215,6 +313,23 @@ Example:
 | shelter status | `shelter:status:{shelterId}` |
 
 ## 9. Worker Regeneration Target
+
+shelter cache에 대한 `async-worker` rebuild target은 다음과 같다.
+
+1. `shelter:status:{shelterId}`
+2. `shelter:map:item:{shelterId}`
+3. `shelter:geo:seoul:{disasterType}:{shelterType}`
+4. `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
+
+규칙:
+
+- status와 map item은 `targetIds` 기반 batch regeneration을 우선한다.
+- GEO index는 서울 전체 또는 필터 조합별 rebuild가 가능해야 한다.
+- map tile index는 관련 tile batch 또는 전체 index rebuild가 가능해야 한다.
+- 1차에서는 Seoul 전체 rebuild를 허용한다.
+- RDS에서만 rebuild한다.
+- worker에서 candidate lookup fallback을 수행하지 않는다.
+- retired `shelter:list:*` key를 rebuild하지 않는다.
 
 disaster message read model에 대한 `async-worker` rebuild target은 다음과 같다.
 

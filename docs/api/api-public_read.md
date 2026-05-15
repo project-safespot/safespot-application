@@ -11,6 +11,7 @@
 - public shelter read
 - public disaster read
 - public weather 및 air-quality read
+- public shelter map tile read
 - Redis-first read
 - cache regeneration request event
 - 현재 구현이 Redis에서 응답할 수 없을 때의 임시 degraded-mode fallback 처리
@@ -34,6 +35,8 @@
 
 - regeneration request는 `EVENT-007`을 통해 흐른다.
 - 일반 public hot path는 RDS에 의존하지 않는다.
+- `/shelters/nearby`와 `/shelters/map/tiles`는 Redis GEO / tile index 기반으로 동작한다.
+- nearby/map hot path에서 RDS 후보 조회는 사용하지 않는다.
 - worker가 요청된 cache entry를 rebuild한다.
 
 ## 3. Seoul MVP 검증
@@ -85,14 +88,20 @@ Miss handling:
 
 ### 4.2 Shelter cache
 
-현재 key:
+Canonical shelter read models:
 
-- `shelter:status:{id}`
+- `shelter:geo:seoul:{disasterType}:{shelterType}`
+- `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
+- `shelter:map:item:{shelterId}`
+- `shelter:status:{shelterId}`
 
-Future list key:
+규칙:
 
-- `shelter:list:seoul:*`
-- `shelter:list:{region}:*`
+- `shelter:geo`는 nearby의 필수 위치 index다.
+- `shelter:map:tile`은 map viewport용 tile index다.
+- `shelter:map:item`은 정적 marker/item payload다.
+- `shelter:status`는 동적 overlay payload다.
+- `shelter:list:*`는 active contract가 아니다.
 
 ### 4.3 Cache regeneration
 
@@ -104,21 +113,36 @@ Future list key:
 목표 아키텍처:
 
 - `EVENT-007`이 worker rebuild를 구동한다.
+- `api-public-read`는 Redis SET으로 rebuild하지 않는다.
+- `api-public-read`는 `CacheRegenerationRequested`만 publish한다.
 
 ## 5. Endpoints
 
 ### 5.1 GET /shelters/nearby
 
-목적: 서울 coordinates 기준 인근 shelter를 반환한다.
+목적: 현재 위치 기준 가까운 shelter 목록을 반환한다.
 
 Query parameter:
 
 | Parameter | Type | Required | Rule |
 | --- | --- | --- | --- |
-| `lat` | number | Y | Seoul scope 안의 valid coordinate |
-| `lng` | number | Y | Seoul scope 안의 valid coordinate |
+| `lat` | number | Y | valid latitude |
+| `lng` | number | Y | valid longitude |
 | `radius` | number | Y | `100` to `5000` |
 | `disasterType` | string | N | `EARTHQUAKE` / `FLOOD` / `LANDSLIDE` |
+| `shelterType` | string | N | `DESIGNATED` / `TEMPORARY` / `WIDE` |
+| `limit` | number | N | default `50`, max `50` |
+
+동작:
+
+- list 전용 API다.
+- `disasterType` 또는 `shelterType` 필터를 적용한 뒤 가까운 순으로 최대 `50`개를 반환한다.
+- Redis GEO index에서 후보 shelterId를 얻는다.
+- `shelter:map:item:{shelterId}`로 정적 marker/item 정보를 읽는다.
+- 필요하면 `shelter:status:{shelterId}`로 동적 상태를 overlay한다.
+- hot path에서 RDS 후보 조회를 수행하면 안 된다.
+- 통합 nearby 결과를 받은 뒤 프론트에서 `disasterType` 또는 `shelterType`를 다시 필터링하는 구조가 아니다.
+- `disasterType` 또는 `shelterType` 변경 시 프론트는 API를 다시 호출해야 한다.
 
 `200` 응답:
 
@@ -130,12 +154,12 @@ Query parameter:
       {
         "shelterId": 101,
         "shelterName": "Mapo Gymnasium Shelter",
+        "shelterType": "DESIGNATED",
         "disasterType": "EARTHQUAKE",
         "address": "Seoul Mapo-gu ...",
         "latitude": 37.5687,
         "longitude": 126.9081,
         "distanceM": 420,
-        "capacityTotal": 120,
         "currentOccupancy": 128,
         "availableCapacity": 0,
         "congestionLevel": "FULL",
@@ -151,6 +175,9 @@ Query parameter:
 
 - `congestionLevel`은 informational only다.
 - `FULL`은 admission을 막지 않는다.
+- `limit`은 결과 상한이며 50을 초과하면 validation error로 처리한다.
+- `radius`는 검색 반경 상한일 뿐이며, nearby 결과는 `limit` 기준으로 잘린다.
+- `shelterType` 또는 `disasterType`을 바꾸면 재조회가 필요하다.
 
 실패:
 
@@ -160,7 +187,80 @@ Query parameter:
 | 유효하지 않은 형식/범위 | 400 | `VALIDATION_ERROR` |
 | 서울 밖 | 400 | `UNSUPPORTED_REGION` |
 
-### 5.2 GET /shelters/{shelterId}
+### 5.2 GET /shelters/map/tiles
+
+목적: 지도 viewport에 필요한 tile별 shelter marker를 반환한다.
+
+Query parameter:
+
+| Parameter | Type | Required | Rule |
+| --- | --- | --- | --- |
+| `z` | number | Y | `11` to `16` 우선 권장 |
+| `tiles` | string | Y | `x:y` 목록, 예: `7285:3172,7285:3173` |
+| `disasterType` | string | N | `EARTHQUAKE` / `FLOOD` / `LANDSLIDE` |
+| `shelterType` | string | N | `DESIGNATED` / `TEMPORARY` / `WIDE` |
+
+동작:
+
+- map 전용 API다.
+- nearby `50`개 제한과 독립적으로 동작한다.
+- bbox query가 아니라 tile/grid index를 사용한다.
+- 프론트는 지도 idle/moveend 시 필요한 tile 목록을 재계산해 호출한다.
+- `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`를 읽고, 필요하면 `shelter:map:item:{shelterId}`와 `shelter:status:{shelterId}`를 overlay한다.
+- 응답은 static marker 중심이어야 한다.
+- `50`개 제한은 적용하지 않는다.
+- 서버 구현에서는 안전 cap, zoom policy, unsupported zoom 응답을 둘 수 있다.
+
+`200` 응답:
+
+```json
+{
+  "success": true,
+  "data": {
+    "z": 13,
+    "tiles": [
+      {
+        "x": 7285,
+        "y": 3172,
+        "items": [
+          {
+            "shelterId": 101,
+            "shelterName": "Mapo Gymnasium Shelter",
+            "shelterType": "DESIGNATED",
+            "disasterType": "FLOOD",
+            "address": "Seoul Mapo-gu ...",
+            "latitude": 37.5687,
+            "longitude": 126.9081,
+            "currentOccupancy": 128,
+            "availableCapacity": 0,
+            "congestionLevel": "FULL",
+            "shelterStatus": "OPERATING",
+            "updatedAt": "2026-04-14T09:10:00+09:00"
+          }
+        ]
+      }
+    ],
+    "degraded": false,
+    "truncated": false
+  }
+}
+```
+
+참고:
+
+- `z < 11`은 unsupported, bounded response, 또는 확대 필요 응답으로 처리할 수 있다.
+- CDN/API cache 재사용성을 위해 같은 `z/x/y/disasterType/shelterType` 조합은 안정적인 query key를 유지해야 한다.
+- `disasterType` 또는 `shelterType` 변경 시 프론트는 API를 다시 호출해야 한다.
+
+실패:
+
+| Case | HTTP | Code |
+| --- | --- | --- |
+| 필수 필드 누락 | 400 | `MISSING_REQUIRED_FIELD` |
+| 유효하지 않은 형식/범위 | 400 | `VALIDATION_ERROR` |
+| unsupported zoom | 400 또는 422 | `UNSUPPORTED_ZOOM` |
+
+### 5.3 GET /shelters/{shelterId}
 
 `200` 응답:
 
@@ -187,7 +287,7 @@ Query parameter:
 }
 ```
 
-### 5.3 GET /disaster-alerts
+### 5.4 GET /disaster-alerts
 
 Query parameter:
 
@@ -232,7 +332,7 @@ Redis read model 참조:
 - 이 key는 Top N read model이며 default는 `50`이고 full history가 아니다.
 - RDS는 full disaster message history를 저장한다.
 
-### 5.4 GET /disasters/{disasterType}/latest
+### 5.5 GET /disasters/{disasterType}/latest
 
 Query parameter:
 
@@ -278,7 +378,7 @@ Query parameter:
 | 서울 밖 | 400 | `UNSUPPORTED_REGION` |
 | 찾을 수 없음 | 404 | `NOT_FOUND` |
 
-### 5.5 GET /weather-alerts
+### 5.6 GET /weather-alerts
 
 지원 input:
 
@@ -335,7 +435,7 @@ Redis read model 참조:
 - weather context key: `environment:weather:seoul`
 - environment key는 `env:*`가 아니라 `environment:*`를 사용한다.
 
-### 5.6 GET /air-quality
+### 5.7 GET /air-quality
 
 Query parameter:
 
@@ -382,8 +482,10 @@ Redis read model 참조:
 
 - Redis hit -> cached value 반환
 - Redis miss/stale/parse failure -> suppress window에 따라 regeneration request publish
-- 현재 구현이 Redis에서 응답할 수 없으면 RDS degraded-mode fallback을 임시로 사용할 수 있다.
-- degraded-mode fallback은 목표 hot-path behavior가 아니다.
+- `/shelters/nearby`와 `/shelters/map/tiles`의 target hot path는 RDS 후보 조회를 사용하지 않는다.
+- `shelter:geo:seoul:*` miss 또는 empty는 degraded 또는 `503` 정책과 regeneration request로 처리한다.
+- 현재 구현이 Redis에서 응답할 수 없으면 일부 비주요 path에서만 임시 degraded-mode fallback을 사용할 수 있다.
+- degraded-mode fallback은 target hot-path behavior가 아니다.
 
 `EVENT-007` status:
 
@@ -396,6 +498,13 @@ Disaster cache regeneration 규칙:
 - `api-public-read`는 read model을 직접 rebuild하기 위해 Redis `SET`을 호출하면 안 된다.
 - `disaster:messages:recent:seoul`, `disaster:message:core:seoul`, `disaster:messages:list:seoul`, `disaster:detail:{alertId}`의 rebuild는 `async-worker`가 소유한다.
 - RDS가 원천 데이터로 남더라도 일반 hot-path read는 RDS에 의존하면 안 된다.
+
+Shelter cache regeneration 규칙:
+
+- `api-public-read`는 shelter cache target에 대해 `CacheRegenerationRequested`만 publish한다.
+- `api-public-read`는 shelter cache를 직접 rebuild하기 위해 Redis `SET` 또는 GEO write를 호출하면 안 된다.
+- `shelter:status:{shelterId}`, `shelter:map:item:{shelterId}`, `shelter:geo:seoul:{disasterType}:{shelterType}`, `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`의 rebuild는 `async-worker`가 소유한다.
+- `nearby`와 `map` hot path는 RDS candidate lookup으로 복구하지 않는다.
 
 ## 7. 관련 문서
 

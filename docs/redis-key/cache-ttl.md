@@ -9,8 +9,9 @@ RDS는 원천 데이터로 남는다. TTL은 fallback freshness protection이며
 | Key pattern | TTL | 이유 |
 | --- | --- | --- |
 | `shelter:status:{shelterId}` | 3600초 + 0~120초 jitter (실제 범위: 3600~3720초) | TTL은 freshness 보장 수단이 아니라 safety cap이다. 최신성은 ingestion/update event 기반 regeneration이 담당한다. 다수 key 동시 만료 분산 목적으로 additive jitter를 적용한다. |
-| `shelter:list:seoul:{shelterType}:{disasterType}` | 600 seconds | shelter list membership은 shelter status보다 덜 자주 바뀐다. |
-| `shelter:list:{region}:{shelterType}:{disasterType}` | 600 seconds | Seoul namespace와 같은 future list-model policy. |
+| `shelter:geo:seoul:{disasterType}:{shelterType}` | TTL 없음 권장 | GEO index는 nearby read path의 필수 위치 index다. 짧은 TTL은 금지한다. miss는 bootstrap/rebuild 문제다. |
+| `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}` | 600 seconds 또는 event-driven rebuild + safety cap | tile index는 CDN/API cache reuse 대상이다. bounded freshness를 위해 짧은 safety cap를 둘 수 있다. |
+| `shelter:map:item:{shelterId}` | 3600초 + 0~120초 jitter (실제 범위: 3600~3720초) | 정적 marker/item payload는 event-driven rebuild와 safety cap을 함께 사용한다. |
 | `disaster:messages:recent:seoul` | 3600초 + 0~120초 jitter (실제 범위: 3600~3720초) | TTL은 safety cap이다. rebuild 시 동시 만료 분산 목적으로 additive jitter를 적용한다. |
 | `disaster:message:core:seoul` | 3600초 + 0~120초 jitter (실제 범위: 3600~3720초) | TTL은 safety cap이다. rebuild 시 동시 만료 분산 목적으로 additive jitter를 적용한다. |
 | `disaster:messages:list:seoul` | 3600초 + 0~120초 jitter (실제 범위: 3600~3720초) | TTL은 safety cap이다. rebuild 시 동시 만료 분산 목적으로 additive jitter를 적용한다. |
@@ -39,6 +40,13 @@ Disaster message target mapping:
 - `disaster:messages:list:seoul`
 - `disaster:detail:{alertId}`
 
+Shelter target mapping:
+
+- `shelter:status:{shelterId}`
+- `shelter:map:item:{shelterId}`
+- `shelter:geo:seoul:{disasterType}:{shelterType}`
+- `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
+
 ## Suppress Window 참고
 
 suppress key는 실제 regeneration target key를 hash input으로 사용해야 한다.
@@ -54,6 +62,7 @@ suppress key는 실제 regeneration target key를 hash input으로 사용해야 
 
 - `api-core`는 즉시 제거가 필요한 stale shelter key를 `DEL`로만 invalidate한다.
 - `api-public-read`는 miss, stale detection, degraded-mode fallback 후 regeneration을 요청한다.
+- `api-public-read`의 nearby/map hot path는 RDS 후보 조회를 target behavior로 삼지 않는다.
 - `async-worker`는 cache data를 rebuild한다.
 - `external-ingestion`은 normalized DB data를 write하고 post-commit event 또는 trigger를 publish하지만, public Redis read model을 rebuild하지 않는다.
 
@@ -66,3 +75,4 @@ suppress key는 실제 regeneration target key를 hash input으로 사용해야 
 | 2026-05-14 | v1.2 | `disaster:messages:*` TTL 300s → 600s로 상향. rebuild 시 동시 만료 thundering herd 방지 목적으로 ±10% jitter 추가. |
 | 2026-05-14 | v1.3 | 코드 기준 TTL 10분과 문서 불일치 수정 (30초 → 10분). 동시 만료 완화를 위해 `shelter:status:{shelterId}` ±10% jitter 추가. |
 | 2026-05-15 | v1.4 | shelter/disaster cache TTL 1시간(3600초)으로 확대. jitter를 ±10%에서 0~120초 단방향 additive 방식으로 변경. TTL은 safety cap이며 최신성은 event-driven regeneration이 담당함을 명시. |
+| 2026-05-15 | v1.5 | shelter GEO index, map tile, map item 계약을 추가하고 legacy shelter list TTL을 제거. nearby/map hot path의 Redis-first / regeneration-only 계약을 정리함. |

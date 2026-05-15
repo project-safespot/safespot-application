@@ -164,18 +164,25 @@ Current implementation and target architecture must be documented separately whe
 
 ### 7.1 Shelter cache
 
-Current model:
+Current shelter read models:
 
+- `shelter:geo:seoul:{disasterType}:{shelterType}`
+- `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
+- `shelter:map:item:{shelterId}`
 - `shelter:status:{shelterId}`
 
-Target list model:
+Rules:
 
-- `shelter:list:seoul:*`
-- `shelter:list:{region}:*`
+- `shelter:geo` is the 필수 nearby location index다.
+- `shelter:map:tile` is the map viewport tile index다.
+- `shelter:map:item` is the static marker/item payload다.
+- `shelter:status` is the dynamic overlay payload다.
+- retired `shelter:list:*` keys are not active contracts.
 
 Responsibility split:
 
 - `api-core` invalidates by `DEL` only
+- `api-public-read` publishes `CacheRegenerationRequested` only
 - `async-worker` rebuilds cache contents
 
 ### 7.2 Disaster cache
@@ -193,6 +200,7 @@ Rules:
 - filtering is payload-based in `api-public-read`.
 - RDS stores full history and remains the source of truth.
 - `api-public-read` requests regeneration on miss, stale, or degraded-mode fallback.
+- `api-public-read` hot path does not depend on RDS candidate lookup for nearby or map.
 - `async-worker` rebuilds Redis read models from normalized DB data.
 
 ## 8. Documentation Source Of Truth

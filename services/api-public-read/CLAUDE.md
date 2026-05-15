@@ -13,13 +13,16 @@ It does not own admin writes, auth issuance, external ingestion, or cache rebuil
 - valid coordinates outside Seoul still return `UNSUPPORTED_REGION`
 - capacity is not a rejection condition
 - `congestionLevel` is informational only
+- nearby/map hot path는 RDS candidate lookup을 target behavior로 삼지 않는다
 
 ## 3. Cache Model
 
 Shelter:
 
-- current key: `shelter:status:{shelterId}`
-- future key families: `shelter:list:seoul:*`, `shelter:list:{region}:*`
+- `shelter:geo:seoul:{disasterType}:{shelterType}`
+- `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
+- `shelter:map:item:{shelterId}`
+- `shelter:status:{shelterId}`
 
 Disaster:
 
@@ -39,15 +42,19 @@ Read rules:
 
 - disaster message filtering is payload-based, not Redis-key-based
 - do not add `{disasterType}`, `{category}`, or `{district}` key dimensions in MVP disaster message caches
+- nearby는 list 전용이다
+- map은 tile/grid 기반이다
 - normal public read path must not depend on RDS
 - direct RDS fallback is degraded-mode only
+- nearby/map hot path는 RDS candidate lookup을 사용하지 않는다
 
 ## 4. Cache Responsibility Split
 
 - `api-public-read` requests regeneration after miss, stale detection, or degraded-mode fallback
+- `api-public-read` publishes `CacheRegenerationRequested`만 수행한다
 - `async-worker` rebuilds cache data
 - do not rebuild Redis directly in this service
-- do not call Redis `SET` to rebuild public read models
+- do not call Redis `SET` or GEO write to rebuild public read models
 
 ## 5. Current vs Target Awareness
 

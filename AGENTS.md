@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Project
-SafeSpot monorepo (api-core / api-public-read / external-ingestion).
+SafeSpot monorepo (api-core / api-public-read / external-ingestion / async-worker).
 
 ## Primary Goal
 Maintain strict contract consistency across:
@@ -49,6 +49,17 @@ Maintain strict contract consistency across:
 - `disasterType`, `messageCategory`, and district are payload or future-scope concepts, not MVP Redis key dimensions.
 - Retired disaster keys such as `disaster:latest:{disasterType}:{region}` are allowed only in deprecated, historical, or do-not-use warnings.
 
+### Cache (Shelter Nearby / Map)
+- Current shelter Redis read models are:
+  - `shelter:geo:seoul:{disasterType}:{shelterType}`
+  - `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
+  - `shelter:map:item:{shelterId}`
+  - `shelter:status:{shelterId}`
+- `shelter:list:*` is not an active contract.
+- `/shelters/nearby`는 list 전용이며, Redis GEO index 기반 후보 조회 후 map item/status overlay로 응답한다.
+- `/shelters/map/tiles`는 tile/grid 기반이며, nearby 50개 제한과 독립적이다.
+- nearby/map hot path에서 RDS 후보 조회를 사용하면 안 된다.
+
 ---
 
 ## Documentation Consistency Targets
@@ -61,6 +72,10 @@ When editing any of these, check related documents:
 - docs/ingestion/external-ingestion.md
 - docs/event/event-envelope.md
 - docs/redis-key/redis-key.md
+- docs/event/async-worker.md
+- docs/redis-key/cache-ttl.md
+- docs/monitoring/monitoring.md
+- service-level CLAUDE.md files
 - docs/README.md
 
 ---

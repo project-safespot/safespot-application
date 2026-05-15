@@ -11,7 +11,7 @@
 - 공통 Envelope 기반 event parsing
 - eventType별 handler dispatch
 - idempotency 검증 및 중복 처리
-- Redis SET/DEL 기반 cache refresh 및 read model rebuild
+- Redis 기반 cache refresh 및 read model rebuild
 - changedFields 기반 조건부 Redis 갱신
 - RDS COUNT() 기반 shelter 현재인원 계산
 - retry / DLQ 처리
@@ -73,7 +73,7 @@ SQS
 -> EventDispatcher
 -> Handler
 -> Service
--> Redis SET/DEL
+-> Redis rebuild
 -> ACK or retry/DLQ
 ```
 
@@ -86,7 +86,7 @@ SQS
 5. eventType별 handler로 dispatch한다.
 6. `changedFields` 등 조건부 skip 규칙을 적용한다.
 7. 필요한 RDS 조회를 수행한다.
-8. Redis SET/DEL을 수행한다.
+8. Redis rebuild를 수행한다.
 9. metric/log를 남긴다.
 10. 성공 시 ACK, 실패 시 partial batch failure로 재시도/DLQ 흐름을 따른다.
 
@@ -107,7 +107,10 @@ SQS
 
 담당 작업 (Redis 출력):
 
-- `shelter:status:{shelterId}` SET (TTL 30s)
+- `shelter:status:{shelterId}` SET (TTL 3600s + 0~120s jitter)
+- `shelter:map:item:{shelterId}` SET (TTL 3600s + 0~120s jitter)
+- `shelter:geo:seoul:{disasterType}:{shelterType}` GEO rebuild (TTL 없음 권장)
+- `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}` SET (TTL 600s 또는 event-driven rebuild + safety cap)
 - `environment:weather:seoul` SET (TTL 7200s)
 - `environment:air-quality:seoul` SET (TTL 7200s)
 - `environment:weather-alert:seoul` SET (TTL 7200s)
@@ -122,10 +125,10 @@ SQS
 
 담당 작업 (Redis 출력):
 
-- `disaster:detail:{alertId}` SET (TTL 3600s)
-- `disaster:messages:recent:seoul` SET (TTL 300s)
-- `disaster:message:core:seoul` SET (TTL 300s)
-- `disaster:messages:list:seoul` SET (TTL 300s)
+- `disaster:detail:{alertId}` SET (TTL 3600s + 0~120s jitter)
+- `disaster:messages:recent:seoul` SET (TTL 3600s + 0~120s jitter)
+- `disaster:message:core:seoul` SET (TTL 3600s + 0~120s jitter)
+- `disaster:messages:list:seoul` SET (TTL 3600s + 0~120s jitter)
 
 ---
 
@@ -182,11 +185,14 @@ idempotencyKey 기준:
 
 TTL 기준 (cache-ttl.md 기준):
 
-- `shelter:status:{shelterId}`: 30초
-- `disaster:detail:{alertId}`: 3600초 (60분)
-- `disaster:messages:recent:seoul`: 300초 (5분)
-- `disaster:message:core:seoul`: 300초 (5분)
-- `disaster:messages:list:seoul`: 300초 (5분)
+- `shelter:status:{shelterId}`: 3600초 + 0~120초 jitter
+- `shelter:map:item:{shelterId}`: 3600초 + 0~120초 jitter
+- `shelter:geo:seoul:{disasterType}:{shelterType}`: TTL 없음 권장
+- `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`: 600초 또는 event-driven rebuild + safety cap
+- `disaster:detail:{alertId}`: 3600초 + 0~120초 jitter
+- `disaster:messages:recent:seoul`: 3600초 + 0~120초 jitter
+- `disaster:message:core:seoul`: 3600초 + 0~120초 jitter
+- `disaster:messages:list:seoul`: 3600초 + 0~120초 jitter
 - `environment:weather:seoul`: 7200초 (120분)
 - `environment:air-quality:seoul`: 7200초 (120분)
 - `environment:weather-alert:seoul`: 7200초 (120분)
