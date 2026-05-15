@@ -8,6 +8,7 @@ import com.safespot.asyncworker.exception.EventProcessingException;
 import com.safespot.asyncworker.metrics.WorkerMetrics;
 import com.safespot.asyncworker.redis.RedisKeyConstants;
 import com.safespot.asyncworker.service.environment.EnvironmentCacheService;
+import com.safespot.asyncworker.service.shelter.ShelterMapReadModelService;
 import com.safespot.asyncworker.service.shelter.ShelterStatusService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +25,7 @@ import static org.mockito.Mockito.*;
 class CacheRegenerationCacheWorkerHandlerTest {
 
     @Mock private ShelterStatusService shelterStatusService;
+    @Mock private ShelterMapReadModelService shelterMapReadModelService;
     @Mock private EnvironmentCacheService environmentCacheService;
 
     private CacheRegenerationCacheWorkerHandler handler;
@@ -34,7 +36,7 @@ class CacheRegenerationCacheWorkerHandlerTest {
         objectMapper = new ObjectMapper();
         WorkerMetrics workerMetrics = new WorkerMetrics(new SimpleMeterRegistry());
         handler = new CacheRegenerationCacheWorkerHandler(
-            shelterStatusService, environmentCacheService, objectMapper, workerMetrics);
+            shelterStatusService, shelterMapReadModelService, environmentCacheService, objectMapper, workerMetrics);
     }
 
     @Test
@@ -101,9 +103,9 @@ class CacheRegenerationCacheWorkerHandlerTest {
 
     @Test
     void targetIds_unknown_targetType_warn_no_exception() {
-        handler.handle(buildBatchEnvelope("UNKNOWN_TYPE", "unknown_family", List.of(1L)));
-
-        verifyNoInteractions(shelterStatusService, environmentCacheService);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+            handler.handle(buildBatchEnvelope("UNKNOWN_TYPE", "unknown_family", List.of(1L)))
+        ).isInstanceOf(EventProcessingException.class);
     }
 
     @Test
@@ -124,7 +126,7 @@ class CacheRegenerationCacheWorkerHandlerTest {
 
         handler.handle(envelope);
 
-        verifyNoInteractions(shelterStatusService, environmentCacheService);
+        verifyNoInteractions(shelterStatusService, shelterMapReadModelService, environmentCacheService);
     }
 
     @Test
@@ -152,7 +154,38 @@ class CacheRegenerationCacheWorkerHandlerTest {
 
         handler.handle(envelope);
 
+        verifyNoInteractions(shelterStatusService, shelterMapReadModelService, environmentCacheService);
+    }
+
+    @Test
+    void SHELTER_MAP_ITEMS_targetType_dispatch() {
+        handler.handle(buildBatchEnvelope("SHELTER_MAP_ITEMS", "shelter_map_item", List.of(101L, 202L)));
+
+        verify(shelterMapReadModelService).rebuildMapItems(List.of(101L, 202L));
         verifyNoInteractions(shelterStatusService, environmentCacheService);
+    }
+
+    @Test
+    void SHELTER_GEO_INDEX_targetType_dispatch() {
+        handler.handle(buildBatchEnvelopeWithoutIds("SHELTER_GEO_INDEX", "shelter_geo"));
+
+        verify(shelterMapReadModelService).rebuildGeoIndex();
+        verifyNoInteractions(shelterStatusService, environmentCacheService);
+    }
+
+    @Test
+    void SHELTER_MAP_TILES_targetType_dispatch() {
+        handler.handle(buildBatchEnvelopeWithoutIds("SHELTER_MAP_TILES", "shelter_map_tile"));
+
+        verify(shelterMapReadModelService).rebuildMapTiles();
+        verifyNoInteractions(shelterStatusService, environmentCacheService);
+    }
+
+    @Test
+    void SHELTER_MAP_ITEMS_targetIds_empty이면_EventProcessingException() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+            handler.handle(buildBatchEnvelope("SHELTER_MAP_ITEMS", "shelter_map_item", List.of()))
+        ).isInstanceOf(EventProcessingException.class);
     }
 
     private EventEnvelope buildBatchEnvelope(String targetType, String cacheKeyFamily, List<Long> targetIds) {
@@ -171,6 +204,23 @@ class CacheRegenerationCacheWorkerHandlerTest {
         envelope.setEventType(EventType.CacheRegenerationRequested.name());
         envelope.setTraceId("trace-batch-001");
         envelope.setIdempotencyKey("cache-regen:batch:" + targetType.toLowerCase() + ":1744980300");
+        envelope.setPayload(payloadNode);
+        return envelope;
+    }
+
+    private EventEnvelope buildBatchEnvelopeWithoutIds(String targetType, String cacheKeyFamily) {
+        ObjectNode payloadNode = objectMapper.createObjectNode();
+        payloadNode.put("cacheKeyFamily", cacheKeyFamily);
+        payloadNode.put("requestedAt", "2026-05-14T10:00:00Z");
+        payloadNode.put("reason", "cache_miss");
+        payloadNode.put("schemaVersion", 1);
+        payloadNode.put("targetType", targetType);
+
+        EventEnvelope envelope = new EventEnvelope();
+        envelope.setEventId("evt-batch-002");
+        envelope.setEventType(EventType.CacheRegenerationRequested.name());
+        envelope.setTraceId("trace-batch-002");
+        envelope.setIdempotencyKey("cache-regen:batch:" + targetType.toLowerCase() + ":1744980301");
         envelope.setPayload(payloadNode);
         return envelope;
     }

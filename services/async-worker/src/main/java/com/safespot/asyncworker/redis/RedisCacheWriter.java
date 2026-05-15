@@ -9,11 +9,14 @@ import com.safespot.asyncworker.service.shelter.ShelterStatusValue;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
+import org.springframework.data.geo.Point;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.List;
+import java.util.Set;
 
 @Slf4j
 @Component
@@ -29,6 +32,38 @@ public class RedisCacheWriter {
     public void setShelterStatus(Long shelterId, ShelterStatusValue value) {
         set(RedisKeyConstants.shelterStatus(shelterId), value,
                 RedisTtlConstants.withAddedJitter(RedisTtlConstants.SHELTER_STATUS, RedisTtlConstants.SHELTER_DISASTER_JITTER));
+    }
+
+    public void setShelterMapItem(Long shelterId, ShelterMapItemValue value) {
+        Duration ttl = RedisTtlConstants.withAddedJitter(
+            RedisTtlConstants.SHELTER_MAP_ITEM,
+            RedisTtlConstants.SHELTER_DISASTER_JITTER
+        );
+        setWithSizeMetric(RedisKeyConstants.shelterMapItem(shelterId), value, ttl, "shelter_map_item");
+    }
+
+    public void geoAddShelter(String disasterType, String shelterType, double longitude, double latitude, Long shelterId) {
+        String key = RedisKeyConstants.shelterGeo(disasterType, shelterType);
+        String eventType = currentEventType();
+        try {
+            redisTemplate.opsForGeo().add(key, new Point(longitude, latitude), String.valueOf(shelterId));
+            workerMetrics.incrementRedisWrite(eventType, "GEOADD", "success");
+        } catch (Exception e) {
+            workerMetrics.incrementRedisWrite(eventType, "GEOADD", "failure");
+            log.error("Redis GEOADD failed: key={}, shelterId={}", key, shelterId, e);
+            throw new RedisCacheException("Redis GEOADD failed: key=" + key, e);
+        }
+    }
+
+    public void setShelterMapTile(int z, int x, int y, String disasterType, String shelterType, List<Long> shelterIds) {
+        Duration ttl = RedisTtlConstants.SHELTER_MAP_TILE;
+        List<Long> sortedShelterIds = shelterIds.stream().sorted().toList();
+        setWithSizeMetric(
+            RedisKeyConstants.shelterMapTile(z, x, y, disasterType, shelterType),
+            sortedShelterIds,
+            ttl,
+            "shelter_map_tile"
+        );
     }
 
     // Disaster read models
@@ -76,6 +111,37 @@ public class RedisCacheWriter {
 
     public void deleteDisasterDetail(Long alertId) {
         delete(RedisKeyConstants.disasterDetail(alertId));
+    }
+
+    public void deleteKeys(Collection<String> keys) {
+        if (keys == null || keys.isEmpty()) {
+            return;
+        }
+        String eventType = currentEventType();
+        try {
+            redisTemplate.delete(keys);
+            workerMetrics.incrementRedisWrite(eventType, "DEL", "success");
+        } catch (Exception e) {
+            workerMetrics.incrementRedisWrite(eventType, "DEL", "failure");
+            log.error("Redis DEL failed: keyCount={}", keys.size(), e);
+            throw new RedisCacheException("Redis DEL failed: keys=" + keys.size(), e);
+        }
+    }
+
+    public void deleteByPattern(String pattern) {
+        String eventType = currentEventType();
+        try {
+            Set<String> keys = redisTemplate.keys(pattern);
+            if (keys == null || keys.isEmpty()) {
+                return;
+            }
+            redisTemplate.delete(keys);
+            workerMetrics.incrementRedisWrite(eventType, "DEL", "success");
+        } catch (Exception e) {
+            workerMetrics.incrementRedisWrite(eventType, "DEL", "failure");
+            log.error("Redis DEL by pattern failed: pattern={}", pattern, e);
+            throw new RedisCacheException("Redis DEL by pattern failed: pattern=" + pattern, e);
+        }
     }
 
     // private

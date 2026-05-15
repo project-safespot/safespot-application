@@ -24,6 +24,15 @@ public class JdbcShelterRepository implements ShelterRepository {
     private static final String FIND_BY_IDS_SQL =
         "SELECT shelter_id, capacity, shelter_status FROM shelter WHERE shelter_id IN (:shelterIds)";
 
+    private static final String MAP_READ_MODEL_SELECT =
+        "SELECT shelter_id, name, shelter_type, disaster_type, address, latitude, longitude, updated_at FROM shelter";
+
+    private static final String FIND_ALL_FOR_MAP_READ_MODEL_SQL =
+        MAP_READ_MODEL_SELECT;
+
+    private static final String FIND_BY_IDS_FOR_MAP_ITEMS_SQL =
+        MAP_READ_MODEL_SELECT + " WHERE shelter_id IN (:shelterIds)";
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     @Override
@@ -69,6 +78,36 @@ public class JdbcShelterRepository implements ShelterRepository {
                 rs.getObject("capacity", Integer.class),
                 rs.getString("shelter_status")
             )
+        );
+    }
+
+    @Override
+    public List<ShelterMapSource> findAllForMapReadModel() {
+        return jdbcTemplate.query(FIND_ALL_FOR_MAP_READ_MODEL_SQL, (rs, rowNum) -> mapShelterMapSource(rs));
+    }
+
+    @Override
+    public List<ShelterMapSource> findByIdsForMapItems(List<Long> shelterIds) {
+        if (shelterIds == null || shelterIds.isEmpty()) {
+            return List.of();
+        }
+        return jdbcTemplate.query(
+            FIND_BY_IDS_FOR_MAP_ITEMS_SQL,
+            Map.of("shelterIds", shelterIds),
+            (rs, rowNum) -> mapShelterMapSource(rs)
+        );
+    }
+
+    private ShelterMapSource mapShelterMapSource(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new ShelterMapSource(
+            rs.getLong("shelter_id"),
+            rs.getString("name"),
+            rs.getString("shelter_type"),
+            rs.getString("disaster_type"),
+            rs.getString("address"),
+            rs.getBigDecimal("latitude"),
+            rs.getBigDecimal("longitude"),
+            rs.getObject("updated_at", java.time.OffsetDateTime.class)
         );
     }
 }
