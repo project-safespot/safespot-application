@@ -6,9 +6,11 @@ import com.safespot.asyncworker.envelope.EventType;
 import com.safespot.asyncworker.exception.EventProcessingException;
 import com.safespot.asyncworker.handler.EventHandler;
 import com.safespot.asyncworker.metrics.WorkerMetrics;
+import com.safespot.asyncworker.payload.CacheRegenerationTargetType;
 import com.safespot.asyncworker.payload.CacheRegenerationRequestedPayload;
 import com.safespot.asyncworker.redis.RedisKeyConstants;
 import com.safespot.asyncworker.service.environment.EnvironmentCacheService;
+import com.safespot.asyncworker.service.shelter.ShelterMapReadModelService;
 import com.safespot.asyncworker.service.shelter.ShelterStatusService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +28,7 @@ public class CacheRegenerationCacheWorkerHandler implements EventHandler {
     private static final String SHELTER_STATUS_PREFIX = "shelter:status:";
 
     private final ShelterStatusService shelterStatusService;
+    private final ShelterMapReadModelService shelterMapReadModelService;
     private final EnvironmentCacheService environmentCacheService;
     private final ObjectMapper objectMapper;
     private final WorkerMetrics workerMetrics;
@@ -38,9 +41,7 @@ public class CacheRegenerationCacheWorkerHandler implements EventHandler {
     @Override
     public void handle(EventEnvelope envelope) {
         CacheRegenerationRequestedPayload payload = parsePayload(envelope);
-
-        List<Long> targetIds = payload.targetIds();
-        if (targetIds != null && !targetIds.isEmpty()) {
+        if (payload.targetType() != null && !payload.targetType().isBlank()) {
             handleBatch(payload, envelope);
             return;
         }
@@ -50,30 +51,44 @@ public class CacheRegenerationCacheWorkerHandler implements EventHandler {
 
     private void handleBatch(CacheRegenerationRequestedPayload payload, EventEnvelope envelope) {
         String targetType = payload.targetType();
-        List<Long> targetIds = payload.targetIds();
         String cacheKeyFamily = payload.cacheKeyFamily() != null ? payload.cacheKeyFamily() : "unknown";
         String schemaVersion = payload.schemaVersion() != null ? String.valueOf(payload.schemaVersion()) : "unknown";
 
-        if (targetType == null) {
-            log.warn("CacheRegenerationRequested batch: targetType is null, skipping: traceId={}", envelope.getTraceId());
-            return;
-        }
-
         log.info("Handling CacheRegenerationRequested batch (cache-worker): targetType={}, count={}, traceId={}",
-            targetType, targetIds.size(), envelope.getTraceId());
+            targetType, payload.targetIds() != null ? payload.targetIds().size() : 0, envelope.getTraceId());
 
         workerMetrics.incrementCacheRegenerationRequested(
             cacheKeyFamily, EventType.CacheRegenerationRequested.name(),
             payload.reason(), schemaVersion);
 
         try {
-            if ("SHELTER_STATUS".equals(targetType)) {
-                shelterStatusService.recalculateBatch(targetIds);
-                workerMetrics.incrementCacheRegenerationCompleted(cacheKeyFamily);
-                return;
+            CacheRegenerationTargetType normalizedType = CacheRegenerationTargetType.from(targetType);
+            switch (normalizedType) {
+                case SHELTER_STATUS -> {
+                    if (payload.targetIds() != null && !payload.targetIds().isEmpty()) {
+                        shelterStatusService.recalculateBatch(payload.targetIds());
+                    } else if (payload.cacheKey() != null) {
+                        String cacheKey = payload.cacheKey();
+                        if (!cacheKey.startsWith(SHELTER_STATUS_PREFIX)) {
+                            throw new EventProcessingException("SHELTER_STATUS targetType requires shelter status cacheKey");
+                        }
+                        String idStr = cacheKey.substring(SHELTER_STATUS_PREFIX.length());
+                        Long shelterId = parseId(idStr, cacheKey);
+                        shelterStatusService.recalculate(shelterId);
+                    } else {
+                        throw new EventProcessingException("SHELTER_STATUS requires targetIds or cacheKey");
+                    }
+                }
+                case SHELTER_MAP_ITEMS -> {
+                    if (payload.targetIds() == null || payload.targetIds().isEmpty()) {
+                        throw new EventProcessingException("SHELTER_MAP_ITEMS requires non-empty targetIds");
+                    }
+                    shelterMapReadModelService.rebuildMapItems(payload.targetIds());
+                }
+                case SHELTER_GEO_INDEX -> shelterMapReadModelService.rebuildGeoIndex();
+                case SHELTER_MAP_TILES -> shelterMapReadModelService.rebuildMapTiles();
             }
-            log.warn("CacheRegenerationRequested batch: unsupported targetType={}, traceId={}",
-                targetType, envelope.getTraceId());
+            workerMetrics.incrementCacheRegenerationCompleted(cacheKeyFamily);
         } catch (Exception e) {
             workerMetrics.incrementCacheRegenerationFailed(cacheKeyFamily, e.getClass().getSimpleName());
             throw e;

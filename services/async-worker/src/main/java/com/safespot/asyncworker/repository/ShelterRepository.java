@@ -10,4 +10,8 @@ public interface ShelterRepository {
     List<ShelterInfo> findAllForStatusWarmup();
 
     List<ShelterInfo> findByIds(List<Long> shelterIds);
+
+    List<ShelterMapSource> findAllForMapReadModel();
+
+    List<ShelterMapSource> findByIdsForMapItems(List<Long> shelterIds);
 }
