@@ -128,7 +128,7 @@ class ShelterControllerTest {
                         13,
                         7285,
                         3172,
-                        List.of(new ShelterMapItemCacheDto(1, 101L, "서울시민체육관", "DESIGNATED", "FLOOD", "서울", 120, 37.56, 126.97, "2026-05-15T10:00:00Z")),
+                        List.of(new ShelterMapItemCacheDto(1, 101L, "서울시민체육관", "DESIGNATED", "FLOOD", "서울", 120, 12, 108, "AVAILABLE", "OPERATING", 37.56, 126.97, "2026-05-15T10:00:00Z")),
                         null
                 )),
                 null
@@ -140,7 +140,11 @@ class ShelterControllerTest {
                         .param("tiles", "7285:3172"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.tiles[0].z").value(13))
-                .andExpect(jsonPath("$.data.tiles[0].items[0].shelterId").value(101));
+                .andExpect(jsonPath("$.data.tiles[0].items[0].shelterId").value(101))
+                .andExpect(jsonPath("$.data.tiles[0].items[0].currentOccupancy").value(12))
+                .andExpect(jsonPath("$.data.tiles[0].items[0].availableCapacity").value(108))
+                .andExpect(jsonPath("$.data.tiles[0].items[0].congestionLevel").value("AVAILABLE"))
+                .andExpect(jsonPath("$.data.tiles[0].items[0].shelterStatus").value("OPERATING"));
     }
 
     @Test

@@ -106,7 +106,7 @@ class RedisReadCacheTest {
     void multiGetShelterMapItems_partialMiss() throws Exception {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         String hitJson = new ObjectMapper().writeValueAsString(
-                new ShelterMapItemCacheDto(1, 1L, "대피소-1", "DESIGNATED", "FLOOD", "서울", 120, 37.56, 126.97, "2026-05-15T10:00:00Z"));
+                new ShelterMapItemCacheDto(1, 1L, "대피소-1", "DESIGNATED", "FLOOD", "서울", 120, null, null, null, null, 37.56, 126.97, "2026-05-15T10:00:00Z"));
         when(valueOperations.multiGet(List.of("shelter:map:item:1", "shelter:map:item:2")))
                 .thenReturn(Arrays.asList(hitJson, null));
 

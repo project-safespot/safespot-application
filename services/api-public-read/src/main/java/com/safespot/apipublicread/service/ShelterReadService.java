@@ -187,28 +187,49 @@ public class ShelterReadService {
         List<Long> distinctShelterIds = allShelterIds.stream().distinct().toList();
         Map<Long, RedisReadCache.CacheResult<ShelterMapItemCacheDto>> mapItems =
                 redisReadCache.multiGetShelterMapItems(distinctShelterIds);
+        Map<Long, RedisReadCache.CacheResult<ShelterStatusCacheDto>> statusMap =
+                redisReadCache.multiGetShelterStatus(distinctShelterIds);
 
-        List<Long> missIds = new ArrayList<>();
+        List<Long> mapItemMissIds = new ArrayList<>();
+        List<Long> statusMissIds = new ArrayList<>();
         Map<Long, ShelterMapItemCacheDto> resolvedItems = new LinkedHashMap<>();
         for (Long shelterId : distinctShelterIds) {
-            RedisReadCache.CacheResult<ShelterMapItemCacheDto> result = mapItems.get(shelterId);
-            if (result == null) {
-                result = new RedisReadCache.CacheResult<>(null, FallbackReason.REDIS_MISS, "shelter_map_item");
+            RedisReadCache.CacheResult<ShelterMapItemCacheDto> mapItemResult = mapItems.get(shelterId);
+            if (mapItemResult == null) {
+                mapItemResult = new RedisReadCache.CacheResult<>(null, FallbackReason.REDIS_MISS, "shelter_map_item");
             }
-            redisReadCache.recordCacheRequest(result.cache(), result.resultLabel());
-            if (result.isHit()) {
-                resolvedItems.put(shelterId, result.value());
+            redisReadCache.recordCacheRequest(mapItemResult.cache(), mapItemResult.resultLabel());
+            if (!mapItemResult.isHit()) {
+                redisReadCache.recordFallback(mapItemResult.cache(), mapItemResult.fallbackReason());
+                degraded = true;
+                if (mapItemResult.fallbackReason() == FallbackReason.REDIS_MISS) {
+                    mapItemMissIds.add(shelterId);
+                }
                 continue;
             }
-            redisReadCache.recordFallback(result.cache(), result.fallbackReason());
-            degraded = true;
-            if (result.fallbackReason() == FallbackReason.REDIS_MISS) {
-                missIds.add(shelterId);
+
+            RedisReadCache.CacheResult<ShelterStatusCacheDto> statusResult = statusMap.get(shelterId);
+            if (statusResult == null) {
+                statusResult = new RedisReadCache.CacheResult<>(null, FallbackReason.REDIS_MISS, "shelter_status");
             }
+            redisReadCache.recordCacheRequest(statusResult.cache(), statusResult.resultLabel());
+            ShelterStatusCache status = toNearbyStatus(statusResult);
+            if (!statusResult.isHit()) {
+                redisReadCache.recordFallback(statusResult.cache(), statusResult.fallbackReason());
+                degraded = true;
+                if (statusResult.fallbackReason() == FallbackReason.REDIS_MISS) {
+                    statusMissIds.add(shelterId);
+                }
+            }
+
+            resolvedItems.put(shelterId, mergeMapItemWithStatus(mapItemResult.value(), status));
         }
 
-        if (!missIds.isEmpty()) {
-            publishBatchRegenerationIfAllowed("SHELTER_MAP_ITEMS", "shelter:map:item:batch", missIds, CacheRegenerationReason.CACHE_MISS, ENDPOINT_MAP_TILES);
+        if (!mapItemMissIds.isEmpty()) {
+            publishBatchRegenerationIfAllowed("SHELTER_MAP_ITEMS", "shelter:map:item:batch", mapItemMissIds, CacheRegenerationReason.CACHE_MISS, ENDPOINT_MAP_TILES);
+        }
+        if (!statusMissIds.isEmpty()) {
+            publishBatchRegenerationIfAllowed("SHELTER_STATUS", "shelter:status:batch", statusMissIds, CacheRegenerationReason.CACHE_MISS, ENDPOINT_MAP_TILES);
         }
 
         List<ShelterMapTileDto> responseTiles = new ArrayList<>();
@@ -327,6 +348,25 @@ public class ShelterReadService {
                 status.availableCapacity(),
                 status.congestionLevel(),
                 status.shelterStatus(),
+                item.updatedAt()
+        );
+    }
+
+    private ShelterMapItemCacheDto mergeMapItemWithStatus(ShelterMapItemCacheDto item, ShelterStatusCache status) {
+        return new ShelterMapItemCacheDto(
+                item.schemaVersion(),
+                item.shelterId(),
+                item.shelterName(),
+                item.shelterType(),
+                item.disasterType(),
+                item.address(),
+                item.capacityTotal(),
+                status.currentOccupancy(),
+                status.availableCapacity(),
+                status.congestionLevel(),
+                status.shelterStatus(),
+                item.latitude(),
+                item.longitude(),
                 item.updatedAt()
         );
     }
