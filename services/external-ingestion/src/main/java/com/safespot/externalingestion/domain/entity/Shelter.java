@@ -72,12 +72,12 @@ public class Shelter {
     }
 
     /** 외부 수집이 갱신할 수 있는 컬럼 업데이트 (shelter_status 제외) */
-    public void updateFromExternalSource(String name, String shelterType, String disasterType,
+    public void updateFromExternalSource(String name, String disasterType, String shelterType,
                                          String address, BigDecimal latitude, BigDecimal longitude,
                                          Integer capacity, String manager, String contact, String note) {
+        this.disasterType = disasterType;
         this.name = name;
         this.shelterType = shelterType;
-        this.disasterType = disasterType;
         this.address = address;
         this.latitude = latitude;
         this.longitude = longitude;
