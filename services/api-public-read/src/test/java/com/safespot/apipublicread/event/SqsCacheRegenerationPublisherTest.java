@@ -307,4 +307,20 @@ class SqsCacheRegenerationPublisherTest {
                 "reason", "cache_miss",
                 "result", "failure").count()).isEqualTo(1.0);
     }
+
+    @Test
+    void publishTarget_shelterGeoIndex_sendsToCacheRefreshQueue() {
+        when(routeResolver.resolve("shelter_geo_index")).thenReturn(Optional.of(new CacheRegenerationRoute(QueueType.CACHE_REFRESH)));
+        when(sqsClient.sendMessage(any(SendMessageRequest.class)))
+                .thenReturn(SendMessageResponse.builder().messageId("msg-target").build());
+        when(envelopeFactory.buildTarget(eq("shelter_geo_index"), eq("SHELTER_GEO_INDEX"), any()))
+                .thenReturn(CacheRegenerationEnvelope.buildTarget("shelter_geo_index", "SHELTER_GEO_INDEX", CacheRegenerationReason.CACHE_MISS));
+
+        publisher.publishTarget("SHELTER_GEO_INDEX", CacheRegenerationReason.CACHE_MISS, "/shelters/nearby");
+
+        ArgumentCaptor<SendMessageRequest> captor = ArgumentCaptor.forClass(SendMessageRequest.class);
+        verify(sqsClient).sendMessage(captor.capture());
+        assertThat(captor.getValue().queueUrl()).isEqualTo(CACHE_REFRESH_URL);
+        assertThat(captor.getValue().messageBody()).contains("SHELTER_GEO_INDEX");
+    }
 }

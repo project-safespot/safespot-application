@@ -75,6 +75,33 @@ public record CacheRegenerationEnvelope(
         );
     }
 
+    public static CacheRegenerationEnvelope buildTarget(String cacheKeyFamily, String targetType,
+                                                        CacheRegenerationReason reason) {
+        Instant now = Instant.now();
+        long windowStart = (now.getEpochSecond() / 30) * 30;
+        String idempotencyKey = "cache-regen:target:" + targetType.toLowerCase() + ":" + windowStart;
+
+        CacheRegenerationPayload payload = new CacheRegenerationPayload(
+                null,
+                cacheKeyFamily,
+                now.toString(),
+                reason.value(),
+                SCHEMA_VERSION,
+                targetType,
+                null
+        );
+
+        return new CacheRegenerationEnvelope(
+                EVENT_TYPE,
+                UUID.randomUUID().toString(),
+                now.toString(),
+                PRODUCER,
+                UUID.randomUUID().toString(),
+                idempotencyKey,
+                payload
+        );
+    }
+
     static String sha256(String input) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");

@@ -78,7 +78,10 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
     }
 
     private static final Map<String, String> TARGET_TYPE_TO_FAMILY = Map.of(
-            "SHELTER_STATUS", "shelter_status"
+            "SHELTER_STATUS", "shelter_status",
+            "SHELTER_MAP_ITEMS", "shelter_map_item",
+            "SHELTER_GEO_INDEX", "shelter_geo_index",
+            "SHELTER_MAP_TILES", "shelter_map_tile"
     );
 
     @Override
@@ -124,6 +127,48 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
             log.error("[CacheRegen] batch SQS send failed cacheFamily={} targetType={} count={} endpoint={} traceId={} idempotencyKey={}: {}",
                     cacheFamily, targetType, targetIds.size(), endpoint,
                     envelope.traceId(), envelope.idempotencyKey(), e.getMessage());
+            failureRecorder.record(envelope, body, queueType, "batch");
+            recordBatchMetric(cacheFamily, queueType.label(), reason.value(), endpoint, "failure");
+        }
+    }
+
+    @Override
+    public void publishTarget(String targetType, CacheRegenerationReason reason, String endpoint) {
+        String cacheFamily = TARGET_TYPE_TO_FAMILY.get(targetType);
+        if (cacheFamily == null) {
+            log.warn("[CacheRegen] publishTarget unsupported targetType={} endpoint={}", targetType, endpoint);
+            return;
+        }
+
+        Optional<CacheRegenerationRoute> routeOpt = routeResolver.resolve(cacheFamily);
+        if (routeOpt.isEmpty()) {
+            log.warn("[CacheRegen] publishTarget no queue route for cacheFamily={} targetType={}", cacheFamily, targetType);
+            return;
+        }
+        QueueType queueType = routeOpt.get().queueType();
+        String queueUrl = queueUrlProvider.get(queueType);
+
+        CacheRegenerationEnvelope envelope = envelopeFactory.buildTarget(cacheFamily, targetType, reason);
+        String body;
+        try {
+            body = objectMapper.writeValueAsString(envelope);
+        } catch (Exception e) {
+            log.error("[CacheRegen] target serialization failed targetType={} endpoint={}: {}",
+                    targetType, endpoint, e.getMessage(), e);
+            return;
+        }
+
+        try {
+            sqsClient.sendMessage(SendMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .messageBody(body)
+                    .build());
+            log.info("[CacheRegen] target published cacheFamily={} targetType={} endpoint={} traceId={} idempotencyKey={}",
+                    cacheFamily, targetType, endpoint, envelope.traceId(), envelope.idempotencyKey());
+            recordBatchMetric(cacheFamily, queueType.label(), reason.value(), endpoint, "success");
+        } catch (Exception e) {
+            log.error("[CacheRegen] target SQS send failed cacheFamily={} targetType={} endpoint={} traceId={} idempotencyKey={}: {}",
+                    cacheFamily, targetType, endpoint, envelope.traceId(), envelope.idempotencyKey(), e.getMessage());
             failureRecorder.record(envelope, body, queueType, "batch");
             recordBatchMetric(cacheFamily, queueType.label(), reason.value(), endpoint, "failure");
         }

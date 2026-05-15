@@ -24,7 +24,10 @@ public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPubli
     private final MeterRegistry meterRegistry;
 
     private static final Map<String, String> TARGET_TYPE_TO_FAMILY = Map.of(
-            "SHELTER_STATUS", "shelter_status"
+            "SHELTER_STATUS", "shelter_status",
+            "SHELTER_MAP_ITEMS", "shelter_map_item",
+            "SHELTER_GEO_INDEX", "shelter_geo_index",
+            "SHELTER_MAP_TILES", "shelter_map_tile"
     );
 
     @Override
@@ -61,6 +64,26 @@ public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPubli
         CacheRegenerationEnvelope e = CacheRegenerationEnvelope.buildBatch(cacheFamily, targetType, targetIds, reason);
         log.info("[CacheRegen] batch eventType={} eventId={} targetType={} count={} reason={} endpoint={} traceId={} idempotencyKey={}",
                 e.eventType(), e.eventId(), targetType, targetIds.size(), reason.value(), endpoint,
+                e.traceId(), e.idempotencyKey());
+        meterRegistry.counter("api_read_cache_regen_publish_total",
+                "service", "api-public-read",
+                "endpoint", endpoint,
+                "result", "success"
+        ).increment();
+        meterRegistry.counter("safespot.cache.regeneration.requested",
+                "service", "api-public-read",
+                "cache", cacheFamily,
+                "reason", reason.value(),
+                "result", "success"
+        ).increment();
+    }
+
+    @Override
+    public void publishTarget(String targetType, CacheRegenerationReason reason, String endpoint) {
+        String cacheFamily = TARGET_TYPE_TO_FAMILY.getOrDefault(targetType, targetType.toLowerCase());
+        CacheRegenerationEnvelope e = CacheRegenerationEnvelope.buildTarget(cacheFamily, targetType, reason);
+        log.info("[CacheRegen] target eventType={} eventId={} targetType={} reason={} endpoint={} traceId={} idempotencyKey={}",
+                e.eventType(), e.eventId(), targetType, reason.value(), endpoint,
                 e.traceId(), e.idempotencyKey());
         meterRegistry.counter("api_read_cache_regen_publish_total",
                 "service", "api-public-read",

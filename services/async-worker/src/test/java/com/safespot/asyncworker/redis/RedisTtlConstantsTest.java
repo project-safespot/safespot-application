@@ -54,8 +54,28 @@ class RedisTtlConstantsTest {
     }
 
     @Test
+    void shelterMapItem_baseTtl_is3600s() {
+        assertThat(RedisTtlConstants.SHELTER_MAP_ITEM.getSeconds()).isEqualTo(3600L);
+    }
+
+    @Test
+    void shelterMapTile_baseTtl_is600s() {
+        assertThat(RedisTtlConstants.SHELTER_MAP_TILE.getSeconds()).isEqualTo(600L);
+    }
+
+    @Test
     void shelterDisasterJitter_is120s() {
         assertThat(RedisTtlConstants.SHELTER_DISASTER_JITTER.getSeconds()).isEqualTo(120L);
+    }
+
+    @RepeatedTest(200)
+    void withAddedJitter_shelter_map_item_producesValuesInRange_3600to3720s() {
+        Duration result = RedisTtlConstants.withAddedJitter(
+            RedisTtlConstants.SHELTER_MAP_ITEM, RedisTtlConstants.SHELTER_DISASTER_JITTER);
+
+        assertThat(result.toMillis())
+            .isGreaterThanOrEqualTo(3_600_000L)
+            .isLessThanOrEqualTo(3_720_000L);
     }
 
     @Test

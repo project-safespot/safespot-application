@@ -9,6 +9,7 @@ import com.safespot.asyncworker.handler.readmodel.CacheRegenerationReadModelWork
 import com.safespot.asyncworker.handler.readmodel.DisasterReadModelWarmupRequestedHandler;
 import com.safespot.asyncworker.service.disaster.DisasterReadModelService;
 import com.safespot.asyncworker.service.environment.EnvironmentCacheService;
+import com.safespot.asyncworker.service.shelter.ShelterMapReadModelService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.NoSuchBeanDefinitionException;
@@ -56,6 +57,7 @@ class AsyncWorkerContextTest {
     void cache_worker_서비스_빈_등록됨() {
         // async-worker 프로필은 cache-worker 이벤트를 처리하므로 해당 서비스가 필요
         assertThat(ctx.getBean(EnvironmentCacheService.class)).isNotNull();
+        assertThat(ctx.getBean(ShelterMapReadModelService.class)).isNotNull();
     }
 
     @Test
