@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -46,8 +47,8 @@ public class ShelterController {
         if (radius < 100 || radius > 5000) {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "radius는 100~5000 사이여야 합니다.");
         }
-        if (limit != null && limit > 50) {
-            throw new ApiException(ErrorCode.VALIDATION_ERROR, "limit은 50 이하여야 합니다.");
+        if (limit != null && (limit <= 0 || limit > 50)) {
+            throw new ApiException(ErrorCode.VALIDATION_ERROR, "limit은 1~50 사이여야 합니다.");
         }
         if (disasterType != null && !isValidDisasterType(disasterType)) {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "disasterType 값이 올바르지 않습니다.");
@@ -80,9 +81,14 @@ public class ShelterController {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "shelterType 값이 올바르지 않습니다.");
         }
 
+        List<String> tileTokens = parseAndValidateTileTokens(tiles, z);
+        if (tileTokens.size() > 64) {
+            throw new ApiException(ErrorCode.VALIDATION_ERROR, "tiles는 최대 64개까지 허용됩니다.");
+        }
+
         ShelterMapTilesResponse response = shelterReadService.findMapTiles(
                 z,
-                List.of(tiles.split(",")),
+                tileTokens,
                 disasterType,
                 shelterType
         );
@@ -101,5 +107,39 @@ public class ShelterController {
 
     private boolean isValidShelterType(String value) {
         return "DESIGNATED".equals(value) || "TEMPORARY".equals(value) || "WIDE".equals(value);
+    }
+
+    private List<String> parseAndValidateTileTokens(String tiles, int z) {
+        List<String> tileTokens = new ArrayList<>();
+        int maxCoordinate = 1 << z;
+
+        for (String rawToken : tiles.split(",", -1)) {
+            String token = rawToken.trim();
+            if (token.isBlank()) {
+                throw new ApiException(ErrorCode.VALIDATION_ERROR, "tiles 형식이 올바르지 않습니다.");
+            }
+
+            String[] parts = token.split(":");
+            if (parts.length != 2) {
+                throw new ApiException(ErrorCode.VALIDATION_ERROR, "tiles 형식이 올바르지 않습니다.");
+            }
+
+            final int x;
+            final int y;
+            try {
+                x = Integer.parseInt(parts[0].trim());
+                y = Integer.parseInt(parts[1].trim());
+            } catch (NumberFormatException ex) {
+                throw new ApiException(ErrorCode.VALIDATION_ERROR, "tiles 형식이 올바르지 않습니다.");
+            }
+
+            if (x < 0 || y < 0 || x >= maxCoordinate || y >= maxCoordinate) {
+                throw new ApiException(ErrorCode.VALIDATION_ERROR, "tiles 좌표 범위가 올바르지 않습니다.");
+            }
+
+            tileTokens.add(x + ":" + y);
+        }
+
+        return tileTokens;
     }
 }

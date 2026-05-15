@@ -9,6 +9,7 @@ public record ShelterMapSource(
     String shelterType,
     String disasterType,
     String address,
+    Integer capacityTotal,
     BigDecimal latitude,
     BigDecimal longitude,
     OffsetDateTime updatedAt

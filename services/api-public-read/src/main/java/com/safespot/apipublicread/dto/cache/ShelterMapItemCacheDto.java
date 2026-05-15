@@ -7,6 +7,7 @@ public record ShelterMapItemCacheDto(
     String shelterType,
     String disasterType,
     String address,
+    int capacityTotal,
     double latitude,
     double longitude,
     String updatedAt

@@ -30,20 +30,24 @@ class ShelterMapReadModelServiceTest {
     @Test
     void rebuildMapItems_targetIds를_dedupe하고_mapItem을_쓴다() {
         when(shelterRepository.findByIdsForMapItems(List.of(101L, 202L))).thenReturn(List.of(
-            source(101L, "지정대피소", "FLOOD", 37.55, 126.98),
-            source(202L, "임시대피소", "FLOOD", 37.56, 126.99)
+            source(101L, "지정대피소", "FLOOD", 120, 37.55, 126.98),
+            source(202L, "임시대피소", "FLOOD", 80, 37.56, 126.99)
         ));
 
         service.rebuildMapItems(List.of(101L, 202L, 101L));
 
         verify(shelterRepository).findByIdsForMapItems(List.of(101L, 202L));
-        verify(cacheWriter, times(2)).setShelterMapItem(anyLong(), any(ShelterMapItemValue.class));
+        ArgumentCaptor<ShelterMapItemValue> valueCaptor = ArgumentCaptor.forClass(ShelterMapItemValue.class);
+        verify(cacheWriter, times(2)).setShelterMapItem(anyLong(), valueCaptor.capture());
+        assertThat(valueCaptor.getAllValues())
+            .extracting(ShelterMapItemValue::capacityTotal)
+            .containsExactly(120, 80);
     }
 
     @Test
     void rebuildGeoIndex_all_disaster_shelter_dimension에_GEOADD한다() {
         when(shelterRepository.findAllForMapReadModel()).thenReturn(List.of(
-            source(101L, "지정대피소", "FLOOD", 37.55, 126.98)
+            source(101L, "지정대피소", "FLOOD", 120, 37.55, 126.98)
         ));
 
         service.rebuildGeoIndex();
@@ -60,8 +64,8 @@ class ShelterMapReadModelServiceTest {
     @Test
     void rebuildMapTiles_zoom11부터16까지_tile_key를_쓴다() {
         when(shelterRepository.findAllForMapReadModel()).thenReturn(List.of(
-            source(101L, "지정대피소", "FLOOD", 37.5665, 126.9780),
-            source(202L, "지정대피소", "FLOOD", 37.5665, 126.9780)
+            source(101L, "지정대피소", "FLOOD", 120, 37.5665, 126.9780),
+            source(202L, "지정대피소", "FLOOD", 120, 37.5665, 126.9780)
         ));
 
         service.rebuildMapTiles();
@@ -79,7 +83,7 @@ class ShelterMapReadModelServiceTest {
     @Test
     void unsupported_shelter_type_EARTHQUAKE는_mapItem_write에서_제외된다() {
         when(shelterRepository.findByIdsForMapItems(List.of(101L))).thenReturn(List.of(
-            source(101L, "EARTHQUAKE", "EARTHQUAKE", 37.55, 126.98)
+            source(101L, "EARTHQUAKE", "EARTHQUAKE", 120, 37.55, 126.98)
         ));
 
         service.rebuildMapItems(List.of(101L));
@@ -90,7 +94,7 @@ class ShelterMapReadModelServiceTest {
     @Test
     void unsupported_shelter_type_EARTHQUAKE는_geo_tile_write에서_제외된다() {
         when(shelterRepository.findAllForMapReadModel()).thenReturn(List.of(
-            source(101L, "EARTHQUAKE", "EARTHQUAKE", 37.55, 126.98)
+            source(101L, "EARTHQUAKE", "EARTHQUAKE", 120, 37.55, 126.98)
         ));
 
         service.rebuildGeoIndex();
@@ -100,13 +104,30 @@ class ShelterMapReadModelServiceTest {
         verify(cacheWriter, never()).setShelterMapTileToKey(anyString(), anyList());
     }
 
-    private ShelterMapSource source(Long shelterId, String shelterType, String disasterType, double latitude, double longitude) {
+    @Test
+    void rebuildMapItems_null_or_negative_capacity는_0으로_보정한다() {
+        when(shelterRepository.findByIdsForMapItems(List.of(101L, 202L))).thenReturn(List.of(
+            source(101L, "지정대피소", "FLOOD", null, 37.55, 126.98),
+            source(202L, "임시대피소", "FLOOD", -10, 37.56, 126.99)
+        ));
+
+        service.rebuildMapItems(List.of(101L, 202L));
+
+        ArgumentCaptor<ShelterMapItemValue> valueCaptor = ArgumentCaptor.forClass(ShelterMapItemValue.class);
+        verify(cacheWriter, times(2)).setShelterMapItem(anyLong(), valueCaptor.capture());
+        assertThat(valueCaptor.getAllValues())
+            .extracting(ShelterMapItemValue::capacityTotal)
+            .containsExactly(0, 0);
+    }
+
+    private ShelterMapSource source(Long shelterId, String shelterType, String disasterType, Integer capacityTotal, double latitude, double longitude) {
         return new ShelterMapSource(
             shelterId,
             "대피소-" + shelterId,
             shelterType,
             disasterType,
             "서울시 어딘가",
+            capacityTotal,
             BigDecimal.valueOf(latitude),
             BigDecimal.valueOf(longitude),
             OffsetDateTime.parse("2026-05-15T10:00:00Z")

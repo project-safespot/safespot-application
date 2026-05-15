@@ -140,9 +140,12 @@ public class ShelterReadService {
         if (z < MIN_TILE_ZOOM || z > MAX_TILE_ZOOM) {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "z는 11~16 사이여야 합니다.");
         }
+        if (tiles == null || tiles.isEmpty()) {
+            throw new ApiException(ErrorCode.VALIDATION_ERROR, "tiles 형식이 올바르지 않습니다.");
+        }
 
         List<TileCoordinate> coordinates = tiles.stream()
-                .map(this::parseTileCoordinate)
+                .map(tile -> parseTileCoordinate(tile, z))
                 .distinct()
                 .toList();
 
@@ -310,7 +313,6 @@ public class ShelterReadService {
     }
 
     private ShelterNearbyItem toNearbyItem(ShelterMapItemCacheDto item, int distanceM, ShelterStatusCache status) {
-        int capacityTotal = Math.max(0, status.currentOccupancy() + status.availableCapacity());
         return new ShelterNearbyItem(
                 item.shelterId(),
                 item.shelterName(),
@@ -320,7 +322,7 @@ public class ShelterReadService {
                 item.latitude(),
                 item.longitude(),
                 distanceM,
-                capacityTotal,
+                item.capacityTotal(),
                 status.currentOccupancy(),
                 status.availableCapacity(),
                 status.congestionLevel(),
@@ -425,13 +427,22 @@ public class ShelterReadService {
         };
     }
 
-    private TileCoordinate parseTileCoordinate(String rawTile) {
-        String[] parts = rawTile.split(":");
+    private TileCoordinate parseTileCoordinate(String rawTile, int z) {
+        if (rawTile == null || rawTile.trim().isBlank()) {
+            throw new ApiException(ErrorCode.VALIDATION_ERROR, "tiles 형식이 올바르지 않습니다.");
+        }
+        String[] parts = rawTile.trim().split(":");
         if (parts.length != 2) {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "tiles 형식이 올바르지 않습니다.");
         }
         try {
-            return new TileCoordinate(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
+            int x = Integer.parseInt(parts[0].trim());
+            int y = Integer.parseInt(parts[1].trim());
+            int maxCoordinate = 1 << z;
+            if (x < 0 || y < 0 || x >= maxCoordinate || y >= maxCoordinate) {
+                throw new ApiException(ErrorCode.VALIDATION_ERROR, "tiles 좌표 범위를 초과했습니다.");
+            }
+            return new TileCoordinate(x, y);
         } catch (NumberFormatException e) {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "tiles 형식이 올바르지 않습니다.");
         }

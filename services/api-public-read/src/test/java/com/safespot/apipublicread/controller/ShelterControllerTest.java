@@ -63,6 +63,54 @@ class ShelterControllerTest {
     }
 
     @Test
+    void getNearby_limitZero_returns400() throws Exception {
+        mockMvc.perform(get("/shelters/nearby")
+                        .param("lat", "37.5663")
+                        .param("lng", "126.9779")
+                        .param("radius", "1000")
+                        .param("limit", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void getNearby_limitNegative_returns400() throws Exception {
+        mockMvc.perform(get("/shelters/nearby")
+                        .param("lat", "37.5663")
+                        .param("lng", "126.9779")
+                        .param("radius", "1000")
+                        .param("limit", "-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void getNearby_limitOne_allows() throws Exception {
+        when(shelterReadService.findNearby(anyDouble(), anyDouble(), anyInt(), any(), any(), eq(1)))
+                .thenReturn(List.of());
+
+        mockMvc.perform(get("/shelters/nearby")
+                        .param("lat", "37.5663")
+                        .param("lng", "126.9779")
+                        .param("radius", "1000")
+                        .param("limit", "1"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void getNearby_limit50_allows() throws Exception {
+        when(shelterReadService.findNearby(anyDouble(), anyDouble(), anyInt(), any(), any(), eq(50)))
+                .thenReturn(List.of());
+
+        mockMvc.perform(get("/shelters/nearby")
+                        .param("lat", "37.5663")
+                        .param("lng", "126.9779")
+                        .param("radius", "1000")
+                        .param("limit", "50"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void getNearby_invalidShelterType_returns400() throws Exception {
         mockMvc.perform(get("/shelters/nearby")
                         .param("lat", "37.5663")
@@ -80,7 +128,7 @@ class ShelterControllerTest {
                         13,
                         7285,
                         3172,
-                        List.of(new ShelterMapItemCacheDto(1, 101L, "서울시민체육관", "DESIGNATED", "FLOOD", "서울", 37.56, 126.97, "2026-05-15T10:00:00Z")),
+                        List.of(new ShelterMapItemCacheDto(1, 101L, "서울시민체육관", "DESIGNATED", "FLOOD", "서울", 120, 37.56, 126.97, "2026-05-15T10:00:00Z")),
                         null
                 )),
                 null
@@ -100,6 +148,74 @@ class ShelterControllerTest {
         mockMvc.perform(get("/shelters/map/tiles")
                         .param("z", "10")
                         .param("tiles", "7285:3172"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void getMapTiles_zoom17_returns400() throws Exception {
+        mockMvc.perform(get("/shelters/map/tiles")
+                        .param("z", "17")
+                        .param("tiles", "7285:3172"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void getMapTiles_emptyTiles_returns400() throws Exception {
+        mockMvc.perform(get("/shelters/map/tiles")
+                        .param("z", "13")
+                        .param("tiles", " "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("MISSING_REQUIRED_FIELD"));
+    }
+
+    @Test
+    void getMapTiles_emptyToken_returns400() throws Exception {
+        mockMvc.perform(get("/shelters/map/tiles")
+                        .param("z", "13")
+                        .param("tiles", "7285:3172,,7285:3173"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void getMapTiles_over64Tiles_returns400() throws Exception {
+        String tiles = java.util.stream.IntStream.range(0, 65)
+                .mapToObj(i -> "1:" + i)
+                .reduce((a, b) -> a + "," + b)
+                .orElseThrow();
+
+        mockMvc.perform(get("/shelters/map/tiles")
+                        .param("z", "13")
+                        .param("tiles", tiles))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void getMapTiles_negativeCoordinate_returns400() throws Exception {
+        mockMvc.perform(get("/shelters/map/tiles")
+                        .param("z", "13")
+                        .param("tiles", "-1:3172"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void getMapTiles_rangeOverflow_returns400() throws Exception {
+        mockMvc.perform(get("/shelters/map/tiles")
+                        .param("z", "13")
+                        .param("tiles", "8192:0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    void getMapTiles_nonNumeric_returns400() throws Exception {
+        mockMvc.perform(get("/shelters/map/tiles")
+                        .param("z", "13")
+                        .param("tiles", "abc:0"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
     }

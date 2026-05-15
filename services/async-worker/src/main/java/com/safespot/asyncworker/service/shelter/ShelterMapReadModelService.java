@@ -164,6 +164,7 @@ public class ShelterMapReadModelService {
             shelterType,
             disasterType,
             source.address(),
+            Math.max(0, source.capacityTotal() != null ? source.capacityTotal() : 0),
             source.latitude().doubleValue(),
             source.longitude().doubleValue(),
             source.updatedAt().toString()
@@ -306,6 +307,7 @@ public class ShelterMapReadModelService {
         String shelterType,
         String disasterType,
         String address,
+        int capacityTotal,
         double latitude,
         double longitude,
         String updatedAt
@@ -318,6 +320,7 @@ public class ShelterMapReadModelService {
                 shelterType,
                 disasterType,
                 address,
+                capacityTotal,
                 latitude,
                 longitude,
                 updatedAt

@@ -111,7 +111,7 @@ class ShelterReadServiceTest {
         assertThat(result.get(0).shelterId()).isEqualTo(101L);
         assertThat(result.get(0).currentOccupancy()).isEqualTo(12);
         assertThat(result.get(0).availableCapacity()).isEqualTo(88);
-        assertThat(result.get(0).capacityTotal()).isEqualTo(100);
+        assertThat(result.get(0).capacityTotal()).isEqualTo(120);
         verify(redisReadCache).multiGetShelterMapItems(List.of(101L));
         verify(redisReadCache).multiGetShelterStatus(List.of(101L));
     }
@@ -201,6 +201,7 @@ class ShelterReadServiceTest {
         assertThat(result).hasSize(1);
         assertThat(result.get(0).currentOccupancy()).isZero();
         assertThat(result.get(0).availableCapacity()).isZero();
+        assertThat(result.get(0).capacityTotal()).isEqualTo(120);
         assertThat(result.get(0).congestionLevel()).isNull();
         assertThat(result.get(0).shelterStatus()).isNull();
         verify(cacheRegenerationPublisher).publishBatch(
@@ -268,6 +269,44 @@ class ShelterReadServiceTest {
     }
 
     @Test
+    void map_tiles_빈_token이면_validation_error() {
+        assertThatThrownBy(() -> shelterReadService.findMapTiles(13, List.of("7285:3172", " "), null, null))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void map_tiles_negative_x면_validation_error() {
+        assertThatThrownBy(() -> shelterReadService.findMapTiles(13, List.of("-1:3172"), null, null))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void map_tiles_negative_y면_validation_error() {
+        assertThatThrownBy(() -> shelterReadService.findMapTiles(13, List.of("7285:-1"), null, null))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void map_tiles_x_range초과면_validation_error() {
+        assertThatThrownBy(() -> shelterReadService.findMapTiles(13, List.of("8192:0"), null, null))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void map_tiles_y_range초과면_validation_error() {
+        assertThatThrownBy(() -> shelterReadService.findMapTiles(13, List.of("0:8192"), null, null))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
+    void map_tiles_x_or_y가_숫자가_아니면_validation_error() {
+        assertThatThrownBy(() -> shelterReadService.findMapTiles(13, List.of("abc:1"), null, null))
+                .isInstanceOf(ApiException.class);
+        assertThatThrownBy(() -> shelterReadService.findMapTiles(13, List.of("1:abc"), null, null))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
     void map_tiles_partial_tile_miss면_regeneration을_요청한다() {
         when(redisReadCache.multiGetShelterMapTiles(List.of("shelter:map:tile:13:7285:3172:all:all")))
                 .thenReturn(Map.of(
@@ -294,6 +333,7 @@ class ShelterReadServiceTest {
                 "DESIGNATED",
                 "FLOOD",
                 "서울특별시",
+                120,
                 37.5687,
                 126.9081,
                 "2026-05-15T10:00:00Z"

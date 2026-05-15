@@ -156,7 +156,7 @@ class RedisCacheWriterTest {
     void setShelterMapItem_withAddedJitterTtl_3600to3720s() {
         cacheWriter.setShelterMapItem(
             101L,
-            new ShelterMapItemValue(1, 101L, "테스트 대피소", "DESIGNATED", "FLOOD", "서울", 37.55, 126.98, "2026-05-15T10:00:00Z")
+            new ShelterMapItemValue(1, 101L, "테스트 대피소", "DESIGNATED", "FLOOD", "서울", 120, 37.55, 126.98, "2026-05-15T10:00:00Z")
         );
 
         verify(valueOps).set(

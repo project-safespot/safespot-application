@@ -25,7 +25,7 @@ public class JdbcShelterRepository implements ShelterRepository {
         "SELECT shelter_id, capacity, shelter_status FROM shelter WHERE shelter_id IN (:shelterIds)";
 
     private static final String MAP_READ_MODEL_SELECT =
-        "SELECT shelter_id, name, shelter_type, disaster_type, address, latitude, longitude, updated_at FROM shelter";
+        "SELECT shelter_id, name, shelter_type, disaster_type, address, capacity, latitude, longitude, updated_at FROM shelter";
 
     private static final String FIND_ALL_FOR_MAP_READ_MODEL_SQL =
         MAP_READ_MODEL_SELECT;
@@ -105,6 +105,7 @@ public class JdbcShelterRepository implements ShelterRepository {
             rs.getString("shelter_type"),
             rs.getString("disaster_type"),
             rs.getString("address"),
+            rs.getObject("capacity", Integer.class),
             rs.getBigDecimal("latitude"),
             rs.getBigDecimal("longitude"),
             rs.getObject("updated_at", java.time.OffsetDateTime.class)
