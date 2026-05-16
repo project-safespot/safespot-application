@@ -1,6 +1,7 @@
 package com.safespot.asyncworker.service.disaster;
 
 import com.safespot.asyncworker.exception.EventProcessingException;
+import com.safespot.asyncworker.metrics.WorkerMetrics;
 import com.safespot.asyncworker.payload.DisasterDataCollectedPayload;
 import com.safespot.asyncworker.redis.DisasterDetailCacheValue;
 import com.safespot.asyncworker.redis.DisasterMessageItem;
@@ -25,6 +26,7 @@ public class DisasterReadModelService {
 
     private final DisasterAlertRepository disasterAlertRepository;
     private final RedisCacheWriter cacheWriter;
+    private final WorkerMetrics workerMetrics;
 
     // DisasterDataCollected 처리 진입점
     // async-worker.md §5.2 rebuild 순서: detail → recent → core → list
@@ -42,12 +44,16 @@ public class DisasterReadModelService {
     // TTL은 safety cap(3600s + 0~120s jitter)이며 freshness 보장 수단이 아니다.
     // 최신성은 ingestion/update event 기반 regeneration이 담당한다.
     public void warmupAll(int limit, boolean includeDetails) {
+        List<DisasterAlertRecord> listRecords = disasterAlertRepository.findInScopeOrderByIssuedAtDesc(LIST_LIMIT);
+        cacheWriter.setDisasterMessagesList(listRecords.stream().map(this::toMessageItem).toList());
+        log.info("disaster:messages:list:seoul SET: count={}", listRecords.size());
+
+        rebuildDetailsFromRecords(listRecords, "warmup-list");
         if (includeDetails) {
             rebuildAllDetails(limit);
         }
         rebuildRecent();
         rebuildCore();
-        rebuildList();
         log.info("Disaster read model warmed up: limit={}, includeDetails={}", limit, includeDetails);
     }
 
@@ -85,24 +91,38 @@ public class DisasterReadModelService {
 
     private void rebuildAllDetails(int limit) {
         List<DisasterAlertRecord> records = disasterAlertRepository.findInScopeOrderByIssuedAtDesc(limit);
-        for (DisasterAlertRecord r : records) {
-            cacheWriter.setDisasterDetail(r.alertId(), toDetailValue(r));
-            log.info("disaster:detail:{} SET (warmup)", r.alertId());
-        }
+        rebuildDetailsFromRecords(records, "warmup-all");
     }
 
     private void rebuildDetails(List<Long> alertIds) {
         for (Long alertId : alertIds) {
             disasterAlertRepository.findById(alertId).ifPresentOrElse(
                 r -> {
-                    cacheWriter.setDisasterDetail(alertId, toDetailValue(r));
-                    log.info("disaster:detail:{} SET", alertId);
+                    writeDetail(alertId, r, "regeneration");
                 },
                 () -> {
                     cacheWriter.deleteDisasterDetail(alertId);
                     log.info("disaster:detail:{} DEL: alertId not found in RDS, stale key removed", alertId);
                 }
             );
+        }
+    }
+
+    private void rebuildDetailsFromRecords(List<DisasterAlertRecord> records, String source) {
+        for (DisasterAlertRecord record : records) {
+            writeDetail(record.alertId(), record, source);
+        }
+    }
+
+    private void writeDetail(Long alertId, DisasterAlertRecord record, String source) {
+        try {
+            cacheWriter.setDisasterDetail(alertId, toDetailValue(record));
+            workerMetrics.incrementCacheRegenerationCompleted("disaster_detail");
+            log.info("disaster:detail:{} SET: source={}", alertId, source);
+        } catch (RuntimeException e) {
+            workerMetrics.incrementCacheRegenerationFailed("disaster_detail", "redis_write_failure");
+            log.warn("disaster:detail:{} write failed: source={}", alertId, source, e);
+            throw e;
         }
     }
 
