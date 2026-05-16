@@ -219,6 +219,9 @@ async-worker Terraform이 Lambda를 직접 관리한다. SQS → Lambda event so
 | deployment package | ZIP (`services/async-worker/build/distributions/async-worker-lambda-0.0.1-SNAPSHOT.zip`) |
 | VPC | private_app_subnet, lambda_sg |
 
+GitHub Actions는 이 ZIP을 `aws lambda update-function-code`로 직접 업로드할 수 있다.
+ECR은 container image Lambda로 전환할 때만 필요하다.
+
 ### 9.2 SQS → Lambda Event Source Mapping
 
 3개 queue 각각 전용 event source mapping을 생성한다.

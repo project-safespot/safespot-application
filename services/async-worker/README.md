@@ -83,6 +83,9 @@ Lambda 엔트리포인트는 단일 클래스다.
 
 Lambda ZIP 위치: `services/async-worker/build/distributions/async-worker-lambda-*.zip`
 
+GitHub Actions 배포는 이 ZIP을 AWS Lambda에 직접 업로드하는 방식으로 구성할 수 있다.
+ECR은 container image Lambda로 바꿀 때만 필요하다.
+
 ZIP 구조:
 
 - `lib/async-worker-*.jar`
