@@ -4,6 +4,7 @@ import com.safespot.apipublicread.cache.RedisReadCache;
 
 public enum CacheRegenerationReason {
     CACHE_MISS("cache_miss"),
+    STALE("stale"),
     REDIS_DOWN("redis_down"),
     PARSE_ERROR("parse_error");
 

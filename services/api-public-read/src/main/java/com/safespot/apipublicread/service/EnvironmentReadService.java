@@ -21,6 +21,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeParseException;
 import java.time.format.DateTimeFormatter;
 
 @Service
@@ -32,6 +35,7 @@ public class EnvironmentReadService {
     private static final String ENDPOINT_AIR = "/air-quality";
     private static final String REPOSITORY_WEATHER_LOG = "weather_log_repository";
     private static final String REPOSITORY_AIR_QUALITY_LOG = "air_quality_log_repository";
+    private static final Duration STALE_THRESHOLD = Duration.ofMinutes(90);
 
     static final String WEATHER_KEY = "environment:weather:seoul";
     static final String AIR_KEY = "environment:air-quality:seoul";
@@ -57,7 +61,10 @@ public class EnvironmentReadService {
     private WeatherAlertDto findWeatherByGrid(String region, int nx, int ny) {
         RedisReadCache.CacheResult<WeatherCacheDto> cached = redisReadCache.get(WEATHER_KEY, new TypeReference<>() {});
         redisReadCache.recordCacheRequest(cached.cache(), cached.resultLabel());
-        if (cached.isHit()) return toWeatherDto(region, cached.value());
+        if (cached.isHit()) {
+            maybeRequestStaleRegeneration(WEATHER_KEY, cached.cache(), ENDPOINT_WEATHER, cached.value().forecastedAt());
+            return toWeatherDto(region, cached.value());
+        }
 
         redisReadCache.recordFallback(cached.cache(), cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(REPOSITORY_WEATHER_LOG, cached.fallbackReason());
@@ -77,7 +84,10 @@ public class EnvironmentReadService {
 
         RedisReadCache.CacheResult<WeatherCacheDto> cached = redisReadCache.get(WEATHER_KEY, new TypeReference<>() {});
         redisReadCache.recordCacheRequest(cached.cache(), cached.resultLabel());
-        if (cached.isHit()) return toWeatherDto(region, cached.value());
+        if (cached.isHit()) {
+            maybeRequestStaleRegeneration(WEATHER_KEY, cached.cache(), ENDPOINT_WEATHER, cached.value().forecastedAt());
+            return toWeatherDto(region, cached.value());
+        }
 
         redisReadCache.recordFallback(cached.cache(), cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(REPOSITORY_WEATHER_LOG, cached.fallbackReason());
@@ -97,7 +107,10 @@ public class EnvironmentReadService {
 
         RedisReadCache.CacheResult<AirQualityCacheDto> cached = redisReadCache.get(AIR_KEY, new TypeReference<>() {});
         redisReadCache.recordCacheRequest(cached.cache(), cached.resultLabel());
-        if (cached.isHit()) return toAirQualityDto(cached.value());
+        if (cached.isHit()) {
+            maybeRequestStaleRegeneration(AIR_KEY, cached.cache(), ENDPOINT_AIR, cached.value().measuredAt());
+            return toAirQualityDto(cached.value());
+        }
 
         redisReadCache.recordFallback(cached.cache(), cached.fallbackReason());
         redisReadCache.recordDbFallbackQuery(REPOSITORY_AIR_QUALITY_LOG, cached.fallbackReason());
@@ -144,6 +157,43 @@ public class EnvironmentReadService {
                     "cache", cache,
                     "reason", CacheRegenerationReason.from(fallbackReason).value(),
                     "result", "suppressed").increment();
+        }
+    }
+
+    private void maybeRequestStaleRegeneration(String cacheKey, String cache, String endpoint, String observedAt) {
+        if (!isStale(observedAt)) {
+            return;
+        }
+
+        meterRegistry.counter("api_read_cache_regen_requested_total",
+                "service", "api-public-read", "endpoint", endpoint).increment();
+        meterRegistry.counter("safespot.cache.regeneration.requested",
+                "service", "api-public-read",
+                "cache", cache,
+                "reason", CacheRegenerationReason.STALE.value(),
+                "result", "requested").increment();
+        if (suppressWindowService.tryPublish(cacheKey)) {
+            cacheRegenerationPublisher.publish(cacheKey, CacheRegenerationReason.STALE, endpoint);
+        } else {
+            meterRegistry.counter("api_read_cache_regen_suppressed_total",
+                    "service", "api-public-read", "endpoint", endpoint).increment();
+            meterRegistry.counter("safespot.cache.regeneration.requested",
+                    "service", "api-public-read",
+                    "cache", cache,
+                    "reason", CacheRegenerationReason.STALE.value(),
+                    "result", "suppressed").increment();
+        }
+    }
+
+    private boolean isStale(String observedAt) {
+        if (observedAt == null || observedAt.isBlank()) {
+            return false;
+        }
+        try {
+            OffsetDateTime observed = OffsetDateTime.parse(observedAt, DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+            return observed.isBefore(OffsetDateTime.now().minus(STALE_THRESHOLD));
+        } catch (DateTimeParseException e) {
+            return false;
         }
     }
 
