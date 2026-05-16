@@ -2,6 +2,7 @@ package com.safespot.apipublicread.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.safespot.apipublicread.cache.FallbackSingleFlight;
+import com.safespot.apipublicread.cache.FallbackSingleFlight.JoinTimeoutException;
 import com.safespot.apipublicread.cache.RedisReadCache;
 import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.domain.DisasterAlert;
@@ -35,6 +36,7 @@ public class DisasterAlertReadService {
     private static final String ENDPOINT_LIST = "/disaster-alerts";
     private static final String ENDPOINT_LATEST = "/disasters/{disasterType}/latest";
     private static final String REPOSITORY_DISASTER_ALERT = "disaster_alert_repository";
+    private static final String DB_FALLBACK_SUPPRESS_PREFIX = "db-fallback:disaster:detail:";
 
     static final String LIST_KEY = "disaster:messages:list:seoul";
     static final String DETAIL_KEY_PREFIX = "disaster:detail:";
@@ -111,12 +113,17 @@ public class DisasterAlertReadService {
         redisReadCache.recordFallback(detailResult.cache(), detailResult.fallbackReason());
         requestRegeneration(detailKey, detailResult.cache(), ENDPOINT_LATEST, detailResult.fallbackReason());
 
-        return fallbackSingleFlight.execute(
-                detailKey,
-                detailResult.cache(),
-                REPOSITORY_DISASTER_ALERT,
-                () -> loadDetailFromRds(item.alertId(), detailResult.fallbackReason())
-        );
+        try {
+            return fallbackSingleFlight.execute(
+                    detailKey,
+                    detailResult.cache(),
+                    REPOSITORY_DISASTER_ALERT,
+                    () -> loadDetailFromRdsWithRateLimit(detailKey, item, detailResult.fallbackReason())
+            );
+        } catch (JoinTimeoutException e) {
+            recordDetailFallbackResult("timeout_stale");
+            return toLatestDto(item);
+        }
     }
 
     private List<DisasterAlert> loadAlertsFromRds(RedisReadCache.FallbackReason fallbackReason) {
@@ -144,6 +151,27 @@ public class DisasterAlertReadService {
             redisReadCache.recordDbFallbackLatency(REPOSITORY_DISASTER_ALERT, "failure", System.currentTimeMillis() - start);
             throw e;
         }
+    }
+
+    private DisasterLatestDto loadDetailFromRdsWithRateLimit(
+            String detailKey,
+            DisasterMessageCacheDto item,
+            RedisReadCache.FallbackReason fallbackReason
+    ) {
+        if (!suppressWindowService.tryAllowDbFallback(DB_FALLBACK_SUPPRESS_PREFIX + detailKey)) {
+            recordDetailFallbackResult("suppressed_stale");
+            return toLatestDto(item);
+        }
+        recordDetailFallbackResult("leader");
+        return loadDetailFromRds(item.alertId(), fallbackReason);
+    }
+
+    private void recordDetailFallbackResult(String result) {
+        meterRegistry.counter("safespot.db.fallback.disaster_detail",
+                "service", "api-public-read",
+                "repository", REPOSITORY_DISASTER_ALERT,
+                "result", result
+        ).increment();
     }
 
     private void requestRegeneration(String cacheKey, String cache, String endpoint, RedisReadCache.FallbackReason fallbackReason) {
@@ -249,6 +277,19 @@ public class DisasterAlertReadService {
     }
 
     private DisasterLatestDto toLatestDto(DisasterDetailCacheDto value) {
+        return new DisasterLatestDto(
+                value.alertId(),
+                value.disasterType(),
+                value.region(),
+                value.level(),
+                value.message(),
+                value.issuedAt(),
+                value.expiredAt(),
+                null
+        );
+    }
+
+    private DisasterLatestDto toLatestDto(DisasterMessageCacheDto value) {
         return new DisasterLatestDto(
                 value.alertId(),
                 value.disasterType(),

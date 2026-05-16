@@ -17,13 +17,23 @@ import java.time.Duration;
 public class SuppressWindowService {
 
     private static final Duration SUPPRESS_TTL = Duration.ofSeconds(30);
+    private static final String REGEN_PREFIX = "suppress:cache-regeneration:";
+    private static final String DB_FALLBACK_PREFIX = "suppress:db-fallback:";
 
     private final StringRedisTemplate redisTemplate;
 
     public boolean tryPublish(String cacheKey) {
-        String suppressKey = "suppress:cache-regeneration:" + hash(cacheKey);
+        return tryAcquire(REGEN_PREFIX, cacheKey, SUPPRESS_TTL);
+    }
+
+    public boolean tryAllowDbFallback(String cacheKey) {
+        return tryAcquire(DB_FALLBACK_PREFIX, cacheKey, SUPPRESS_TTL);
+    }
+
+    private boolean tryAcquire(String prefix, String cacheKey, Duration ttl) {
+        String suppressKey = prefix + hash(cacheKey);
         try {
-            Boolean set = redisTemplate.opsForValue().setIfAbsent(suppressKey, "1", SUPPRESS_TTL);
+            Boolean set = redisTemplate.opsForValue().setIfAbsent(suppressKey, "1", ttl);
             return Boolean.TRUE.equals(set);
         } catch (RedisConnectionFailureException e) {
             log.warn("[Suppress] Redis unavailable for key={}: {}", suppressKey, e.getMessage());

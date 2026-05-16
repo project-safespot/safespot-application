@@ -16,6 +16,12 @@ import java.util.function.Supplier;
 @Component
 public class FallbackSingleFlight {
 
+    public static class JoinTimeoutException extends IllegalStateException {
+        public JoinTimeoutException(String cacheKey, Throwable cause) {
+            super("Timed out waiting for fallback single-flight key=" + cacheKey, cause);
+        }
+    }
+
     private final MeterRegistry meterRegistry;
     private final long timeoutMs;
     private final ConcurrentMap<String, CompletableFuture<Object>> inFlight = new ConcurrentHashMap<>();
@@ -55,7 +61,7 @@ public class FallbackSingleFlight {
             return result;
         } catch (TimeoutException e) {
             record("fallback_singleflight_timeout_total", cache, repository, "timeout");
-            throw new IllegalStateException("Timed out waiting for fallback single-flight key=" + cacheKey, e);
+            throw new JoinTimeoutException(cacheKey, e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while waiting for fallback single-flight key=" + cacheKey, e);

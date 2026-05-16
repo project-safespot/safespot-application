@@ -21,6 +21,7 @@ import org.springframework.data.redis.domain.geo.GeoReference;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.ArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -73,6 +74,64 @@ class RedisReadCacheTest {
 
         assertThat(result.get(1L).isHit()).isTrue();
         assertThat(result.get(2L).isMiss()).isTrue();
+    }
+
+    @Test
+    void getMany_allHit_preservesKeyOrder() throws Exception {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        ObjectMapper mapper = new ObjectMapper();
+        when(valueOperations.multiGet(List.of("shelter:status:2", "shelter:status:1")))
+                .thenReturn(List.of(
+                        mapper.writeValueAsString(new ShelterStatusCacheDto(20, 80, "LOW", "OPERATING")),
+                        mapper.writeValueAsString(new ShelterStatusCacheDto(10, 90, "LOW", "OPERATING"))
+                ));
+
+        Map<String, RedisReadCache.CacheResult<ShelterStatusCacheDto>> result = redisReadCache.getMany(
+                List.of("shelter:status:2", "shelter:status:1"),
+                ShelterStatusCacheDto.class,
+                RedisReadCache.CacheMetricLabel.SHELTER_STATUS
+        );
+
+        assertThat(new ArrayList<>(result.keySet())).containsExactly("shelter:status:2", "shelter:status:1");
+        assertThat(result.get("shelter:status:2").value().currentOccupancy()).isEqualTo(20);
+        assertThat(result.get("shelter:status:1").value().currentOccupancy()).isEqualTo(10);
+    }
+
+    @Test
+    void getMany_partialMissAndNullValue_returnsPerKeyResult() throws Exception {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        String hitJson = new ObjectMapper().writeValueAsString(
+                new ShelterStatusCacheDto(30, 70, "LOW", "OPERATING"));
+        when(valueOperations.multiGet(List.of("shelter:status:1", "shelter:status:2", "shelter:status:3")))
+                .thenReturn(Arrays.asList(hitJson, null, null));
+
+        Map<String, RedisReadCache.CacheResult<ShelterStatusCacheDto>> result = redisReadCache.getMany(
+                List.of("shelter:status:1", "shelter:status:2", "shelter:status:3"),
+                ShelterStatusCacheDto.class,
+                RedisReadCache.CacheMetricLabel.SHELTER_STATUS
+        );
+
+        assertThat(result.get("shelter:status:1").isHit()).isTrue();
+        assertThat(result.get("shelter:status:2").isMiss()).isTrue();
+        assertThat(result.get("shelter:status:3").isMiss()).isTrue();
+    }
+
+    @Test
+    void getMany_parseErrorMixed_doesNotFailWholeBatch() throws Exception {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        String hitJson = new ObjectMapper().writeValueAsString(
+                new ShelterMapItemCacheDto(1, 1L, "shelter-1", "DESIGNATED", "FLOOD", "seoul", 120, null, null, null, null, 37.56, 126.97, "2026-05-15T10:00:00Z"));
+        when(valueOperations.multiGet(List.of("shelter:map:item:1", "shelter:map:item:2")))
+                .thenReturn(List.of(hitJson, "{not-json"));
+
+        Map<String, RedisReadCache.CacheResult<ShelterMapItemCacheDto>> result = redisReadCache.getMany(
+                List.of("shelter:map:item:1", "shelter:map:item:2"),
+                ShelterMapItemCacheDto.class,
+                RedisReadCache.CacheMetricLabel.SHELTER_MAP_ITEM
+        );
+
+        assertThat(result.get("shelter:map:item:1").isHit()).isTrue();
+        assertThat(result.get("shelter:map:item:2").isParseError()).isTrue();
     }
 
     @Test
