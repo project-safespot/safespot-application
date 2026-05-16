@@ -1,0 +1,81 @@
+name: Deploy Async Worker Lambda
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/async-worker/**'
+      - 'common/**'
+      - 'build.gradle'
+      - 'settings.gradle'
+      - 'gradle/**'
+      - '.github/workflows/deploy-async-worker.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target deployment environment
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: async-worker-lambda-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+    env:
+      AWS_REGION: ap-northeast-2
+      DEPLOY_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'dev' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: gradle
+
+      - name: Grant execute permission for Gradle
+        run: chmod +x ./gradlew
+
+      - name: Test and package async-worker Lambda
+        run: |
+          ./gradlew \
+            :services:async-worker:test \
+            :services:async-worker:lambdaPackage \
+            --no-daemon
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Lambda code
+        run: |
+          zip_path="$(find services/async-worker/build/distributions -name 'async-worker-lambda-*.zip' | sort | tail -n 1)"
+          if [ -z "$zip_path" ]; then
+            echo "ERROR: async-worker lambda package not found"
+            exit 1
+          fi
+
+          function_name="safespot-${DEPLOY_ENV}-async-worker"
+          echo "Deploying ${function_name} from ${zip_path}"
+
+          aws lambda update-function-code \
+            --function-name "${function_name}" \
+            --zip-file "fileb://${zip_path}"
+
