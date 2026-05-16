@@ -414,3 +414,22 @@ structured log 및 metric label에는 `queue_name`을 포함할 수 있지만:
 - event envelope: `docs/event/event-envelope.md`
 - async worker behavior: `docs/event/async-worker.md`
 - Redis key contract: `docs/redis-key/redis-key.md`
+## 11. Source Classification
+
+- `SAFETY_DATA_ALERT` = `DISASTER_MESSAGE`
+- `KMA_EARTHQUAKE` = `DISASTER_OBSERVATION`
+- `SEOUL_EARTHQUAKE` = `DISASTER_OBSERVATION`
+- `FORESTRY_LANDSLIDE` = `DISASTER_FORECAST`
+- `SEOUL_RIVER_LEVEL` = `FLOOD_RISK_OBSERVATION`
+
+현재 `disaster_alert` write contract는 `SAFETY_DATA_ALERT`에만 적용한다.
+
+- `SAFETY_DATA_ALERT`만 `disaster_alert` row를 생성한다.
+- `KMA_EARTHQUAKE`, `SEOUL_EARTHQUAKE`, `FORESTRY_LANDSLIDE`, `SEOUL_RIVER_LEVEL`는 raw payload와 execution log만 유지한다.
+- 위 4개 source는 현재 `DisasterDataCollectedEvent`를 발행하지 않는다.
+
+향후 설계 메모:
+
+- TODO: `earthquake_event` table 검토
+- TODO: `landslide_forecast` table 검토
+- TODO: `river_level_observation` 또는 `flood_risk_event` table 검토

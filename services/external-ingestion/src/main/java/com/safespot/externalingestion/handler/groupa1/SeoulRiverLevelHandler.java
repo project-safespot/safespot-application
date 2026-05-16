@@ -8,9 +8,8 @@ import org.springframework.stereotype.Component;
 import java.util.Map;
 
 /**
- * 서울시 하천 수위 API (SEOUL_RIVER_LEVEL) — ListRiverStageService
- * 폴링 주기: 30초 | 호출 제한 없음
- * 정규화 대상: disaster_alert (detail_json에 수위 정보 저장)
+ * 서울시 하천 수위 API (SEOUL_RIVER_LEVEL) - ListRiverStageService
+ * 현재 계약: raw payload 수집만 유지하고 disaster_alert에는 적재하지 않는다.
  */
 @Component
 public class SeoulRiverLevelHandler extends AbstractIngestionHandler {

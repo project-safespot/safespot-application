@@ -11,10 +11,10 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 기상청 지진 정보 API (KMA_EARTHQUAKE) — EqkInfoService/getEqkMsg
- * 폴링 주기: 1분 | 일일 한도: 10,000회 (개발)
- * 정규화 대상: disaster_alert + disaster_alert_detail
- * auth: query param ServiceKey (대소문자 공식 계약 기준)
+ * 기상청 지진 정보 API (KMA_EARTHQUAKE) - EqkInfoService/getEqkMsg
+ * 수집 주기: 1분
+ * 현재 계약: raw payload 수집만 유지하고 disaster_alert에는 적재하지 않는다.
+ * auth: query param ServiceKey
  */
 @Component
 public class KmaEarthquakeHandler extends AbstractIngestionHandler {

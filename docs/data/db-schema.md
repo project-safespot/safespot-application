@@ -755,3 +755,21 @@ cache-worker
 | 2026-04-20 | v7.1 | 서현 async+worker 문서 기준 Redis 키 전면 수정. 당시 pointer/detail 모델 반영 이력 |
 | 2026-04-22 | v7.2 | 환경 캐시 TTL 60분 → 120분 정정. TTL 철학 주석 추가 (fallback 안정성 목적, 데이터 신선도 아님) |
 | 2026-04-24 | v7.3 | shelter list 키를 지역 namespace 형식으로 정정(`shelter:list:seoul:{shelterType}:{disasterType}`, `shelter:list:{region}:{shelterType}:{disasterType}`). deprecated `disaster:alert:list` 혼선 제거 |
+## Appendix A. Source Classification
+
+- `SAFETY_DATA_ALERT` = `DISASTER_MESSAGE`
+- `KMA_EARTHQUAKE` = `DISASTER_OBSERVATION`
+- `SEOUL_EARTHQUAKE` = `DISASTER_OBSERVATION`
+- `FORESTRY_LANDSLIDE` = `DISASTER_FORECAST`
+- `SEOUL_RIVER_LEVEL` = `FLOOD_RISK_OBSERVATION`
+
+`disaster_alert`와 `disaster_alert_detail`의 active write contract는 현재 `SAFETY_DATA_ALERT`에만 적용한다.
+
+- `KMA_EARTHQUAKE`, `SEOUL_EARTHQUAKE`, `FORESTRY_LANDSLIDE`, `SEOUL_RIVER_LEVEL`는 현행 스키마에 write하지 않는다.
+- 위 4개 source는 raw payload collection과 execution log만 유지한다.
+
+향후 분리 대상 메모:
+
+- TODO: `earthquake_event`
+- TODO: `landslide_forecast`
+- TODO: `river_level_observation` 또는 `flood_risk_event`

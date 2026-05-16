@@ -4,13 +4,19 @@ import com.safespot.externalingestion.config.DataInitializer;
 import com.safespot.externalingestion.domain.entity.DisasterAlert;
 import com.safespot.externalingestion.domain.entity.ExternalApiRawPayload;
 import com.safespot.externalingestion.domain.entity.ExternalApiSource;
+import com.safespot.externalingestion.publisher.CacheEventPublisher;
 import com.safespot.externalingestion.queue.NormalizationMessage;
 import com.safespot.externalingestion.queue.NormalizationQueue;
-import com.safespot.externalingestion.repository.*;
+import com.safespot.externalingestion.repository.DisasterAlertDetailRepository;
+import com.safespot.externalingestion.repository.DisasterAlertRepository;
+import com.safespot.externalingestion.repository.ExternalApiExecutionLogRepository;
+import com.safespot.externalingestion.repository.ExternalApiRawPayloadRepository;
+import com.safespot.externalingestion.repository.ExternalApiSourceRepository;
 import com.safespot.externalingestion.service.NormalizationService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,9 +24,13 @@ import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 
 /**
- * H2 인메모리 DB로 수집 → 정규화 흐름 통합 검증
+ * H2 in-memory DB 기준의 수집 및 정규화 통합 검증.
  */
 @SpringBootTest
 @ActiveProfiles("local")
@@ -33,7 +43,9 @@ class IngestionIntegrationTest {
     @Autowired ExternalApiRawPayloadRepository rawPayloadRepo;
     @Autowired ExternalApiExecutionLogRepository executionLogRepo;
     @Autowired DisasterAlertRepository disasterAlertRepo;
+    @Autowired DisasterAlertDetailRepository disasterAlertDetailRepo;
     @Autowired DataInitializer dataInitializer;
+    @MockBean CacheEventPublisher cacheEventPublisher;
 
     @Test
     void dataInitializer_seedsAllSources() {
@@ -65,35 +77,13 @@ class IngestionIntegrationTest {
     }
 
     @Test
-    void normalizationService_processesDisasterAlert() {
-        ExternalApiSource source = sourceRepo.findBySourceCode("SAFETY_DATA_ALERT")
-            .orElseThrow(() -> new IllegalStateException("SAFETY_DATA_ALERT source not seeded"));
-
-        var execLog = new com.safespot.externalingestion.domain.entity.ExternalApiExecutionLog();
-        execLog.setSource(source);
-        execLog.setExecutionStatus(com.safespot.externalingestion.domain.enums.ExecutionStatus.RUNNING);
-        execLog.setStartedAt(OffsetDateTime.now());
-        execLog.setTraceId("integration-test-trace");
-        var savedLog = executionLogRepo.save(execLog);
-
-        ExternalApiRawPayload raw = new ExternalApiRawPayload();
-        raw.setSource(source);
-        raw.setExecutionLog(savedLog);
-        raw.setResponseBody("""
+    void normalizationService_processesSafetyDataAlert() {
+        processSource("SAFETY_DATA_ALERT", """
             {"response":{"body":{"items":{"item":[
               {"MSG_CN":"통합테스트 홍수 경보","RCPTN_RGN_NM":"서울특별시",
                "EMRG_STEP_NM":"경계","DST_SE_NM":"홍수","CRT_DT":"2026-04-21 15:00:00"}
             ]}}}}
-            """);
-        raw.setPayloadHash("integration-test-hash-001");
-        raw.setCollectedAt(OffsetDateTime.now());
-        raw.setRetentionExpiresAt(OffsetDateTime.now().plusDays(90));
-        ExternalApiRawPayload savedRaw = rawPayloadRepo.save(raw);
-
-        NormalizationMessage msg = NormalizationMessage.of(
-            savedRaw.getRawId(), source.getSourceId(), savedLog.getExecutionId(), "integration-test-trace");
-
-        normalizationService.process(msg);
+            """, "integration-test-hash-001", "integration-test-trace");
 
         List<DisasterAlert> alerts = disasterAlertRepo.findAll();
         assertThat(alerts).anyMatch(a ->
@@ -144,6 +134,84 @@ class IngestionIntegrationTest {
             .filter(a -> "SAFETY_DATA_ALERT".equals(a.getSource()))
             .filter(a -> a.getIssuedAt().getHour() == 16)
             .count();
-        assertThat(count).isEqualTo(1); // 중복 SKIP으로 1건만 저장
+        assertThat(count).isEqualTo(1);
+    }
+
+    @Test
+    void normalizationService_kmaEarthquake_doesNotCreateDisasterAlertOrDetailOrPublishEvent() {
+        processSource("KMA_EARTHQUAKE", """
+            {"response":{"header":{"resultCode":"00","resultMsg":"NORMAL SERVICE."},"body":{"items":{"item":[
+              {"tmFc":"202604211000","tmEqk":"20260421095800","lat":"37.56","lon":"126.97",
+               "loc":"서울 북쪽 10km","mt":"3.5","inT":"최대진도III"}
+            ]}}}}
+            """, "kma-eq-hash-001", "kma-eq-trace");
+
+        assertThat(disasterAlertRepo.findAll()).isEmpty();
+        assertThat(disasterAlertDetailRepo.findAll()).isEmpty();
+        verify(cacheEventPublisher, never()).publish(any(), anyString());
+    }
+
+    @Test
+    void normalizationService_seoulEarthquake_doesNotCreateDisasterAlertOrPublishEvent() {
+        processSource("SEOUL_EARTHQUAKE", """
+            {"TbEqkKenvinfo":{"row":[
+              {"OCCR_DT":"2026-04-21 10:05:00","OCCR_PLC":"서울 서초구",
+               "MAGNTD_1":"3.2","DEPTH_KM":"8","INTENSITY":"진도2"}
+            ]}}
+            """, "seoul-eq-hash-001", "seoul-eq-trace");
+
+        assertThat(disasterAlertRepo.findAll()).isEmpty();
+        verify(cacheEventPublisher, never()).publish(any(), anyString());
+    }
+
+    @Test
+    void normalizationService_forestryLandslide_doesNotCreateDisasterAlertOrPublishEvent() {
+        processSource("FORESTRY_LANDSLIDE", """
+            {"response":{"header":{"resultCode":"00","resultMsg":"NORMAL SERVICE."},"body":{"items":{"item":[
+              {"prctnInfoAnlssDt":"2026-04-21 10:00:00","sgg":"서울특별시 종로구","lndslFrcstNm":"주의보"}
+            ]}}}}
+            """, "forestry-hash-001", "forestry-trace");
+
+        assertThat(disasterAlertRepo.findAll()).isEmpty();
+        verify(cacheEventPublisher, never()).publish(any(), anyString());
+    }
+
+    @Test
+    void normalizationService_seoulRiverLevel_doesNotCreateDisasterAlertOrPublishEvent() {
+        processSource("SEOUL_RIVER_LEVEL", """
+            {"ListRiverStageService":{"row":[
+              {"WATG_NM":"한강대교","GU_OFC_NM":"서울특별시 용산구",
+               "DTRSM_DATA_CLCT_TM":"2026-04-21 10:00:00",
+               "RLTM_RVR_WATL_CNT":"4.5","PLAN_FLDE":"6.5","CNTRL_WATL":"4.0"}
+            ]}}
+            """, "river-hash-001", "river-trace");
+
+        assertThat(disasterAlertRepo.findAll()).isEmpty();
+        verify(cacheEventPublisher, never()).publish(any(), anyString());
+    }
+
+    private void processSource(String sourceCode, String responseBody, String payloadHash, String traceId) {
+        ExternalApiSource source = sourceRepo.findBySourceCode(sourceCode)
+            .orElseThrow(() -> new IllegalStateException(sourceCode + " source not seeded"));
+
+        var execLog = new com.safespot.externalingestion.domain.entity.ExternalApiExecutionLog();
+        execLog.setSource(source);
+        execLog.setExecutionStatus(com.safespot.externalingestion.domain.enums.ExecutionStatus.RUNNING);
+        execLog.setStartedAt(OffsetDateTime.now());
+        execLog.setTraceId(traceId);
+        var savedLog = executionLogRepo.save(execLog);
+
+        ExternalApiRawPayload raw = new ExternalApiRawPayload();
+        raw.setSource(source);
+        raw.setExecutionLog(savedLog);
+        raw.setResponseBody(responseBody);
+        raw.setPayloadHash(payloadHash);
+        raw.setCollectedAt(OffsetDateTime.now());
+        raw.setRetentionExpiresAt(OffsetDateTime.now().plusDays(90));
+        ExternalApiRawPayload savedRaw = rawPayloadRepo.save(raw);
+
+        normalizationService.process(
+            NormalizationMessage.of(savedRaw.getRawId(), source.getSourceId(), savedLog.getExecutionId(), traceId)
+        );
     }
 }

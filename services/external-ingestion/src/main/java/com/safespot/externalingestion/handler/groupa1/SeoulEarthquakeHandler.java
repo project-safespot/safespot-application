@@ -8,9 +8,8 @@ import org.springframework.stereotype.Component;
 import java.util.Map;
 
 /**
- * 서울시 지진 발생 현황 API (SEOUL_EARTHQUAKE) — TbEqkKenvinfo
- * 폴링 주기: 30초 | 호출 제한 없음
- * 정규화 대상: disaster_alert (source=SEOUL_EARTHQUAKE)
+ * 서울시 지진 발생 현황 API (SEOUL_EARTHQUAKE) - TbEqkKenvinfo
+ * 현재 계약: raw payload 수집만 유지하고 disaster_alert에는 적재하지 않는다.
  */
 @Component
 public class SeoulEarthquakeHandler extends AbstractIngestionHandler {
