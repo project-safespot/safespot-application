@@ -8,6 +8,7 @@ import com.safespot.asyncworker.exception.EventProcessingException;
 import com.safespot.asyncworker.metrics.WorkerMetrics;
 import com.safespot.asyncworker.redis.RedisKeyConstants;
 import com.safespot.asyncworker.service.environment.EnvironmentCacheService;
+import com.safespot.asyncworker.service.shelter.ShelterDetailReadModelService;
 import com.safespot.asyncworker.service.shelter.ShelterMapReadModelService;
 import com.safespot.asyncworker.service.shelter.ShelterStatusService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -24,6 +25,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class CacheRegenerationCacheWorkerHandlerTest {
 
+    @Mock private ShelterDetailReadModelService shelterDetailReadModelService;
     @Mock private ShelterStatusService shelterStatusService;
     @Mock private ShelterMapReadModelService shelterMapReadModelService;
     @Mock private EnvironmentCacheService environmentCacheService;
@@ -36,7 +38,15 @@ class CacheRegenerationCacheWorkerHandlerTest {
         objectMapper = new ObjectMapper();
         WorkerMetrics workerMetrics = new WorkerMetrics(new SimpleMeterRegistry());
         handler = new CacheRegenerationCacheWorkerHandler(
-            shelterStatusService, shelterMapReadModelService, environmentCacheService, objectMapper, workerMetrics);
+            shelterDetailReadModelService, shelterStatusService, shelterMapReadModelService, environmentCacheService, objectMapper, workerMetrics);
+    }
+
+    @Test
+    void shelter_detail_key_shelterId_추출_후_재빌드() {
+        handler.handle(buildEnvelope(RedisKeyConstants.shelterDetail(101L), "shelter_detail"));
+
+        verify(shelterDetailReadModelService).rebuildDetails(List.of(101L));
+        verifyNoInteractions(environmentCacheService, shelterStatusService);
     }
 
     @Test
@@ -171,6 +181,14 @@ class CacheRegenerationCacheWorkerHandlerTest {
 
         verify(shelterMapReadModelService).rebuildMapItems(List.of(101L, 202L));
         verifyNoInteractions(shelterStatusService, environmentCacheService);
+    }
+
+    @Test
+    void SHELTER_DETAIL_targetType_dispatch() {
+        handler.handle(buildBatchEnvelope("SHELTER_DETAIL", "shelter_detail", List.of(101L, 202L)));
+
+        verify(shelterDetailReadModelService).rebuildDetails(List.of(101L, 202L));
+        verifyNoInteractions(shelterStatusService, shelterMapReadModelService, environmentCacheService);
     }
 
     @Test

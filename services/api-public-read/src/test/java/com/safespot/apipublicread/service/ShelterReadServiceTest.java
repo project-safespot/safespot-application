@@ -8,6 +8,7 @@ import com.safespot.apipublicread.domain.Shelter;
 import com.safespot.apipublicread.dto.ShelterDetailDto;
 import com.safespot.apipublicread.dto.ShelterMapTilesResponse;
 import com.safespot.apipublicread.dto.ShelterNearbyItem;
+import com.safespot.apipublicread.dto.cache.ShelterDetailCacheDto;
 import com.safespot.apipublicread.dto.cache.ShelterMapItemCacheDto;
 import com.safespot.apipublicread.dto.cache.ShelterStatusCacheDto;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
@@ -30,6 +31,10 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -77,8 +82,8 @@ class ShelterReadServiceTest {
     }
 
     @Test
-    void findById_cacheHit_returnsFromCache() {
-        when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
+    void findById_detailCacheHit_doesNotCallShelterRepository() {
+        when(redisReadCache.getShelterDetail(101L)).thenReturn(new RedisReadCache.CacheResult<>(detailCache(101L), null, "shelter_detail"));
         ShelterStatusCacheDto cachedStatus = new ShelterStatusCacheDto(68, 52, "NORMAL", "OPERATING");
         when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(cachedStatus, null));
@@ -87,70 +92,116 @@ class ShelterReadServiceTest {
 
         assertThat(result.shelterId()).isEqualTo(101L);
         assertThat(result.currentOccupancy()).isEqualTo(68);
+        verify(shelterRepository, never()).findById(101L);
         verify(evacuationEntryRepository, never()).countCurrentOccupancy(anyLong());
     }
 
     @Test
-    void findById_cacheMiss_fallsBackToRdsAndEmitsEvent() {
+    void findById_detailCacheMiss_publishesShelterDetailRegenerationOnceWithinSuppressWindow() {
+        when(redisReadCache.getShelterDetail(101L))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_detail"));
         when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
         when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_status"));
-        when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenReturn(68L);
-        when(suppressWindowService.tryPublish("shelter:status:101")).thenReturn(true);
+                .thenReturn(new RedisReadCache.CacheResult<>(new ShelterStatusCacheDto(68, 52, "NORMAL", "OPERATING"), null, "shelter_status"));
+        when(suppressWindowService.tryPublish("shelter:detail:101")).thenReturn(true);
 
         ShelterDetailDto result = shelterReadService.findById(101L);
 
-        assertThat(result.currentOccupancy()).isEqualTo(68);
-        verify(redisReadCache).recordFallback(eq("shelter_status"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
-        verify(redisReadCache).recordDbFallbackQuery("shelter_status_repository", RedisReadCache.FallbackReason.REDIS_MISS);
-        verify(cacheRegenerationPublisher).publish("shelter:status:101", CacheRegenerationReason.CACHE_MISS, "/shelters/{shelterId}");
+        assertThat(result.shelterId()).isEqualTo(101L);
+        verify(redisReadCache).recordFallback(eq("shelter_detail"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
+        verify(cacheRegenerationPublisher).publishBatch(
+                eq("SHELTER_DETAIL"), eq(List.of(101L)), eq(CacheRegenerationReason.CACHE_MISS), eq("/shelters/{shelterId}"));
     }
 
     @Test
-    void findById_redisDown_fallsBackToRdsAndEmitsEvent() {
-        when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
+    void findById_detailCacheMiss_concurrentRequestsPerformOneShelterRepositoryFallback() throws Exception {
+        when(redisReadCache.getShelterDetail(101L))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_detail"));
         when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_DOWN, "shelter_status"));
-        when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenReturn(30L);
-        when(suppressWindowService.tryPublish("shelter:status:101")).thenReturn(true);
+                .thenReturn(new RedisReadCache.CacheResult<>(new ShelterStatusCacheDto(68, 52, "NORMAL", "OPERATING"), null, "shelter_status"));
+        when(suppressWindowService.tryPublish("shelter:detail:101")).thenReturn(false);
+        AtomicInteger repositoryCalls = new AtomicInteger();
+        CountDownLatch firstCallStarted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(shelterRepository.findById(101L)).thenAnswer(invocation -> {
+            repositoryCalls.incrementAndGet();
+            firstCallStarted.countDown();
+            assertThat(release.await(1, TimeUnit.SECONDS)).isTrue();
+            return Optional.of(shelter);
+        });
 
-        ShelterDetailDto result = shelterReadService.findById(101L);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> shelterReadService.findById(101L));
+            assertThat(firstCallStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            var second = executor.submit(() -> shelterReadService.findById(101L));
+            release.countDown();
 
-        assertThat(result.currentOccupancy()).isEqualTo(30);
-        verify(redisReadCache).recordFallback(eq("shelter_status"), eq(RedisReadCache.FallbackReason.REDIS_DOWN));
-        verify(cacheRegenerationPublisher).publish("shelter:status:101", CacheRegenerationReason.REDIS_DOWN, "/shelters/{shelterId}");
+            assertThat(first.get(1, TimeUnit.SECONDS).shelterId()).isEqualTo(101L);
+            assertThat(second.get(1, TimeUnit.SECONDS).shelterId()).isEqualTo(101L);
+            assertThat(repositoryCalls).hasValue(1);
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @Test
-    void findById_suppressWindow_doesNotEmitSecondTime() {
-        when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
+    void findById_statusCacheMiss_stillUsesExistingStatusSingleFlight() throws Exception {
+        when(redisReadCache.getShelterDetail(101L)).thenReturn(new RedisReadCache.CacheResult<>(detailCache(101L), null, "shelter_detail"));
         when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_status"));
-        when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenReturn(10L);
-        when(suppressWindowService.tryPublish("shelter:status:101")).thenReturn(false);
+        AtomicInteger occupancyCalls = new AtomicInteger();
+        CountDownLatch firstCountStarted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenAnswer(invocation -> {
+            occupancyCalls.incrementAndGet();
+            firstCountStarted.countDown();
+            assertThat(release.await(1, TimeUnit.SECONDS)).isTrue();
+            return 68L;
+        });
+        when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
+        when(suppressWindowService.tryPublish("shelter:status:101")).thenReturn(true);
 
-        shelterReadService.findById(101L);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> shelterReadService.findById(101L));
+            assertThat(firstCountStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            var second = executor.submit(() -> shelterReadService.findById(101L));
+            release.countDown();
 
-        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
+            assertThat(first.get(1, TimeUnit.SECONDS).currentOccupancy()).isEqualTo(68);
+            assertThat(second.get(1, TimeUnit.SECONDS).currentOccupancy()).isEqualTo(68);
+            assertThat(occupancyCalls).hasValue(1);
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+        }
     }
 
     @Test
     void findById_parseError_fallsBackWithoutRegenerationRequest() {
+        when(redisReadCache.getShelterDetail(101L))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.PARSE_ERROR, "shelter_detail"));
         when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
         when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
-                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.PARSE_ERROR, "shelter_status"));
-        when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenReturn(10L);
+                .thenReturn(new RedisReadCache.CacheResult<>(new ShelterStatusCacheDto(10, 110, "AVAILABLE", "OPERATING"), null, "shelter_status"));
 
         ShelterDetailDto result = shelterReadService.findById(101L);
 
         assertThat(result.currentOccupancy()).isEqualTo(10);
         verify(suppressWindowService, never()).tryPublish(anyString());
-        verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
+        verify(cacheRegenerationPublisher, never()).publishBatch(anyString(), anyList(), any(), anyString());
     }
 
     @Test
     void findById_notFound_throwsApiException() {
+        when(redisReadCache.getShelterDetail(999L))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_detail"));
         when(shelterRepository.findById(999L)).thenReturn(Optional.empty());
+        when(redisReadCache.get(eq("shelter:status:999"), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(new ShelterStatusCacheDto(0, 0, null, null), null, "shelter_status"));
+        when(suppressWindowService.tryPublish("shelter:detail:999")).thenReturn(false);
 
         assertThatThrownBy(() -> shelterReadService.findById(999L))
                 .isInstanceOf(ApiException.class);
@@ -463,6 +514,24 @@ class ShelterReadServiceTest {
                 null,
                 37.5687,
                 126.9081,
+                "2026-05-15T10:00:00Z"
+        );
+    }
+
+    private ShelterDetailCacheDto detailCache(long id) {
+        return new ShelterDetailCacheDto(
+                1,
+                id,
+                "대피소-" + id,
+                "DESIGNATED",
+                "FLOOD",
+                "서울시",
+                37.5687,
+                126.9081,
+                120,
+                "manager",
+                "010-1234-5678",
+                "note",
                 "2026-05-15T10:00:00Z"
         );
     }

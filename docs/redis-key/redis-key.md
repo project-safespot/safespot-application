@@ -165,6 +165,7 @@ environment key는 disaster message key와 분리되어 유지된다.
 - `shelter:geo:seoul:{disasterType}:{shelterType}`
 - `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
 - `shelter:map:item:{shelterId}`
+- `shelter:detail:{shelterId}`
 - `shelter:status:{shelterId}`
 
 규칙:
@@ -213,7 +214,35 @@ environment key는 disaster message key와 분리되어 유지된다.
 - 동적 상태는 `shelter:status:{shelterId}`로 분리한다.
 - CDN/API cache reuse를 위해 stable payload를 유지한다.
 
-### 5.2 `shelter:status:{shelterId}`
+### 5.2 `shelter:detail:{shelterId}`
+
+紐⑹쟻:
+
+- `/shelters/{shelterId}` detail API payload 1嫄댁쓣 ??ν븳??
+
+理쒖냼 payload field:
+
+- `schemaVersion`
+- `shelterId`
+- `name`
+- `shelterType`
+- `disasterType`
+- `address`
+- `latitude`
+- `longitude`
+- `capacity`
+- `manager`
+- `contact`
+- `note`
+- `updatedAt`
+
+洹쒖튃:
+
+- shelter detail API??`shelter:detail:{shelterId}`瑜?癒쇱? read source濡??ъ슜?쒕떎.
+- ?숈쟻 ?곹깭??`shelter:status:{shelterId}`濡?遺꾨━?쒕떎.
+- detail miss/down/parse error??singleflight + 吏짧??memoization?쇰줈 DB fallback瑜?制듯븳??
+
+### 5.3 `shelter:status:{shelterId}`
 
 목적:
 
@@ -231,7 +260,7 @@ environment key는 disaster message key와 분리되어 유지된다.
 - 동적 상태만 저장한다.
 - `shelter:map:item`의 정적 marker payload와 분리한다.
 
-### 5.3 `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
+### 5.4 `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
 
 목적:
 
@@ -245,7 +274,7 @@ environment key는 disaster message key와 분리되어 유지된다.
 - 1차 권장 zoom 범위는 `z=11..16`이다.
 - `z<11`은 unsupported, bounded response, 또는 확대 필요 응답으로 처리할 수 있다.
 
-### 5.4 `shelter:geo:seoul:{disasterType}:{shelterType}`
+### 5.5 `shelter:geo:seoul:{disasterType}:{shelterType}`
 
 목적:
 

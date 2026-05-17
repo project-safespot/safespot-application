@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
@@ -37,6 +38,7 @@ public class DisasterAlertReadService {
     private static final String ENDPOINT_LATEST = "/disasters/{disasterType}/latest";
     private static final String REPOSITORY_DISASTER_ALERT = "disaster_alert_repository";
     private static final String DB_FALLBACK_SUPPRESS_PREFIX = "db-fallback:disaster:detail:";
+    private static final Duration DETAIL_MEMO_TTL = Duration.ofMillis(1000);
 
     static final String LIST_KEY = "disaster:messages:list:seoul";
     static final String DETAIL_KEY_PREFIX = "disaster:detail:";
@@ -114,10 +116,11 @@ public class DisasterAlertReadService {
         requestRegeneration(detailKey, detailResult.cache(), ENDPOINT_LATEST, detailResult.fallbackReason());
 
         try {
-            return fallbackSingleFlight.execute(
+            return fallbackSingleFlight.executeMemoized(
                     detailKey,
                     detailResult.cache(),
                     REPOSITORY_DISASTER_ALERT,
+                    DETAIL_MEMO_TTL,
                     () -> loadDetailFromRdsWithRateLimit(detailKey, item, detailResult.fallbackReason())
             );
         } catch (JoinTimeoutException e) {

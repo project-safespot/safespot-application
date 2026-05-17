@@ -27,6 +27,7 @@ import org.springframework.data.domain.Sort;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -197,6 +198,47 @@ class DisasterAlertReadServiceTest {
 
         assertThat(result.alertId()).isEqualTo(55L);
         assertThat(result.message()).isEqualTo(EARTHQUAKE_ITEM.message());
+        verify(disasterAlertRepository, never()).findById(anyLong());
+    }
+
+    @Test
+    void detailMiss_sequentialRequestsWithinMemoTtlDoNotRepeatDbFallback() {
+        DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
+        when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(List.of(EARTHQUAKE_ITEM), null));
+        when(redisReadCache.get(eq(DETAIL_KEY_55), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_detail"));
+        when(suppressWindowService.tryPublish(DETAIL_KEY_55)).thenReturn(false);
+        when(suppressWindowService.tryAllowDbFallback(DB_FALLBACK_KEY_55)).thenReturn(true);
+        when(disasterAlertRepository.findById(55L)).thenReturn(Optional.of(alert));
+
+        DisasterLatestDto first = disasterAlertReadService.findLatest("EARTHQUAKE", "seoul");
+        DisasterLatestDto second = disasterAlertReadService.findLatest("EARTHQUAKE", "seoul");
+
+        assertThat(first.alertId()).isEqualTo(55L);
+        assertThat(second.alertId()).isEqualTo(55L);
+        verify(disasterAlertRepository, times(1)).findById(55L);
+    }
+
+    @Test
+    void detailMiss_suppressedStaleResultIsMemoizedBriefly() {
+        AtomicInteger suppressCalls = new AtomicInteger();
+        when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(List.of(EARTHQUAKE_ITEM), null));
+        when(redisReadCache.get(eq(DETAIL_KEY_55), any(TypeReference.class)))
+                .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_detail"));
+        when(suppressWindowService.tryPublish(DETAIL_KEY_55)).thenReturn(false);
+        when(suppressWindowService.tryAllowDbFallback(DB_FALLBACK_KEY_55)).thenAnswer(invocation -> {
+            suppressCalls.incrementAndGet();
+            return false;
+        });
+
+        DisasterLatestDto first = disasterAlertReadService.findLatest("EARTHQUAKE", "seoul");
+        DisasterLatestDto second = disasterAlertReadService.findLatest("EARTHQUAKE", "seoul");
+
+        assertThat(first.message()).isEqualTo(EARTHQUAKE_ITEM.message());
+        assertThat(second.message()).isEqualTo(EARTHQUAKE_ITEM.message());
+        assertThat(suppressCalls).hasValue(1);
         verify(disasterAlertRepository, never()).findById(anyLong());
     }
 

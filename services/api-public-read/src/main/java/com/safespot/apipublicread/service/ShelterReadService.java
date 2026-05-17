@@ -11,6 +11,7 @@ import com.safespot.apipublicread.dto.ShelterMapTileDto;
 import com.safespot.apipublicread.dto.ShelterMapTilesResponse;
 import com.safespot.apipublicread.dto.ShelterNearbyItem;
 import com.safespot.apipublicread.dto.ShelterStatusCache;
+import com.safespot.apipublicread.dto.cache.ShelterDetailCacheDto;
 import com.safespot.apipublicread.dto.cache.ShelterMapItemCacheDto;
 import com.safespot.apipublicread.dto.cache.ShelterStatusCacheDto;
 import com.safespot.apipublicread.event.CacheRegenerationPublisher;
@@ -25,6 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -49,7 +51,9 @@ public class ShelterReadService {
     private static final String ENDPOINT_NEARBY = "/shelters/nearby";
     private static final String ENDPOINT_MAP_TILES = "/shelters/map/tiles";
     private static final String ENDPOINT_DETAIL = "/shelters/{shelterId}";
+    private static final String REPOSITORY_SHELTER_DETAIL = "shelter_detail_repository";
     private static final String REPOSITORY_SHELTER_STATUS = "shelter_status_repository";
+    private static final Duration SHELTER_DETAIL_MEMO_TTL = Duration.ofSeconds(2);
 
     private final ShelterRepository shelterRepository;
     private final EvacuationEntryRepository evacuationEntryRepository;
@@ -247,11 +251,36 @@ public class ShelterReadService {
     }
 
     public ShelterDetailDto findById(Long shelterId) {
-        Shelter shelter = shelterRepository.findById(shelterId)
-                .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
+        String detailKey = "shelter:detail:" + shelterId;
+        RedisReadCache.CacheResult<ShelterDetailCacheDto> detailResult = redisReadCache.getShelterDetail(shelterId);
+        redisReadCache.recordCacheRequest(detailResult.cache(), detailResult.resultLabel());
+
+        ShelterDetailCacheDto detail;
+        if (detailResult.isHit()) {
+            detail = detailResult.value();
+        } else {
+            FallbackReason reason = detailResult.fallbackReason();
+            redisReadCache.recordFallback(detailResult.cache(), reason);
+            if (reason != FallbackReason.PARSE_ERROR) {
+                publishBatchRegenerationIfAllowed(
+                        "SHELTER_DETAIL",
+                        detailKey,
+                        List.of(shelterId),
+                        CacheRegenerationReason.from(reason),
+                        ENDPOINT_DETAIL
+                );
+            }
+            detail = fallbackSingleFlight.executeMemoized(
+                    detailKey,
+                    detailResult.cache(),
+                    REPOSITORY_SHELTER_DETAIL,
+                    SHELTER_DETAIL_MEMO_TTL,
+                    () -> loadShelterDetailFromRds(shelterId, reason)
+            ).orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
+        }
 
         ShelterStatusCache status = getShelterStatusFromCacheOrRds(shelterId, ENDPOINT_DETAIL, true);
-        return toDetailDto(shelter, status);
+        return toDetailDto(detail, status);
     }
 
     private ShelterStatusCache getShelterStatusFromCacheOrRds(Long shelterId, String endpoint, boolean publishRegenerationOnFallback) {
@@ -333,6 +362,20 @@ public class ShelterReadService {
         }
     }
 
+    private java.util.Optional<ShelterDetailCacheDto> loadShelterDetailFromRds(Long shelterId, FallbackReason reason) {
+        redisReadCache.recordDbFallbackQuery(REPOSITORY_SHELTER_DETAIL, reason);
+        long start = System.currentTimeMillis();
+        try {
+            java.util.Optional<ShelterDetailCacheDto> result = shelterRepository.findById(shelterId)
+                    .map(this::toDetailCacheDto);
+            redisReadCache.recordDbFallbackLatency(REPOSITORY_SHELTER_DETAIL, "success", System.currentTimeMillis() - start);
+            return result;
+        } catch (RuntimeException e) {
+            redisReadCache.recordDbFallbackLatency(REPOSITORY_SHELTER_DETAIL, "failure", System.currentTimeMillis() - start);
+            throw e;
+        }
+    }
+
     private ShelterNearbyItem toNearbyItem(ShelterMapItemCacheDto item, int distanceM, ShelterStatusCache status) {
         return new ShelterNearbyItem(
                 item.shelterId(),
@@ -371,24 +414,42 @@ public class ShelterReadService {
         );
     }
 
-    private ShelterDetailDto toDetailDto(Shelter s, ShelterStatusCache status) {
+    private ShelterDetailDto toDetailDto(ShelterDetailCacheDto s, ShelterStatusCache status) {
         return new ShelterDetailDto(
-                s.getShelterId(),
-                s.getName(),
-                s.getShelterType(),
-                s.getDisasterType(),
-                s.getAddress(),
-                s.getLatitude().doubleValue(),
-                s.getLongitude().doubleValue(),
-                s.getCapacity(),
+                s.shelterId(),
+                s.name(),
+                s.shelterType(),
+                s.disasterType(),
+                s.address(),
+                s.latitude(),
+                s.longitude(),
+                s.capacity(),
                 status.currentOccupancy(),
                 status.availableCapacity(),
                 status.congestionLevel(),
                 status.shelterStatus(),
-                s.getManager(),
-                s.getContact(),
-                s.getNote(),
-                s.getUpdatedAt() != null ? s.getUpdatedAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) : null
+                s.manager(),
+                s.contact(),
+                s.note(),
+                s.updatedAt()
+        );
+    }
+
+    private ShelterDetailCacheDto toDetailCacheDto(Shelter shelter) {
+        return new ShelterDetailCacheDto(
+                1,
+                shelter.getShelterId(),
+                shelter.getName(),
+                shelter.getShelterType(),
+                shelter.getDisasterType(),
+                shelter.getAddress(),
+                shelter.getLatitude().doubleValue(),
+                shelter.getLongitude().doubleValue(),
+                shelter.getCapacity(),
+                shelter.getManager(),
+                shelter.getContact(),
+                shelter.getNote(),
+                shelter.getUpdatedAt() != null ? shelter.getUpdatedAt().format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) : null
         );
     }
 
@@ -459,6 +520,7 @@ public class ShelterReadService {
 
     private String cacheFamily(String targetType) {
         return switch (targetType) {
+            case "SHELTER_DETAIL" -> "shelter_detail";
             case "SHELTER_STATUS" -> "shelter_status";
             case "SHELTER_MAP_ITEMS" -> "shelter_map_item";
             case "SHELTER_GEO_INDEX" -> "shelter_geo_index";

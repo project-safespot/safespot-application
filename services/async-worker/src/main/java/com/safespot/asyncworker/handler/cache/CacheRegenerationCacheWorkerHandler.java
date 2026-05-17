@@ -10,6 +10,7 @@ import com.safespot.asyncworker.payload.CacheRegenerationTargetType;
 import com.safespot.asyncworker.payload.CacheRegenerationRequestedPayload;
 import com.safespot.asyncworker.redis.RedisKeyConstants;
 import com.safespot.asyncworker.service.environment.EnvironmentCacheService;
+import com.safespot.asyncworker.service.shelter.ShelterDetailReadModelService;
 import com.safespot.asyncworker.service.shelter.ShelterMapReadModelService;
 import com.safespot.asyncworker.service.shelter.ShelterStatusService;
 import lombok.RequiredArgsConstructor;
@@ -25,8 +26,10 @@ import java.util.List;
 @RequiredArgsConstructor
 public class CacheRegenerationCacheWorkerHandler implements EventHandler {
 
+    private static final String SHELTER_DETAIL_PREFIX = "shelter:detail:";
     private static final String SHELTER_STATUS_PREFIX = "shelter:status:";
 
+    private final ShelterDetailReadModelService shelterDetailReadModelService;
     private final ShelterStatusService shelterStatusService;
     private final ShelterMapReadModelService shelterMapReadModelService;
     private final EnvironmentCacheService environmentCacheService;
@@ -64,6 +67,13 @@ public class CacheRegenerationCacheWorkerHandler implements EventHandler {
         try {
             CacheRegenerationTargetType normalizedType = CacheRegenerationTargetType.from(targetType);
             switch (normalizedType) {
+                case SHELTER_DETAIL -> {
+                    if (payload.targetIds() == null || payload.targetIds().isEmpty()) {
+                        shelterDetailReadModelService.rebuildAllDetails();
+                    } else {
+                        shelterDetailReadModelService.rebuildDetails(payload.targetIds());
+                    }
+                }
                 case SHELTER_STATUS -> {
                     if (payload.targetIds() != null && !payload.targetIds().isEmpty()) {
                         shelterStatusService.recalculateBatch(payload.targetIds());
@@ -118,6 +128,14 @@ public class CacheRegenerationCacheWorkerHandler implements EventHandler {
                 String idStr = cacheKey.substring(SHELTER_STATUS_PREFIX.length());
                 Long shelterId = parseId(idStr, cacheKey);
                 shelterStatusService.recalculate(shelterId);
+                workerMetrics.incrementCacheRegenerationCompleted(cacheKeyFamily);
+                return;
+            }
+
+            if (cacheKey.startsWith(SHELTER_DETAIL_PREFIX)) {
+                String idStr = cacheKey.substring(SHELTER_DETAIL_PREFIX.length());
+                Long shelterId = parseId(idStr, cacheKey);
+                shelterDetailReadModelService.rebuildDetails(List.of(shelterId));
                 workerMetrics.incrementCacheRegenerationCompleted(cacheKeyFamily);
                 return;
             }

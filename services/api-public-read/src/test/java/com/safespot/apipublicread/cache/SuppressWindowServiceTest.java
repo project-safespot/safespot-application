@@ -1,5 +1,6 @@
 package com.safespot.apipublicread.cache;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,7 +27,7 @@ class SuppressWindowServiceTest {
     @BeforeEach
     void setUp() {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        suppressWindowService = new SuppressWindowService(redisTemplate);
+        suppressWindowService = new SuppressWindowService(redisTemplate, new SimpleMeterRegistry());
     }
 
     @Test
@@ -80,5 +81,15 @@ class SuppressWindowServiceTest {
         var captor = org.mockito.ArgumentCaptor.forClass(String.class);
         verify(valueOps).setIfAbsent(captor.capture(), anyString(), any(Duration.class));
         assertThat(captor.getValue()).startsWith("suppress:cache-regeneration:");
+    }
+
+    @Test
+    void tryPublish_localDenyHit_skipsSecondRedisCall() {
+        when(valueOps.setIfAbsent(anyString(), eq("1"), eq(Duration.ofSeconds(30)))).thenReturn(false);
+
+        assertThat(suppressWindowService.tryPublish("disaster:messages:list:seoul")).isFalse();
+        assertThat(suppressWindowService.tryPublish("disaster:messages:list:seoul")).isFalse();
+
+        verify(valueOps, times(1)).setIfAbsent(anyString(), eq("1"), eq(Duration.ofSeconds(30)));
     }
 }

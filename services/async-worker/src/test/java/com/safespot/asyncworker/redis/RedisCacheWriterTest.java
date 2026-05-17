@@ -61,6 +61,21 @@ class RedisCacheWriterTest {
     }
 
     @Test
+    void setShelterDetail_withAddedJitterTtl_3600to3720s() {
+        cacheWriter.setShelterDetail(
+            101L,
+            new ShelterDetailValue(1, 101L, "상세 대피소", "DESIGNATED", "FLOOD", "서울", 37.55, 126.98, 120, "manager", "010", "note", "2026-05-15T10:00:00Z")
+        );
+
+        verify(valueOps).set(
+            eq(RedisKeyConstants.shelterDetail(101L)),
+            anyString(),
+            argThat(ttl -> isWithinAddedJitterRange(ttl,
+                    RedisTtlConstants.SHELTER_DETAIL, RedisTtlConstants.SHELTER_DISASTER_JITTER))
+        );
+    }
+
+    @Test
     void setDisasterDetail_withAddedJitterTtl_3600to3720s() {
         DisasterDetailCacheValue value = new DisasterDetailCacheValue(
             1, 42L, "FLOOD", null, "ALERT", "WARNING", 3,

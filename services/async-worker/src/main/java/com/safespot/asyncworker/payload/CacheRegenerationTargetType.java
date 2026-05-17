@@ -3,6 +3,7 @@ package com.safespot.asyncworker.payload;
 import com.safespot.asyncworker.exception.EventProcessingException;
 
 public enum CacheRegenerationTargetType {
+    SHELTER_DETAIL,
     SHELTER_STATUS,
     SHELTER_MAP_ITEMS,
     SHELTER_GEO_INDEX,

@@ -9,6 +9,7 @@ import com.safespot.asyncworker.metrics.WorkerMetrics;
 import com.safespot.asyncworker.redis.RedisKeyConstants;
 import com.safespot.asyncworker.service.disaster.DisasterReadModelService;
 import com.safespot.asyncworker.service.environment.EnvironmentCacheService;
+import com.safespot.asyncworker.service.shelter.ShelterDetailReadModelService;
 import com.safespot.asyncworker.service.shelter.ShelterMapReadModelService;
 import com.safespot.asyncworker.service.shelter.ShelterStatusService;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -26,6 +27,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class CacheRegenerationAsyncWorkerHandlerTest {
 
+    @Mock private ShelterDetailReadModelService shelterDetailReadModelService;
     @Mock private ShelterStatusService shelterStatusService;
     @Mock private ShelterMapReadModelService shelterMapReadModelService;
     @Mock private EnvironmentCacheService environmentCacheService;
@@ -39,6 +41,7 @@ class CacheRegenerationAsyncWorkerHandlerTest {
         objectMapper = new ObjectMapper();
         WorkerMetrics workerMetrics = new WorkerMetrics(new SimpleMeterRegistry());
         handler = new CacheRegenerationAsyncWorkerHandler(
+            shelterDetailReadModelService,
             shelterStatusService,
             shelterMapReadModelService,
             environmentCacheService,
@@ -54,6 +57,14 @@ class CacheRegenerationAsyncWorkerHandlerTest {
 
         verify(shelterMapReadModelService).rebuildMapItems(List.of(101L, 202L));
         verifyNoInteractions(shelterStatusService, environmentCacheService, disasterReadModelService);
+    }
+
+    @Test
+    void SHELTER_DETAIL_targetType_dispatch() {
+        handler.handle(buildTargetEnvelope("SHELTER_DETAIL", "shelter_detail", null, List.of(101L, 202L)));
+
+        verify(shelterDetailReadModelService).rebuildDetails(List.of(101L, 202L));
+        verifyNoInteractions(shelterStatusService, shelterMapReadModelService, environmentCacheService, disasterReadModelService);
     }
 
     @Test
@@ -133,6 +144,14 @@ class CacheRegenerationAsyncWorkerHandlerTest {
 
         verify(disasterReadModelService).rebuildList();
         verifyNoInteractions(shelterStatusService, shelterMapReadModelService, environmentCacheService);
+    }
+
+    @Test
+    void legacy_shelter_detail_path_dispatch() {
+        handler.handle(buildLegacyEnvelope(RedisKeyConstants.shelterDetail(101L), "shelter_detail"));
+
+        verify(shelterDetailReadModelService).rebuildDetails(List.of(101L));
+        verifyNoInteractions(shelterStatusService, shelterMapReadModelService, environmentCacheService, disasterReadModelService);
     }
 
     private EventEnvelope buildTargetEnvelope(String targetType, String cacheKeyFamily, String cacheKey, List<Long> targetIds) {
