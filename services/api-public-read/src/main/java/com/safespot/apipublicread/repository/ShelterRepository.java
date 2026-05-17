@@ -23,4 +23,20 @@ public interface ShelterRepository extends JpaRepository<Shelter, Long> {
             @Param("lngMax") BigDecimal lngMax,
             @Param("disasterType") String disasterType
     );
+
+    @Query("""
+            SELECT s FROM Shelter s
+            WHERE s.latitude BETWEEN :latMin AND :latMax
+              AND s.longitude BETWEEN :lngMin AND :lngMax
+              AND (:disasterType IS NULL OR s.disasterType = :disasterType)
+              AND (:shelterType IS NULL OR s.shelterType = :shelterType)
+            """)
+    List<Shelter> findByBoundingBoxAndFilters(
+            @Param("latMin") BigDecimal latMin,
+            @Param("latMax") BigDecimal latMax,
+            @Param("lngMin") BigDecimal lngMin,
+            @Param("lngMax") BigDecimal lngMax,
+            @Param("disasterType") String disasterType,
+            @Param("shelterType") String shelterType
+    );
 }

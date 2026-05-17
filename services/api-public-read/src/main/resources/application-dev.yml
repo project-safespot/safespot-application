@@ -20,6 +20,17 @@ server:
   port: 8080
 
 safespot:
+  public-read:
+    fallback:
+      default-lock-ttl: 5s
+      shelter-map-tile-lock-ttl: 5s
+      disaster-detail-lock-ttl: 5s
+      shelter-status-lock-ttl: 3s
+      shelter-map-item-lock-ttl: 3s
+      shelter-map-tile-negative-ttl: 20s
+      regeneration-suppress-ttl: 45s
+      follower-backoff: 50ms
+      batch-chunk-size: 50
   cache-regeneration:
     publisher-mode: sqs
     publish-failure-file: /tmp/cache-regeneration-publish-failures.jsonl

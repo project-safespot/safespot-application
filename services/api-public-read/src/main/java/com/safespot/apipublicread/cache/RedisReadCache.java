@@ -38,6 +38,12 @@ public class RedisReadCache {
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
+    private final PublicReadMetricRecorder metricRecorder;
+
+    public RedisReadCache(StringRedisTemplate redisTemplate, ObjectMapper objectMapper,
+                          MeterRegistry meterRegistry) {
+        this(redisTemplate, objectMapper, meterRegistry, new PublicReadMetricRecorder(meterRegistry));
+    }
 
     public enum CacheMetricLabel {
         DISASTER_MESSAGES("disaster_messages"),
@@ -301,6 +307,21 @@ public class RedisReadCache {
         return getMany(tileKeys, new TypeReference<List<Long>>() {}, CacheMetricLabel.SHELTER_MAP_TILE);
     }
 
+    public Map<String, CacheResult<List<Long>>> multiGetShelterMapTileStale(List<String> tileKeys) {
+        if (tileKeys == null || tileKeys.isEmpty()) {
+            return Map.of();
+        }
+        List<String> staleKeys = tileKeys.stream().map(key -> "stale:" + key).toList();
+        Map<String, CacheResult<List<Long>>> values =
+                getMany(staleKeys, new TypeReference<List<Long>>() {}, CacheMetricLabel.SHELTER_MAP_TILE);
+        Map<String, CacheResult<List<Long>>> result = new LinkedHashMap<>();
+        for (String key : tileKeys) {
+            result.put(key, values.getOrDefault("stale:" + key,
+                    new CacheResult<>(null, FallbackReason.REDIS_MISS, CacheMetricLabel.SHELTER_MAP_TILE.value())));
+        }
+        return result;
+    }
+
     public void set(String key, Object value, Duration ttl) {
         try {
             String json = objectMapper.writeValueAsString(value);
@@ -315,41 +336,35 @@ public class RedisReadCache {
     }
 
     public void recordCacheRequest(String cache, String result) {
-        meterRegistry.counter("safespot.cache.requests",
-                "service", "api-public-read",
-                "cache", lowCardinality(cache),
-                "result", result
-        ).increment();
+        metricRecorder.recordCacheRequest(cache, result);
     }
 
     public void recordFallback(String cache, FallbackReason reason) {
-        String reasonLabel = switch (reason) {
-            case REDIS_DOWN -> "redis_down";
-            case PARSE_ERROR -> "parse_error";
-            case REDIS_MISS -> "redis_miss";
-        };
-        meterRegistry.counter("safespot.cache.fallback",
-                "service", "api-public-read",
-                "cache", lowCardinality(cache),
-                "reason", reasonLabel
-        ).increment();
+        recordFallback(cache, fallbackReasonLabel(reason));
+    }
+
+    public void recordFallback(String cache, String reason) {
+        metricRecorder.recordCacheFallback(cache, reason);
+    }
+
+    public void recordDbFallbackQuery(String cache, String repository, FallbackReason reason, String result) {
+        metricRecorder.recordDbFallbackQuery(cache, repository, dbFallbackReason(reason), result);
+    }
+
+    public void recordDbFallbackQuery(String cache, String repository, String reason, String result) {
+        metricRecorder.recordDbFallbackQuery(cache, repository, reason, result);
     }
 
     public void recordDbFallbackQuery(String repository, FallbackReason reason) {
-        meterRegistry.counter("safespot.db.fallback.queries",
-                "service", "api-public-read",
-                "repository", lowCardinality(repository),
-                "reason", dbFallbackReason(reason)
-        ).increment();
+        recordDbFallbackQuery("unknown", repository, reason, "leader");
+    }
+
+    public void recordDbFallbackLatency(String cache, String repository, String result, long durationMs) {
+        metricRecorder.recordDbFallbackLatency(cache, repository, result, durationMs);
     }
 
     public void recordDbFallbackLatency(String repository, String result, long durationMs) {
-        Timer.builder("safespot.db.fallback")
-                .tag("service", "api-public-read")
-                .tag("repository", lowCardinality(repository))
-                .tag("result", lowCardinality(result))
-                .register(meterRegistry)
-                .record(durationMs, TimeUnit.MILLISECONDS);
+        recordDbFallbackLatency("unknown", repository, result, durationMs);
     }
 
     private void recordRedisRead(String cache, String result, long startNanos, String operation) {
@@ -376,6 +391,14 @@ public class RedisReadCache {
             case REDIS_DOWN -> "redis_error";
             case PARSE_ERROR -> "parse_error";
             case REDIS_MISS -> "cache_miss";
+        };
+    }
+
+    private static String fallbackReasonLabel(FallbackReason reason) {
+        return switch (reason) {
+            case REDIS_DOWN -> "redis_down";
+            case PARSE_ERROR -> "parse_error";
+            case REDIS_MISS -> "redis_miss";
         };
     }
 

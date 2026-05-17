@@ -1,6 +1,7 @@
 package com.safespot.apipublicread.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.safespot.apipublicread.cache.PublicReadMetricRecorder;
 import com.safespot.apipublicread.event.CacheKeyFamilyResolver;
 import com.safespot.apipublicread.event.CacheRegenerationEnvelopeFactory;
 import com.safespot.apipublicread.event.CacheRegenerationPublishFailureRecorder;
@@ -65,9 +66,10 @@ public class SqsPublisherConfig {
             CacheRegenerationRouteResolver routeResolver,
             CacheRegenerationEnvelopeFactory envelopeFactory,
             CacheRegenerationPublishFailureRecorder failureRecorder,
-            MeterRegistry meterRegistry) {
+            MeterRegistry meterRegistry,
+            PublicReadMetricRecorder metricRecorder) {
         return new SqsCacheRegenerationPublisher(sqsClient, queueUrlProvider, objectMapper,
-                familyResolver, routeResolver, envelopeFactory, failureRecorder, meterRegistry);
+                familyResolver, routeResolver, envelopeFactory, failureRecorder, meterRegistry, metricRecorder);
     }
 
     @Bean

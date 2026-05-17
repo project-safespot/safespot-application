@@ -23,9 +23,9 @@ class FallbackSingleFlightTest {
         AtomicInteger calls = new AtomicInteger();
 
         List<String> results = runConcurrent(100, () -> singleFlight.execute(
-                "shelter:status:101",
                 "shelter_status",
-                "shelter_status_repository",
+                "seoul",
+                "101",
                 () -> {
                     calls.incrementAndGet();
                     sleep(100);
@@ -35,15 +35,17 @@ class FallbackSingleFlightTest {
 
         assertThat(results).hasSize(100).containsOnly("ok");
         assertThat(calls).hasValue(1);
-        assertThat(meterRegistry.counter("fallback_singleflight_leader_total",
+        assertThat(meterRegistry.counter("safespot.fallback.singleflight",
                 "service", "api-public-read",
                 "cache", "shelter_status",
-                "repository", "shelter_status_repository",
+                "region", "seoul",
+                "scope", "local",
                 "result", "leader").count()).isEqualTo(1.0);
-        assertThat(meterRegistry.counter("fallback_singleflight_join_total",
+        assertThat(meterRegistry.counter("safespot.fallback.singleflight",
                 "service", "api-public-read",
                 "cache", "shelter_status",
-                "repository", "shelter_status_repository",
+                "region", "seoul",
+                "scope", "local",
                 "result", "join").count()).isEqualTo(99.0);
     }
 
@@ -53,9 +55,9 @@ class FallbackSingleFlightTest {
         CountDownLatch bothLeadersStarted = new CountDownLatch(2);
 
         List<String> results = runConcurrent(List.of(
-                () -> singleFlight.execute("shelter:status:101", "shelter_status", "shelter_status_repository",
+                () -> singleFlight.execute("shelter_status", "seoul", "101",
                         () -> waitForBothLeaders("a", bothLeadersStarted)),
-                () -> singleFlight.execute("shelter:status:102", "shelter_status", "shelter_status_repository",
+                () -> singleFlight.execute("shelter_status", "seoul", "102",
                         () -> waitForBothLeaders("b", bothLeadersStarted))
         ));
 
@@ -67,9 +69,9 @@ class FallbackSingleFlightTest {
         FallbackSingleFlight singleFlight = new FallbackSingleFlight(new SimpleMeterRegistry(), 1_000);
 
         assertThatThrownBy(() -> runConcurrent(2, () -> singleFlight.execute(
-                "disaster:messages:list:seoul",
                 "disaster_messages",
-                "disaster_alert_repository",
+                "seoul",
+                "list",
                 () -> {
                     sleep(100);
                     throw new IllegalStateException("db failed");
@@ -89,9 +91,9 @@ class FallbackSingleFlightTest {
 
         try {
             var leader = executor.submit(() -> singleFlight.execute(
-                    "disaster:detail:55",
                     "disaster_detail",
-                    "disaster_alert_repository",
+                    "seoul",
+                    "55",
                     () -> {
                         leaderStarted.countDown();
                         await(releaseLeader);
@@ -101,18 +103,19 @@ class FallbackSingleFlightTest {
             assertThat(leaderStarted.await(1, TimeUnit.SECONDS)).isTrue();
 
             assertThatThrownBy(() -> singleFlight.execute(
-                    "disaster:detail:55",
                     "disaster_detail",
-                    "disaster_alert_repository",
+                    "seoul",
+                    "55",
                     () -> "follower"
             )).isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("Timed out waiting for fallback single-flight");
 
             assertThat(singleFlight.inFlightSize()).isEqualTo(1);
-            assertThat(meterRegistry.counter("fallback_singleflight_timeout_total",
+            assertThat(meterRegistry.counter("safespot.fallback.singleflight",
                     "service", "api-public-read",
                     "cache", "disaster_detail",
-                    "repository", "disaster_alert_repository",
+                    "region", "seoul",
+                    "scope", "local",
                     "result", "timeout").count()).isEqualTo(1.0);
 
             releaseLeader.countDown();

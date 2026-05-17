@@ -288,6 +288,8 @@ suppress key는 실제 regeneration target key에서 파생해야 한다.
 Format:
 
 - `suppress:cache-regeneration:{cacheKeyHash}`
+- `suppress:db-fallback:{cacheKeyHash}`
+- `lock:fallback:{cache}:{region}:{logicalKey}`
 
 규칙:
 
@@ -296,6 +298,11 @@ Format:
 - suppress key는 duplicate-throttling guard일 뿐이며 read-model entry가 아니다.
 
 Example:
+
+- `suppress:db-fallback:{cacheKeyHash}` ??short-lived DB fallback / negative-cache guard濡??ъ슜?쒕떎.
+- `lock:fallback:{cache}:{region}:{logicalKey}` ??cross-pod fallback leader election guard濡??ъ슜?쒕떎.
+- `stale:shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}` ??optional stale shadow tile key濡??쎌씤?쒕떎.
+- local singleflight key `fallback:{cache}:{region}:{logicalKey}` ??in-memory only濡?Redis key contract?먯꽌??젣?쇱맂??.
 
 - miss target: `disaster:messages:list:seoul`
 - suppress target: `suppress:cache-regeneration:{hash("disaster:messages:list:seoul")}`

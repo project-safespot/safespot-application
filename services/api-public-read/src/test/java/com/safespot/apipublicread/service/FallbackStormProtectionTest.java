@@ -2,6 +2,9 @@ package com.safespot.apipublicread.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.safespot.apipublicread.cache.FallbackSingleFlight;
+import com.safespot.apipublicread.cache.DistributedFallbackGuard;
+import com.safespot.apipublicread.cache.FallbackControlProperties;
+import com.safespot.apipublicread.cache.PublicReadMetricRecorder;
 import com.safespot.apipublicread.cache.RedisReadCache;
 import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.domain.DisasterAlert;
@@ -40,17 +43,23 @@ class FallbackStormProtectionTest {
         ShelterRepository shelterRepository = mock(ShelterRepository.class);
         EvacuationEntryRepository evacuationEntryRepository = mock(EvacuationEntryRepository.class);
         RedisReadCache redisReadCache = mock(RedisReadCache.class);
+        DistributedFallbackGuard distributedFallbackGuard = mock(DistributedFallbackGuard.class);
         SuppressWindowService suppressWindowService = mock(SuppressWindowService.class);
         CacheRegenerationPublisher publisher = mock(CacheRegenerationPublisher.class);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         ShelterReadService service = new ShelterReadService(
                 shelterRepository,
                 evacuationEntryRepository,
                 redisReadCache,
-                new FallbackSingleFlight(new SimpleMeterRegistry(), 1_000),
+                new FallbackSingleFlight(meterRegistry, 1_000),
+                distributedFallbackGuard,
                 suppressWindowService,
                 publisher,
-                new SimpleMeterRegistry()
+                new PublicReadMetricRecorder(meterRegistry),
+                new FallbackControlProperties()
         );
+        when(distributedFallbackGuard.tryAcquire(anyString(), anyString(), anyString(), any()))
+                .thenReturn(DistributedFallbackGuard.Decision.LEADER);
         Shelter shelter = shelter(101L);
         when(shelterRepository.findById(101L)).thenReturn(Optional.of(shelter));
         when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
@@ -68,23 +77,29 @@ class FallbackStormProtectionTest {
         assertThat(results).allSatisfy(result -> assertThat(result.currentOccupancy()).isEqualTo(68));
         verify(evacuationEntryRepository, times(1)).countCurrentOccupancy(101L);
         verify(redisReadCache, times(1))
-                .recordDbFallbackQuery("shelter_status_repository", RedisReadCache.FallbackReason.REDIS_MISS);
+                .recordDbFallbackQuery("shelter_status", "shelter_status_repository", RedisReadCache.FallbackReason.REDIS_MISS, "leader");
     }
 
     @Test
     void sameDisasterMessagesMiss_concurrentRequestsPerformOneRepositoryFallback() throws Exception {
         DisasterAlertRepository disasterAlertRepository = mock(DisasterAlertRepository.class);
         RedisReadCache redisReadCache = mock(RedisReadCache.class);
+        DistributedFallbackGuard distributedFallbackGuard = mock(DistributedFallbackGuard.class);
         SuppressWindowService suppressWindowService = mock(SuppressWindowService.class);
         CacheRegenerationPublisher publisher = mock(CacheRegenerationPublisher.class);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         DisasterAlertReadService service = new DisasterAlertReadService(
                 disasterAlertRepository,
                 redisReadCache,
-                new FallbackSingleFlight(new SimpleMeterRegistry(), 1_000),
+                new FallbackSingleFlight(meterRegistry, 1_000),
+                distributedFallbackGuard,
                 suppressWindowService,
                 publisher,
-                new SimpleMeterRegistry()
+                new PublicReadMetricRecorder(meterRegistry),
+                new FallbackControlProperties()
         );
+        when(distributedFallbackGuard.tryAcquire(anyString(), anyString(), anyString(), any()))
+                .thenReturn(DistributedFallbackGuard.Decision.LEADER);
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<List<DisasterMessageCacheDto>>(
                         null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
@@ -103,7 +118,7 @@ class FallbackStormProtectionTest {
         verify(disasterAlertRepository, times(1))
                 .findAlerts(isNull(), isNull(), any(PageRequest.class));
         verify(redisReadCache, times(1))
-                .recordDbFallbackQuery("disaster_alert_repository", RedisReadCache.FallbackReason.REDIS_MISS);
+                .recordDbFallbackQuery("disaster_messages", "disaster_alert_repository", RedisReadCache.FallbackReason.REDIS_MISS, "leader");
     }
 
     private static <T> List<T> runConcurrent(int count, Callable<T> task) throws Exception {

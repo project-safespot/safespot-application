@@ -564,6 +564,21 @@ CloudWatch / RDS Enhanced Monitoring / Performance Insights
 - api-core admin action success/failure
 - api-core SQS publish success/failure/retry
 
+PromQL example:
+
+- `cache_hit_ratio_by_cache`
+  `sum by (cache) (increase(safespot_cache_requests_total{service=~"api-public-read.*",result="hit"}[5m])) / clamp_min(sum by (cache) (increase(safespot_cache_requests_total{service=~"api-public-read.*"}[5m])), 1)`
+- `cache_requests_increase_by_cache_result`
+  `sum by (cache, result) (increase(safespot_cache_requests_total{service=~"api-public-read.*"}[5m]))`
+- `db_fallback_increase_by_repository_reason`
+  `sum by (cache, repository, reason, result) (increase(safespot_db_fallback_queries_total{service=~"api-public-read.*"}[5m]))`
+- `redis_read_latency_p95_by_cache`
+  `histogram_quantile(0.95, sum by (le, cache) (rate(safespot_redis_read_seconds_bucket{service=~"api-public-read.*"}[5m])))`
+- `fallback_singleflight_by_cache_scope_result`
+  `sum by (cache, scope, result) (increase(safespot_fallback_singleflight_total{service=~"api-public-read.*"}[5m]))`
+- `cache_regeneration_requested_by_cache_reason_result`
+  `sum by (cache, reason, result) (increase(safespot_cache_regeneration_requested_total{service=~"api-public-read.*"}[5m]))`
+
 ### 7.2 Async-worker / SQS / Lambda dashboard
 
 필수 panel:

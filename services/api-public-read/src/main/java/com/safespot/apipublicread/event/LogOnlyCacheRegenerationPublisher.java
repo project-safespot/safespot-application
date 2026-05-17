@@ -1,5 +1,6 @@
 package com.safespot.apipublicread.event;
 
+import com.safespot.apipublicread.cache.PublicReadMetricRecorder;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +23,11 @@ public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPubli
 
     private final CacheKeyFamilyResolver resolver;
     private final MeterRegistry meterRegistry;
+    private final PublicReadMetricRecorder metricRecorder;
+
+    public LogOnlyCacheRegenerationPublisher(CacheKeyFamilyResolver resolver, MeterRegistry meterRegistry) {
+        this(resolver, meterRegistry, new PublicReadMetricRecorder(meterRegistry));
+    }
 
     private static final Map<String, String> TARGET_TYPE_TO_FAMILY = Map.of(
             "SHELTER_STATUS", "shelter_status",
@@ -47,12 +53,7 @@ public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPubli
                 "endpoint", endpoint,
                 "result", "success"
         ).increment();
-        meterRegistry.counter("safespot.cache.regeneration.requested",
-                "service", "api-public-read",
-                "cache", family.get(),
-                "reason", reason.value(),
-                "result", "success"
-        ).increment();
+        metricRecorder.recordCacheRegeneration(family.get(), reason.value(), "published");
     }
 
     @Override
@@ -70,12 +71,7 @@ public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPubli
                 "endpoint", endpoint,
                 "result", "success"
         ).increment();
-        meterRegistry.counter("safespot.cache.regeneration.requested",
-                "service", "api-public-read",
-                "cache", cacheFamily,
-                "reason", reason.value(),
-                "result", "success"
-        ).increment();
+        metricRecorder.recordCacheRegeneration(cacheFamily, reason.value(), "published");
     }
 
     @Override
@@ -90,11 +86,6 @@ public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPubli
                 "endpoint", endpoint,
                 "result", "success"
         ).increment();
-        meterRegistry.counter("safespot.cache.regeneration.requested",
-                "service", "api-public-read",
-                "cache", cacheFamily,
-                "reason", reason.value(),
-                "result", "success"
-        ).increment();
+        metricRecorder.recordCacheRegeneration(cacheFamily, reason.value(), "published");
     }
 }

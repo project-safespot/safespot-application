@@ -2,6 +2,9 @@ package com.safespot.apipublicread.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.safespot.apipublicread.cache.FallbackSingleFlight;
+import com.safespot.apipublicread.cache.DistributedFallbackGuard;
+import com.safespot.apipublicread.cache.FallbackControlProperties;
+import com.safespot.apipublicread.cache.PublicReadMetricRecorder;
 import com.safespot.apipublicread.cache.RedisReadCache;
 import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.domain.Shelter;
@@ -26,6 +29,7 @@ import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -52,10 +56,13 @@ class ShelterReadServiceTest {
     @Mock ShelterRepository shelterRepository;
     @Mock EvacuationEntryRepository evacuationEntryRepository;
     @Mock RedisReadCache redisReadCache;
+    @Mock DistributedFallbackGuard distributedFallbackGuard;
     @Mock SuppressWindowService suppressWindowService;
     @Mock CacheRegenerationPublisher cacheRegenerationPublisher;
     @Spy MeterRegistry meterRegistry = new SimpleMeterRegistry();
     @Spy FallbackSingleFlight fallbackSingleFlight = new FallbackSingleFlight(new SimpleMeterRegistry(), 2_000);
+    @Spy PublicReadMetricRecorder metricRecorder = new PublicReadMetricRecorder(new SimpleMeterRegistry());
+    @Spy FallbackControlProperties fallbackControlProperties = new FallbackControlProperties();
 
     @InjectMocks ShelterReadService shelterReadService;
 
@@ -74,6 +81,8 @@ class ShelterReadServiceTest {
         lenient().when(shelter.getCapacity()).thenReturn(120);
         lenient().when(shelter.getShelterStatus()).thenReturn("OPERATING");
         lenient().when(shelter.getUpdatedAt()).thenReturn(OffsetDateTime.now());
+        lenient().when(distributedFallbackGuard.tryAcquire(anyString(), anyString(), anyString(), any()))
+                .thenReturn(DistributedFallbackGuard.Decision.LEADER);
     }
 
     @Test
@@ -96,13 +105,13 @@ class ShelterReadServiceTest {
         when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_status"));
         when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenReturn(68L);
-        when(suppressWindowService.tryPublish("shelter:status:101")).thenReturn(true);
+        when(suppressWindowService.tryPublish(eq("shelter:status:101"), any(Duration.class))).thenReturn(true);
 
         ShelterDetailDto result = shelterReadService.findById(101L);
 
         assertThat(result.currentOccupancy()).isEqualTo(68);
         verify(redisReadCache).recordFallback(eq("shelter_status"), eq(RedisReadCache.FallbackReason.REDIS_MISS));
-        verify(redisReadCache).recordDbFallbackQuery("shelter_status_repository", RedisReadCache.FallbackReason.REDIS_MISS);
+        verify(redisReadCache).recordDbFallbackQuery("shelter_status", "shelter_status_repository", RedisReadCache.FallbackReason.REDIS_MISS, "leader");
         verify(cacheRegenerationPublisher).publish("shelter:status:101", CacheRegenerationReason.CACHE_MISS, "/shelters/{shelterId}");
     }
 
@@ -112,7 +121,7 @@ class ShelterReadServiceTest {
         when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_DOWN, "shelter_status"));
         when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenReturn(30L);
-        when(suppressWindowService.tryPublish("shelter:status:101")).thenReturn(true);
+        when(suppressWindowService.tryPublish(eq("shelter:status:101"), any(Duration.class))).thenReturn(true);
 
         ShelterDetailDto result = shelterReadService.findById(101L);
 
@@ -127,7 +136,7 @@ class ShelterReadServiceTest {
         when(redisReadCache.get(eq("shelter:status:101"), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_status"));
         when(evacuationEntryRepository.countCurrentOccupancy(101L)).thenReturn(10L);
-        when(suppressWindowService.tryPublish("shelter:status:101")).thenReturn(false);
+        when(suppressWindowService.tryPublish(eq("shelter:status:101"), any(Duration.class))).thenReturn(false);
 
         shelterReadService.findById(101L);
 
@@ -144,7 +153,7 @@ class ShelterReadServiceTest {
         ShelterDetailDto result = shelterReadService.findById(101L);
 
         assertThat(result.currentOccupancy()).isEqualTo(10);
-        verify(suppressWindowService, never()).tryPublish(anyString());
+        verify(suppressWindowService, never()).tryPublish(anyString(), any(Duration.class));
         verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
 
@@ -238,7 +247,7 @@ class ShelterReadServiceTest {
                         101L, hitStatus(12, 88),
                         202L, hitStatus(20, 80)
                 ));
-        when(suppressWindowService.tryPublish("shelter:map:item:batch")).thenReturn(true);
+        when(suppressWindowService.tryPublish(eq("shelter:map:item:batch"), any(Duration.class))).thenReturn(true);
 
         List<ShelterNearbyItem> result = shelterReadService.findNearby(37.5687, 126.9081, 1_000, null, null, 50);
 
@@ -252,7 +261,7 @@ class ShelterReadServiceTest {
     void nearby_geoMiss_publishesGeoIndexRegeneration() {
         when(redisReadCache.geoSearchShelterIds(anyString(), anyDouble(), anyDouble(), anyDouble(), anyInt()))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_geo_index"));
-        when(suppressWindowService.tryPublish("shelter:geo:seoul:all:all")).thenReturn(true);
+        when(suppressWindowService.tryPublish(eq("shelter:geo:seoul:all:all"), any(Duration.class))).thenReturn(true);
 
         List<ShelterNearbyItem> result = shelterReadService.findNearby(37.5687, 126.9081, 1_000, null, null, 50);
 
@@ -269,7 +278,7 @@ class ShelterReadServiceTest {
                 .thenReturn(Map.of(101L, new RedisReadCache.CacheResult<>(mapItem(101L), null, "shelter_map_item")));
         when(redisReadCache.multiGetShelterStatus(List.of(101L)))
                 .thenReturn(Map.of(101L, new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_status")));
-        when(suppressWindowService.tryPublish("shelter:status:batch")).thenReturn(true);
+        when(suppressWindowService.tryPublish(eq("shelter:status:batch"), any(Duration.class))).thenReturn(true);
 
         List<ShelterNearbyItem> result = shelterReadService.findNearby(37.5687, 126.9081, 1_000, null, null, 50);
 
@@ -362,7 +371,7 @@ class ShelterReadServiceTest {
         when(redisReadCache.multiGetShelterStatus(List.of(101L))).thenReturn(Map.of(
                 101L, new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_status")
         ));
-        when(suppressWindowService.tryPublish("shelter:status:batch")).thenReturn(true);
+        when(suppressWindowService.tryPublish(eq("shelter:status:batch"), any(Duration.class))).thenReturn(true);
 
         ShelterMapTilesResponse response = shelterReadService.findMapTiles(13, List.of("7285:3172"), null, null);
 
@@ -432,12 +441,12 @@ class ShelterReadServiceTest {
                         "shelter:map:tile:13:7285:3172:all:all",
                         new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "shelter_map_tile")
                 ));
-        when(suppressWindowService.tryPublish("shelter:map:tile:batch:13:all:all")).thenReturn(true);
+        when(suppressWindowService.tryPublish(eq("shelter:map:tile:13:7285:3172:all:all"), any(Duration.class))).thenReturn(true);
 
         ShelterMapTilesResponse response = shelterReadService.findMapTiles(13, List.of("7285:3172"), null, null);
 
         assertThat(response.tiles()).hasSize(1);
-        verify(cacheRegenerationPublisher).publishTarget("SHELTER_MAP_TILES", CacheRegenerationReason.CACHE_MISS, "/shelters/map/tiles");
+        verify(cacheRegenerationPublisher).publish("shelter:map:tile:13:7285:3172:all:all", CacheRegenerationReason.CACHE_MISS, "/shelters/map/tiles");
     }
 
     private RedisReadCache.CacheResult<ShelterStatusCacheDto> hitStatus(int occupancy, int available) {

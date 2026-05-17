@@ -26,8 +26,40 @@ public class SuppressWindowService {
         return tryAcquire(REGEN_PREFIX, cacheKey, SUPPRESS_TTL);
     }
 
+    public boolean tryPublish(String cacheKey, Duration ttl) {
+        return tryAcquire(REGEN_PREFIX, cacheKey, ttl);
+    }
+
     public boolean tryAllowDbFallback(String cacheKey) {
         return tryAcquire(DB_FALLBACK_PREFIX, cacheKey, SUPPRESS_TTL);
+    }
+
+    public boolean tryAllowDbFallback(String cacheKey, Duration ttl) {
+        return tryAcquire(DB_FALLBACK_PREFIX, cacheKey, ttl);
+    }
+
+    public boolean isDbFallbackSuppressed(String cacheKey) {
+        String suppressKey = DB_FALLBACK_PREFIX + hash(cacheKey);
+        try {
+            return Boolean.TRUE.equals(redisTemplate.hasKey(suppressKey));
+        } catch (RedisConnectionFailureException e) {
+            log.warn("[Suppress] Redis unavailable for key={}: {}", suppressKey, e.getMessage());
+            return false;
+        } catch (Exception e) {
+            log.warn("[Suppress] Redis error for key={}: {}", suppressKey, e.getMessage());
+            return false;
+        }
+    }
+
+    public void markDbFallbackSuppressed(String cacheKey, Duration ttl) {
+        String suppressKey = DB_FALLBACK_PREFIX + hash(cacheKey);
+        try {
+            redisTemplate.opsForValue().set(suppressKey, "1", ttl);
+        } catch (RedisConnectionFailureException e) {
+            log.warn("[Suppress] Redis unavailable for key={}: {}", suppressKey, e.getMessage());
+        } catch (Exception e) {
+            log.warn("[Suppress] Redis error for key={}: {}", suppressKey, e.getMessage());
+        }
     }
 
     private boolean tryAcquire(String prefix, String cacheKey, Duration ttl) {

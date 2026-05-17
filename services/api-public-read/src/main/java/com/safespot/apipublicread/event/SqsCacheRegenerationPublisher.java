@@ -1,6 +1,7 @@
 package com.safespot.apipublicread.event;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.safespot.apipublicread.cache.PublicReadMetricRecorder;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +24,21 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
     private final CacheRegenerationEnvelopeFactory envelopeFactory;
     private final CacheRegenerationPublishFailureRecorder failureRecorder;
     private final MeterRegistry meterRegistry;
+    private final PublicReadMetricRecorder metricRecorder;
+
+    public SqsCacheRegenerationPublisher(
+            SqsClient sqsClient,
+            SqsQueueUrlProvider queueUrlProvider,
+            ObjectMapper objectMapper,
+            CacheKeyFamilyResolver familyResolver,
+            CacheRegenerationRouteResolver routeResolver,
+            CacheRegenerationEnvelopeFactory envelopeFactory,
+            CacheRegenerationPublishFailureRecorder failureRecorder,
+            MeterRegistry meterRegistry
+    ) {
+        this(sqsClient, queueUrlProvider, objectMapper, familyResolver, routeResolver,
+                envelopeFactory, failureRecorder, meterRegistry, new PublicReadMetricRecorder(meterRegistry));
+    }
 
     @Override
     public void publish(String cacheKey, CacheRegenerationReason reason, String endpoint) {
@@ -56,6 +72,7 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
                     cacheFamily, cacheKey, queueType.label(), envelopeType, endpoint,
                     envelope.traceId(), envelope.idempotencyKey(), e.getMessage(), e);
             recordMetric(cacheFamily, queueType.label(), envelopeType, reason.value(), endpoint, "failure");
+            metricRecorder.recordCacheRegeneration(cacheFamily, reason.value(), "failed");
             return;
         }
 
@@ -68,12 +85,14 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
                     cacheFamily, cacheKey, queueType.label(), envelopeType, endpoint,
                     envelope.traceId(), envelope.idempotencyKey());
             recordMetric(cacheFamily, queueType.label(), envelopeType, reason.value(), endpoint, "success");
+            metricRecorder.recordCacheRegeneration(cacheFamily, reason.value(), "published");
         } catch (Exception e) {
             log.error("[CacheRegen] SQS send failed cacheFamily={} cacheKey={} queueType={} envelopeType={} eventId={} endpoint={} traceId={} idempotencyKey={}: {}",
                     cacheFamily, cacheKey, queueType.label(), envelopeType,
                     envelope.eventId(), endpoint, envelope.traceId(), envelope.idempotencyKey(), e.getMessage());
             failureRecorder.record(envelope, body, queueType, envelopeType);
             recordMetric(cacheFamily, queueType.label(), envelopeType, reason.value(), endpoint, "failure");
+            metricRecorder.recordCacheRegeneration(cacheFamily, reason.value(), "failed");
         }
     }
 
@@ -123,12 +142,14 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
             log.info("[CacheRegen] batch published cacheFamily={} targetType={} count={} endpoint={} traceId={} idempotencyKey={}",
                     cacheFamily, targetType, targetIds.size(), endpoint, envelope.traceId(), envelope.idempotencyKey());
             recordBatchMetric(cacheFamily, queueType.label(), reason.value(), endpoint, "success");
+            metricRecorder.recordCacheRegeneration(cacheFamily, reason.value(), "published");
         } catch (Exception e) {
             log.error("[CacheRegen] batch SQS send failed cacheFamily={} targetType={} count={} endpoint={} traceId={} idempotencyKey={}: {}",
                     cacheFamily, targetType, targetIds.size(), endpoint,
                     envelope.traceId(), envelope.idempotencyKey(), e.getMessage());
             failureRecorder.record(envelope, body, queueType, "batch");
             recordBatchMetric(cacheFamily, queueType.label(), reason.value(), endpoint, "failure");
+            metricRecorder.recordCacheRegeneration(cacheFamily, reason.value(), "failed");
         }
     }
 
@@ -166,11 +187,13 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
             log.info("[CacheRegen] target published cacheFamily={} targetType={} endpoint={} traceId={} idempotencyKey={}",
                     cacheFamily, targetType, endpoint, envelope.traceId(), envelope.idempotencyKey());
             recordBatchMetric(cacheFamily, queueType.label(), reason.value(), endpoint, "success");
+            metricRecorder.recordCacheRegeneration(cacheFamily, reason.value(), "published");
         } catch (Exception e) {
             log.error("[CacheRegen] target SQS send failed cacheFamily={} targetType={} endpoint={} traceId={} idempotencyKey={}: {}",
                     cacheFamily, targetType, endpoint, envelope.traceId(), envelope.idempotencyKey(), e.getMessage());
             failureRecorder.record(envelope, body, queueType, "batch");
             recordBatchMetric(cacheFamily, queueType.label(), reason.value(), endpoint, "failure");
+            metricRecorder.recordCacheRegeneration(cacheFamily, reason.value(), "failed");
         }
     }
 
@@ -180,12 +203,6 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
                 "cache", cacheFamily,
                 "queue", queue,
                 "envelope", "batch",
-                "reason", reason,
-                "result", result
-        ).increment();
-        meterRegistry.counter("safespot.cache.regeneration.requested",
-                "service", "api-public-read",
-                "cache", cacheFamily,
                 "reason", reason,
                 "result", result
         ).increment();
@@ -203,12 +220,6 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
                 "cache", cacheFamily,
                 "queue", queue,
                 "envelope", envelopeType,
-                "reason", reason,
-                "result", result
-        ).increment();
-        meterRegistry.counter("safespot.cache.regeneration.requested",
-                "service", "api-public-read",
-                "cache", cacheFamily,
                 "reason", reason,
                 "result", result
         ).increment();

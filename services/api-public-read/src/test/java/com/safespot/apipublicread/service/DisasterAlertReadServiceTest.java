@@ -2,6 +2,9 @@ package com.safespot.apipublicread.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.safespot.apipublicread.cache.FallbackSingleFlight;
+import com.safespot.apipublicread.cache.DistributedFallbackGuard;
+import com.safespot.apipublicread.cache.FallbackControlProperties;
+import com.safespot.apipublicread.cache.PublicReadMetricRecorder;
 import com.safespot.apipublicread.cache.RedisReadCache;
 import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.domain.DisasterAlert;
@@ -25,6 +28,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 
 import java.time.OffsetDateTime;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
@@ -51,10 +55,13 @@ class DisasterAlertReadServiceTest {
 
     @Mock DisasterAlertRepository disasterAlertRepository;
     @Mock RedisReadCache redisReadCache;
+    @Mock DistributedFallbackGuard distributedFallbackGuard;
     @Mock SuppressWindowService suppressWindowService;
     @Mock CacheRegenerationPublisher cacheRegenerationPublisher;
     @Spy MeterRegistry meterRegistry = new SimpleMeterRegistry();
     @Spy FallbackSingleFlight fallbackSingleFlight = new FallbackSingleFlight(new SimpleMeterRegistry(), 2_000);
+    @Spy PublicReadMetricRecorder metricRecorder = new PublicReadMetricRecorder(new SimpleMeterRegistry());
+    @Spy FallbackControlProperties fallbackControlProperties = new FallbackControlProperties();
 
     @InjectMocks DisasterAlertReadService disasterAlertReadService;
 
@@ -67,6 +74,12 @@ class DisasterAlertReadServiceTest {
     private static final DisasterMessageCacheDto FLOOD_ITEM = new DisasterMessageCacheDto(
             1, 56L, "FLOOD", "flood", "ALERT", "DANGER", 3,
             "seoul", "2026-04-14T09:00:00+09:00", null, "flood message", "MOIS", true);
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() {
+        lenient().when(distributedFallbackGuard.tryAcquire(anyString(), anyString(), anyString(), any()))
+                .thenReturn(DistributedFallbackGuard.Decision.LEADER);
+    }
 
     @Test
     void findAlerts_cacheHit_filterByType_returnsMatchingItems() {
@@ -98,7 +111,7 @@ class DisasterAlertReadServiceTest {
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
         DisasterAlert alert = stubAlert(55L, "EARTHQUAKE");
         when(disasterAlertRepository.findAlerts(isNull(), isNull(), any(PageRequest.class))).thenReturn(List.of(alert));
-        when(suppressWindowService.tryPublish(LIST_KEY)).thenReturn(true);
+        when(suppressWindowService.tryPublish(eq(LIST_KEY), any(Duration.class))).thenReturn(true);
 
         List<DisasterAlertItem> result = disasterAlertReadService.findAlerts("seoul", "EARTHQUAKE");
 
@@ -128,7 +141,7 @@ class DisasterAlertReadServiceTest {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
         when(disasterAlertRepository.findAlerts(any(), any(), any(PageRequest.class))).thenReturn(List.of());
-        when(suppressWindowService.tryPublish(LIST_KEY)).thenReturn(false);
+        when(suppressWindowService.tryPublish(eq(LIST_KEY), any(Duration.class))).thenReturn(false);
 
         disasterAlertReadService.findAlerts(null, null);
 
@@ -143,7 +156,7 @@ class DisasterAlertReadServiceTest {
 
         disasterAlertReadService.findAlerts(null, null);
 
-        verify(suppressWindowService, never()).tryPublish(anyString());
+        verify(suppressWindowService, never()).tryPublish(anyString(), any(Duration.class));
         verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
     }
 
@@ -173,7 +186,7 @@ class DisasterAlertReadServiceTest {
         when(redisReadCache.get(eq(DETAIL_KEY_55), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_detail"));
         when(disasterAlertRepository.findById(55L)).thenReturn(Optional.of(alert));
-        when(suppressWindowService.tryPublish(DETAIL_KEY_55)).thenReturn(true);
+        when(suppressWindowService.tryPublish(eq(DETAIL_KEY_55), any(Duration.class))).thenReturn(true);
         when(suppressWindowService.tryAllowDbFallback(DB_FALLBACK_KEY_55)).thenReturn(true);
 
         DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "seoul");
@@ -190,7 +203,7 @@ class DisasterAlertReadServiceTest {
                 .thenReturn(new RedisReadCache.CacheResult<>(List.of(EARTHQUAKE_ITEM), null));
         when(redisReadCache.get(eq(DETAIL_KEY_55), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_detail"));
-        when(suppressWindowService.tryPublish(DETAIL_KEY_55)).thenReturn(true);
+        when(suppressWindowService.tryPublish(eq(DETAIL_KEY_55), any(Duration.class))).thenReturn(true);
         when(suppressWindowService.tryAllowDbFallback(DB_FALLBACK_KEY_55)).thenReturn(false);
 
         DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "seoul");
@@ -206,7 +219,7 @@ class DisasterAlertReadServiceTest {
                 .thenReturn(new RedisReadCache.CacheResult<>(List.of(EARTHQUAKE_ITEM), null));
         when(redisReadCache.get(eq(DETAIL_KEY_55), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_detail"));
-        when(suppressWindowService.tryPublish(DETAIL_KEY_55)).thenReturn(true);
+        when(suppressWindowService.tryPublish(eq(DETAIL_KEY_55), any(Duration.class))).thenReturn(true);
         when(suppressWindowService.tryAllowDbFallback(DB_FALLBACK_KEY_55)).thenReturn(true);
 
         CountDownLatch leaderStarted = new CountDownLatch(1);
@@ -251,7 +264,7 @@ class DisasterAlertReadServiceTest {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
         when(disasterAlertRepository.findAlerts(isNull(), isNull(), any(PageRequest.class))).thenReturn(List.of(alert));
-        when(suppressWindowService.tryPublish(LIST_KEY)).thenReturn(true);
+        when(suppressWindowService.tryPublish(eq(LIST_KEY), any(Duration.class))).thenReturn(true);
 
         DisasterLatestDto result = disasterAlertReadService.findLatest("EARTHQUAKE", "seoul");
 
@@ -265,7 +278,7 @@ class DisasterAlertReadServiceTest {
         when(redisReadCache.get(eq(LIST_KEY), any(TypeReference.class)))
                 .thenReturn(new RedisReadCache.CacheResult<>(null, RedisReadCache.FallbackReason.REDIS_MISS, "disaster_messages"));
         when(disasterAlertRepository.findAlerts(isNull(), isNull(), any(PageRequest.class))).thenReturn(List.of());
-        when(suppressWindowService.tryPublish(LIST_KEY)).thenReturn(false);
+        when(suppressWindowService.tryPublish(eq(LIST_KEY), any(Duration.class))).thenReturn(false);
 
         assertThatThrownBy(() -> disasterAlertReadService.findLatest("EARTHQUAKE", "seoul"))
                 .isInstanceOf(ApiException.class);
