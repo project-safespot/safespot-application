@@ -2,6 +2,8 @@ package com.safespot.apipublicread.event;
 
 import lombok.RequiredArgsConstructor;
 
+import java.util.Optional;
+
 @RequiredArgsConstructor
 public class SqsQueueUrlProvider {
 
@@ -15,5 +17,11 @@ public class SqsQueueUrlProvider {
             case READMODEL_REFRESH -> readModelRefreshQueueUrl;
             case ENVIRONMENT_CACHE_REFRESH -> environmentCacheRefreshQueueUrl;
         };
+    }
+
+    public Optional<String> find(QueueType queueType) {
+        return Optional.ofNullable(get(queueType))
+                .map(String::trim)
+                .filter(value -> !value.isBlank());
     }
 }

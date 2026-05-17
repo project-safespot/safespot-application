@@ -9,6 +9,7 @@ import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.Timer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.geo.GeoResults;
 import org.springframework.data.redis.RedisConnectionFailureException;
@@ -32,7 +33,6 @@ import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class RedisReadCache {
 
     private final StringRedisTemplate redisTemplate;
@@ -40,7 +40,16 @@ public class RedisReadCache {
     private final MeterRegistry meterRegistry;
     private final PublicReadMetricRecorder metricRecorder;
 
+    @Autowired
     public RedisReadCache(StringRedisTemplate redisTemplate, ObjectMapper objectMapper,
+                          MeterRegistry meterRegistry, PublicReadMetricRecorder metricRecorder) {
+        this.redisTemplate = redisTemplate;
+        this.objectMapper = objectMapper;
+        this.meterRegistry = meterRegistry;
+        this.metricRecorder = metricRecorder;
+    }
+
+    RedisReadCache(StringRedisTemplate redisTemplate, ObjectMapper objectMapper,
                           MeterRegistry meterRegistry) {
         this(redisTemplate, objectMapper, meterRegistry, new PublicReadMetricRecorder(meterRegistry));
     }

@@ -1,6 +1,7 @@
 package com.safespot.apipublicread.cache;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.CompletableFuture;
@@ -24,6 +25,7 @@ public class FallbackSingleFlight {
     private final long timeoutMs;
     private final ConcurrentMap<String, CompletableFuture<Object>> inFlight = new ConcurrentHashMap<>();
 
+    @Autowired
     public FallbackSingleFlight(
             PublicReadMetricRecorder metricRecorder,
             @Value("${safespot.public-read.fallback-singleflight.timeout-ms:2000}") long timeoutMs

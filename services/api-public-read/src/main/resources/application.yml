@@ -1,8 +1,6 @@
 spring:
   application:
     name: api-public-read
-  profiles:
-    active: local
 
 server:
   port: 8080

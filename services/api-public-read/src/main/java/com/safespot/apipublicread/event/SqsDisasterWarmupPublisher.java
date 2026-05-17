@@ -20,6 +20,11 @@ public class SqsDisasterWarmupPublisher implements DisasterWarmupPublisher {
     public void publish(int limit, boolean includeDetails) {
         DisasterWarmupEnvelope envelope = DisasterWarmupEnvelope.build(limit, includeDetails);
         String queueUrl = queueUrlProvider.get(QueueType.READMODEL_REFRESH);
+        if (queueUrl == null || queueUrl.isBlank()) {
+            log.warn("[DisasterWarmup] disabled: queue URL missing for queueType={}", QueueType.READMODEL_REFRESH.label());
+            recordMetric("disabled");
+            return;
+        }
         String body;
         try {
             body = objectMapper.writeValueAsString(envelope);

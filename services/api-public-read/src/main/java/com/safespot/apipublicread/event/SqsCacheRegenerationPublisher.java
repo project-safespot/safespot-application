@@ -62,6 +62,13 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
         QueueType queueType = route.queueType();
         String envelopeType = route.envelopeType();
         String queueUrl = queueUrlProvider.get(queueType);
+        if (queueUrl == null || queueUrl.isBlank()) {
+            log.warn("[CacheRegen] disabled cacheFamily={} cacheKey={} queueType={} endpoint={} reason={}: queue URL missing",
+                    cacheFamily, cacheKey, queueType.label(), endpoint, reason.value());
+            recordMetric(cacheFamily, queueType.label(), envelopeType, reason.value(), endpoint, "disabled");
+            metricRecorder.recordCacheRegeneration(cacheFamily, reason.value(), "disabled");
+            return;
+        }
 
         CacheRegenerationEnvelope envelope = envelopeFactory.build(queueType, cacheKey, cacheFamily, reason);
         String body;
@@ -123,6 +130,13 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
         }
         QueueType queueType = routeOpt.get().queueType();
         String queueUrl = queueUrlProvider.get(queueType);
+        if (queueUrl == null || queueUrl.isBlank()) {
+            log.warn("[CacheRegen] batch disabled cacheFamily={} targetType={} queueType={} endpoint={} reason={}: queue URL missing",
+                    cacheFamily, targetType, queueType.label(), endpoint, reason.value());
+            recordBatchMetric(cacheFamily, queueType.label(), reason.value(), endpoint, "disabled");
+            metricRecorder.recordCacheRegeneration(cacheFamily, reason.value(), "disabled");
+            return;
+        }
 
         CacheRegenerationEnvelope envelope = envelopeFactory.buildBatch(cacheFamily, targetType, targetIds, reason);
         String body;
@@ -168,6 +182,13 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
         }
         QueueType queueType = routeOpt.get().queueType();
         String queueUrl = queueUrlProvider.get(queueType);
+        if (queueUrl == null || queueUrl.isBlank()) {
+            log.warn("[CacheRegen] target disabled cacheFamily={} targetType={} queueType={} endpoint={} reason={}: queue URL missing",
+                    cacheFamily, targetType, queueType.label(), endpoint, reason.value());
+            recordBatchMetric(cacheFamily, queueType.label(), reason.value(), endpoint, "disabled");
+            metricRecorder.recordCacheRegeneration(cacheFamily, reason.value(), "disabled");
+            return;
+        }
 
         CacheRegenerationEnvelope envelope = envelopeFactory.buildTarget(cacheFamily, targetType, reason);
         String body;

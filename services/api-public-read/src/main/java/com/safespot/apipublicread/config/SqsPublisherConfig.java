@@ -14,7 +14,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.util.Assert;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.sqs.SqsClient;
 
@@ -38,15 +37,9 @@ public class SqsPublisherConfig {
 
     @Bean
     public SqsQueueUrlProvider sqsQueueUrlProvider(
-            @Value("${safespot.aws.sqs.cache-refresh-queue-url}") String cacheRefreshQueueUrl,
-            @Value("${safespot.aws.sqs.readmodel-refresh-queue-url}") String readModelRefreshQueueUrl,
-            @Value("${safespot.aws.sqs.environment-cache-refresh-queue-url}") String environmentCacheRefreshQueueUrl) {
-        Assert.hasText(cacheRefreshQueueUrl,
-                "safespot.aws.sqs.cache-refresh-queue-url must not be empty");
-        Assert.hasText(readModelRefreshQueueUrl,
-                "safespot.aws.sqs.readmodel-refresh-queue-url must not be empty");
-        Assert.hasText(environmentCacheRefreshQueueUrl,
-                "safespot.aws.sqs.environment-cache-refresh-queue-url must not be empty");
+            @Value("${safespot.aws.sqs.cache-refresh-queue-url:}") String cacheRefreshQueueUrl,
+            @Value("${safespot.aws.sqs.readmodel-refresh-queue-url:}") String readModelRefreshQueueUrl,
+            @Value("${safespot.aws.sqs.environment-cache-refresh-queue-url:}") String environmentCacheRefreshQueueUrl) {
         return new SqsQueueUrlProvider(cacheRefreshQueueUrl, readModelRefreshQueueUrl, environmentCacheRefreshQueueUrl);
     }
 

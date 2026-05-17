@@ -4,6 +4,7 @@ import com.safespot.apipublicread.cache.PublicReadMetricRecorder;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -18,14 +19,21 @@ import java.util.Optional;
         havingValue = "log",
         matchIfMissing = true
 )
-@RequiredArgsConstructor
 public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPublisher {
 
     private final CacheKeyFamilyResolver resolver;
     private final MeterRegistry meterRegistry;
     private final PublicReadMetricRecorder metricRecorder;
 
-    public LogOnlyCacheRegenerationPublisher(CacheKeyFamilyResolver resolver, MeterRegistry meterRegistry) {
+    @Autowired
+    public LogOnlyCacheRegenerationPublisher(CacheKeyFamilyResolver resolver, MeterRegistry meterRegistry,
+                                             PublicReadMetricRecorder metricRecorder) {
+        this.resolver = resolver;
+        this.meterRegistry = meterRegistry;
+        this.metricRecorder = metricRecorder;
+    }
+
+    LogOnlyCacheRegenerationPublisher(CacheKeyFamilyResolver resolver, MeterRegistry meterRegistry) {
         this(resolver, meterRegistry, new PublicReadMetricRecorder(meterRegistry));
     }
 
