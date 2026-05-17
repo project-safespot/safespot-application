@@ -2,8 +2,8 @@ package com.safespot.apipublicread.event;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
@@ -11,9 +11,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-@Slf4j
-@RequiredArgsConstructor
 public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher {
+
+    private static final Logger log = LoggerFactory.getLogger(SqsCacheRegenerationPublisher.class);
 
     private final SqsClient sqsClient;
     private final SqsQueueUrlProvider queueUrlProvider;
@@ -23,6 +23,26 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
     private final CacheRegenerationEnvelopeFactory envelopeFactory;
     private final CacheRegenerationPublishFailureRecorder failureRecorder;
     private final MeterRegistry meterRegistry;
+
+    public SqsCacheRegenerationPublisher(
+            SqsClient sqsClient,
+            SqsQueueUrlProvider queueUrlProvider,
+            ObjectMapper objectMapper,
+            CacheKeyFamilyResolver familyResolver,
+            CacheRegenerationRouteResolver routeResolver,
+            CacheRegenerationEnvelopeFactory envelopeFactory,
+            CacheRegenerationPublishFailureRecorder failureRecorder,
+            MeterRegistry meterRegistry
+    ) {
+        this.sqsClient = sqsClient;
+        this.queueUrlProvider = queueUrlProvider;
+        this.objectMapper = objectMapper;
+        this.familyResolver = familyResolver;
+        this.routeResolver = routeResolver;
+        this.envelopeFactory = envelopeFactory;
+        this.failureRecorder = failureRecorder;
+        this.meterRegistry = meterRegistry;
+    }
 
     @Override
     public void publish(String cacheKey, CacheRegenerationReason reason, String endpoint) {

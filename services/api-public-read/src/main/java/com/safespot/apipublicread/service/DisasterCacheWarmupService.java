@@ -4,15 +4,16 @@ import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.dto.DisasterCacheWarmupRequest;
 import com.safespot.apipublicread.event.DisasterWarmupPublisher;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-@Slf4j
 @Service
 @RequiredArgsConstructor
 public class DisasterCacheWarmupService {
 
     private static final String WARMUP_SUPPRESS_KEY = "disaster:warmup:all";
+    private static final Logger log = LoggerFactory.getLogger(DisasterCacheWarmupService.class);
 
     private final SuppressWindowService suppressWindowService;
     private final DisasterWarmupPublisher disasterWarmupPublisher;

@@ -1,26 +1,26 @@
 package com.safespot.apipublicread.cache;
 
-import io.micrometer.core.instrument.MeterRegistry;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.RedisConnectionFailureException;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.stereotype.Component;
-
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Component;
 
-@Slf4j
 @Component
 public class SuppressWindowService {
 
     private static final Duration SUPPRESS_TTL = Duration.ofSeconds(30);
     private static final String REGEN_PREFIX = "suppress:cache-regeneration:";
     private static final String DB_FALLBACK_PREFIX = "suppress:db-fallback:";
+    private static final Logger log = LoggerFactory.getLogger(SuppressWindowService.class);
 
     private final StringRedisTemplate redisTemplate;
     private final MeterRegistry meterRegistry;
