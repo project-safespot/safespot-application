@@ -4,7 +4,6 @@ public final class RedisKeyConstants {
 
     private RedisKeyConstants() {}
 
-    public static final String SHELTER_DETAIL              = "shelter:detail:%d";
     public static final String SHELTER_STATUS              = "shelter:status:%d";
     public static final String SHELTER_MAP_ITEM            = "shelter:map:item:%d";
     public static final String SHELTER_GEO                 = "shelter:geo:seoul:%s:%s";
@@ -20,10 +19,6 @@ public final class RedisKeyConstants {
     public static final String ENVIRONMENT_WEATHER_ALERT   = "environment:weather-alert:seoul";
 
     public static final String IDEMPOTENCY                 = "idempotency:%s";
-
-    public static String shelterDetail(Long shelterId) {
-        return SHELTER_DETAIL.formatted(shelterId);
-    }
 
     public static String shelterStatus(Long shelterId) {
         return SHELTER_STATUS.formatted(shelterId);

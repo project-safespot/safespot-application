@@ -17,7 +17,6 @@ class CacheKeyFamilyResolverTest {
             "disaster:messages:list:seoul, disaster_messages_list",
             "disaster:detail:42, disaster_detail",
             "disaster:detail:999999, disaster_detail",
-            "shelter:detail:101, shelter_detail",
             "shelter:status:1, shelter_status",
             "shelter:status:101, shelter_status",
             "environment:weather:seoul, environment_weather",

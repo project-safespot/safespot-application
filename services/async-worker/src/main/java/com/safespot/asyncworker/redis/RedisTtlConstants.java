@@ -11,7 +11,6 @@ public final class RedisTtlConstants {
     // 최신성은 ingestion/update event 기반 regeneration이 담당한다.
     // cache-ttl.md 기준
 
-    public static final Duration SHELTER_DETAIL            = Duration.ofSeconds(3600);
     public static final Duration SHELTER_STATUS            = Duration.ofSeconds(3600);
     // shelter:map:item / shelter:map:tile 는 persistent read model 이므로 writer에서 TTL을 사용하지 않는다.
     // 상수는 기존 테스트/호환성용으로 남겨 둔다.

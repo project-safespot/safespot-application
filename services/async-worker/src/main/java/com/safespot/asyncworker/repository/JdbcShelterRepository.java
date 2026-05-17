@@ -27,15 +27,6 @@ public class JdbcShelterRepository implements ShelterRepository {
     private static final String MAP_READ_MODEL_SELECT =
         "SELECT shelter_id, name, shelter_type, disaster_type, address, capacity, latitude, longitude, updated_at FROM shelter";
 
-    private static final String DETAIL_READ_MODEL_SELECT =
-        "SELECT shelter_id, name, shelter_type, disaster_type, address, capacity, manager, contact, note, latitude, longitude, updated_at FROM shelter";
-
-    private static final String FIND_ALL_FOR_DETAIL_READ_MODEL_SQL =
-        DETAIL_READ_MODEL_SELECT;
-
-    private static final String FIND_BY_IDS_FOR_DETAIL_READ_MODEL_SQL =
-        DETAIL_READ_MODEL_SELECT + " WHERE shelter_id IN (:shelterIds)";
-
     private static final String FIND_ALL_FOR_MAP_READ_MODEL_SQL =
         MAP_READ_MODEL_SELECT;
 
@@ -96,23 +87,6 @@ public class JdbcShelterRepository implements ShelterRepository {
     }
 
     @Override
-    public List<ShelterDetailSource> findAllForDetailReadModel() {
-        return jdbcTemplate.query(FIND_ALL_FOR_DETAIL_READ_MODEL_SQL, (rs, rowNum) -> mapShelterDetailSource(rs));
-    }
-
-    @Override
-    public List<ShelterDetailSource> findByIdsForDetailReadModel(List<Long> shelterIds) {
-        if (shelterIds == null || shelterIds.isEmpty()) {
-            return List.of();
-        }
-        return jdbcTemplate.query(
-            FIND_BY_IDS_FOR_DETAIL_READ_MODEL_SQL,
-            Map.of("shelterIds", shelterIds),
-            (rs, rowNum) -> mapShelterDetailSource(rs)
-        );
-    }
-
-    @Override
     public List<ShelterMapSource> findByIdsForMapItems(List<Long> shelterIds) {
         if (shelterIds == null || shelterIds.isEmpty()) {
             return List.of();
@@ -132,23 +106,6 @@ public class JdbcShelterRepository implements ShelterRepository {
             rs.getString("disaster_type"),
             rs.getString("address"),
             rs.getObject("capacity", Integer.class),
-            rs.getBigDecimal("latitude"),
-            rs.getBigDecimal("longitude"),
-            rs.getObject("updated_at", java.time.OffsetDateTime.class)
-        );
-    }
-
-    private ShelterDetailSource mapShelterDetailSource(java.sql.ResultSet rs) throws java.sql.SQLException {
-        return new ShelterDetailSource(
-            rs.getLong("shelter_id"),
-            rs.getString("name"),
-            rs.getString("shelter_type"),
-            rs.getString("disaster_type"),
-            rs.getString("address"),
-            rs.getObject("capacity", Integer.class),
-            rs.getString("manager"),
-            rs.getString("contact"),
-            rs.getString("note"),
             rs.getBigDecimal("latitude"),
             rs.getBigDecimal("longitude"),
             rs.getObject("updated_at", java.time.OffsetDateTime.class)

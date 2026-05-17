@@ -78,7 +78,6 @@ public class SqsCacheRegenerationPublisher implements CacheRegenerationPublisher
     }
 
     private static final Map<String, String> TARGET_TYPE_TO_FAMILY = Map.of(
-            "SHELTER_DETAIL", "shelter_detail",
             "SHELTER_STATUS", "shelter_status",
             "SHELTER_MAP_ITEMS", "shelter_map_item",
             "SHELTER_GEO_INDEX", "shelter_geo_index",

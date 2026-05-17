@@ -10,7 +10,6 @@ import com.safespot.asyncworker.payload.CacheRegenerationRequestedPayload;
 import com.safespot.asyncworker.redis.RedisKeyConstants;
 import com.safespot.asyncworker.service.disaster.DisasterReadModelService;
 import com.safespot.asyncworker.service.environment.EnvironmentCacheService;
-import com.safespot.asyncworker.service.shelter.ShelterDetailReadModelService;
 import com.safespot.asyncworker.service.shelter.ShelterMapReadModelService;
 import com.safespot.asyncworker.service.shelter.ShelterStatusService;
 import lombok.RequiredArgsConstructor;
@@ -26,11 +25,9 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class CacheRegenerationAsyncWorkerHandler implements EventHandler {
 
-    private static final String SHELTER_DETAIL_PREFIX = "shelter:detail:";
     private static final String SHELTER_STATUS_PREFIX = "shelter:status:";
     private static final String DISASTER_DETAIL_PREFIX = "disaster:detail:";
 
-    private final ShelterDetailReadModelService shelterDetailReadModelService;
     private final ShelterStatusService shelterStatusService;
     private final ShelterMapReadModelService shelterMapReadModelService;
     private final EnvironmentCacheService environmentCacheService;
@@ -73,14 +70,6 @@ public class CacheRegenerationAsyncWorkerHandler implements EventHandler {
     private void handleByTargetType(CacheRegenerationRequestedPayload payload, String cacheKeyFamily) {
         CacheRegenerationTargetType targetType = CacheRegenerationTargetType.from(payload.targetType());
         switch (targetType) {
-            case SHELTER_DETAIL -> {
-                if (payload.targetIds() == null || payload.targetIds().isEmpty()) {
-                    shelterDetailReadModelService.rebuildAllDetails();
-                    return;
-                }
-                shelterDetailReadModelService.rebuildDetails(payload.targetIds());
-                return;
-            }
             case SHELTER_STATUS -> {
                 if (payload.targetIds() != null && !payload.targetIds().isEmpty()) {
                     shelterStatusService.recalculateBatch(payload.targetIds());
@@ -123,14 +112,6 @@ public class CacheRegenerationAsyncWorkerHandler implements EventHandler {
             String idStr = cacheKey.substring(SHELTER_STATUS_PREFIX.length());
             Long shelterId = parseLongId(idStr, cacheKey);
             shelterStatusService.recalculate(shelterId);
-            workerMetrics.incrementCacheRegenerationCompleted(payload.cacheKeyFamily());
-            return;
-        }
-
-        if (cacheKey.startsWith(SHELTER_DETAIL_PREFIX)) {
-            String idStr = cacheKey.substring(SHELTER_DETAIL_PREFIX.length());
-            Long shelterId = parseLongId(idStr, cacheKey);
-            shelterDetailReadModelService.rebuildDetails(List.of(shelterId));
             workerMetrics.incrementCacheRegenerationCompleted(payload.cacheKeyFamily());
             return;
         }

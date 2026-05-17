@@ -3,10 +3,8 @@ package com.safespot.apipublicread.cache;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -124,76 +122,6 @@ class FallbackSingleFlightTest {
             releaseLeader.countDown();
             executor.shutdownNow();
         }
-    }
-
-    @Test
-    void sameKey_sequentialRequestsWithinMemoTtlReuseResult() {
-        FallbackSingleFlight singleFlight = new FallbackSingleFlight(new SimpleMeterRegistry(), 1_000);
-        AtomicInteger calls = new AtomicInteger();
-
-        String first = singleFlight.executeMemoized("shelter:detail:101", "shelter_detail", "shelter_detail_repository",
-                Duration.ofMillis(200), () -> "ok-" + calls.incrementAndGet());
-        String second = singleFlight.executeMemoized("shelter:detail:101", "shelter_detail", "shelter_detail_repository",
-                Duration.ofMillis(200), () -> "ok-" + calls.incrementAndGet());
-
-        assertThat(first).isEqualTo("ok-1");
-        assertThat(second).isEqualTo("ok-1");
-        assertThat(calls).hasValue(1);
-    }
-
-    @Test
-    void sameKey_afterMemoTtlExecutesSupplierAgain() {
-        FallbackSingleFlight singleFlight = new FallbackSingleFlight(new SimpleMeterRegistry(), 1_000);
-        AtomicInteger calls = new AtomicInteger();
-
-        String first = singleFlight.executeMemoized("shelter:detail:101", "shelter_detail", "shelter_detail_repository",
-                Duration.ofMillis(50), () -> "ok-" + calls.incrementAndGet());
-        sleep(80);
-        String second = singleFlight.executeMemoized("shelter:detail:101", "shelter_detail", "shelter_detail_repository",
-                Duration.ofMillis(50), () -> "ok-" + calls.incrementAndGet());
-
-        assertThat(first).isEqualTo("ok-1");
-        assertThat(second).isEqualTo("ok-2");
-        assertThat(calls).hasValue(2);
-    }
-
-    @Test
-    void leaderFailureIsNotMemoized() {
-        FallbackSingleFlight singleFlight = new FallbackSingleFlight(new SimpleMeterRegistry(), 1_000);
-        AtomicInteger calls = new AtomicInteger();
-
-        assertThatThrownBy(() -> singleFlight.executeMemoized(
-                "shelter:detail:101",
-                "shelter_detail",
-                "shelter_detail_repository",
-                Duration.ofMillis(200),
-                () -> {
-                    calls.incrementAndGet();
-                    throw new IllegalStateException("db failed");
-                }
-        )).hasMessageContaining("db failed");
-
-        String result = singleFlight.executeMemoized(
-                "shelter:detail:101",
-                "shelter_detail",
-                "shelter_detail_repository",
-                Duration.ofMillis(200),
-                () -> "ok-" + calls.incrementAndGet()
-        );
-
-        assertThat(result).isEqualTo("ok-2");
-        assertThat(calls).hasValue(2);
-    }
-
-    @Test
-    void memoSizeDoesNotGrowUnbounded() {
-        FallbackSingleFlight singleFlight = new FallbackSingleFlight(new SimpleMeterRegistry(), 1_000, 2);
-
-        singleFlight.executeMemoized("k1", "shelter_detail", "repo", Duration.ofSeconds(1), () -> Optional.of("a"));
-        singleFlight.executeMemoized("k2", "shelter_detail", "repo", Duration.ofSeconds(1), () -> Optional.of("b"));
-        singleFlight.executeMemoized("k3", "shelter_detail", "repo", Duration.ofSeconds(1), () -> Optional.of("c"));
-
-        assertThat(singleFlight.memoizedSize()).isLessThanOrEqualTo(2);
     }
 
     private static <T> List<T> runConcurrent(int count, Callable<T> task) throws Exception {

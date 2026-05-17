@@ -2,7 +2,6 @@ package com.safespot.apipublicread.cache;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.safespot.apipublicread.dto.cache.ShelterDetailCacheDto;
 import com.safespot.apipublicread.dto.cache.ShelterMapItemCacheDto;
 import com.safespot.apipublicread.dto.cache.ShelterStatusCacheDto;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -43,7 +42,6 @@ public class RedisReadCache {
     public enum CacheMetricLabel {
         DISASTER_MESSAGES("disaster_messages"),
         DISASTER_DETAIL("disaster_detail"),
-        SHELTER_DETAIL("shelter_detail"),
         SHELTER_STATUS("shelter_status"),
         SHELTER_GEO_INDEX("shelter_geo_index"),
         SHELTER_MAP_ITEM("shelter_map_item"),
@@ -233,10 +231,6 @@ public class RedisReadCache {
         return result;
     }
 
-    public CacheResult<ShelterDetailCacheDto> getShelterDetail(Long shelterId) {
-        return get("shelter:detail:" + shelterId, new TypeReference<>() {});
-    }
-
     public CacheResult<List<GeoSearchHit>> geoSearchShelterIds(String key, double longitude, double latitude, double radiusM, int limit) {
         long start = System.nanoTime();
         try {
@@ -391,7 +385,6 @@ public class RedisReadCache {
         if (key.equals("disaster:messages:recent:seoul")) return "disaster_messages";
         if (key.equals("disaster:message:core:seoul")) return "disaster_messages";
         if (key.startsWith("disaster:detail:")) return "disaster_detail";
-        if (key.startsWith("shelter:detail:")) return "shelter_detail";
         if (key.startsWith("shelter:status:")) return "shelter_status";
         if (key.startsWith("shelter:geo:")) return "shelter_geo_index";
         if (key.startsWith("shelter:map:item:")) return "shelter_map_item";
@@ -405,7 +398,6 @@ public class RedisReadCache {
         return switch (cacheName(key)) {
             case "disaster_messages" -> CacheMetricLabel.DISASTER_MESSAGES;
             case "disaster_detail" -> CacheMetricLabel.DISASTER_DETAIL;
-            case "shelter_detail" -> CacheMetricLabel.SHELTER_DETAIL;
             case "shelter_status" -> CacheMetricLabel.SHELTER_STATUS;
             case "shelter_geo_index" -> CacheMetricLabel.SHELTER_GEO_INDEX;
             case "shelter_map_item" -> CacheMetricLabel.SHELTER_MAP_ITEM;

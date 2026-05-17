@@ -90,7 +90,6 @@ Miss handling:
 
 Canonical shelter read models:
 
-- `shelter:detail:{shelterId}`
 - `shelter:geo:seoul:{disasterType}:{shelterType}`
 - `shelter:map:tile:{z}:{x}:{y}:{disasterType}:{shelterType}`
 - `shelter:map:item:{shelterId}`
@@ -103,8 +102,6 @@ Canonical shelter read models:
 - `shelter:map:item`은 정적 marker/item payload다.
 - `shelter:status`는 동적 overlay payload다.
 - `shelter:list:*`는 active contract가 아니다.
-
-`GET /shelters/{shelterId}`는 `shelter:detail:{shelterId}`를 우선 조회하고, miss/down/parse error에서만 singleflight + 짧은 memoization으로 DB fallback을 사용한다.
 
 ### 4.3 Cache regeneration
 

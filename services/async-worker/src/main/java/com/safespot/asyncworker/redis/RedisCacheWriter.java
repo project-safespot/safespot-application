@@ -33,14 +33,6 @@ public class RedisCacheWriter {
 
     // Shelter
 
-    public void setShelterDetail(Long shelterId, ShelterDetailValue value) {
-        setWithSizeMetric(
-                RedisKeyConstants.shelterDetail(shelterId),
-                value,
-                RedisTtlConstants.withAddedJitter(RedisTtlConstants.SHELTER_DETAIL, RedisTtlConstants.SHELTER_DISASTER_JITTER),
-                "shelter_detail");
-    }
-
     public void setShelterStatus(Long shelterId, ShelterStatusValue value) {
         set(RedisKeyConstants.shelterStatus(shelterId), value,
                 RedisTtlConstants.withAddedJitter(RedisTtlConstants.SHELTER_STATUS, RedisTtlConstants.SHELTER_DISASTER_JITTER));

@@ -54,11 +54,6 @@ class RedisTtlConstantsTest {
     }
 
     @Test
-    void shelterDetail_baseTtl_is3600s() {
-        assertThat(RedisTtlConstants.SHELTER_DETAIL.getSeconds()).isEqualTo(3600L);
-    }
-
-    @Test
     void shelterMapItem_baseTtl_is3600s() {
         assertThat(RedisTtlConstants.SHELTER_MAP_ITEM.getSeconds()).isEqualTo(3600L);
     }

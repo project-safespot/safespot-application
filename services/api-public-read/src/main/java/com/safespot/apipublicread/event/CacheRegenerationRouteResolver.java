@@ -9,7 +9,6 @@ import java.util.Optional;
 public class CacheRegenerationRouteResolver {
 
     private static final Map<String, QueueType> FAMILY_TO_QUEUE = Map.ofEntries(
-            Map.entry("shelter_detail", QueueType.CACHE_REFRESH),
             Map.entry("shelter_status", QueueType.CACHE_REFRESH),
             Map.entry("shelter_map_item", QueueType.CACHE_REFRESH),
             Map.entry("shelter_geo_index", QueueType.CACHE_REFRESH),

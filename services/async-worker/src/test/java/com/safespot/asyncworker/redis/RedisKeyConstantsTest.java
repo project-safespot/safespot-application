@@ -7,12 +7,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RedisKeyConstantsTest {
 
     @Test
-    void shelterDetail_key를_생성한다() {
-        assertThat(RedisKeyConstants.shelterDetail(101L))
-            .isEqualTo("shelter:detail:101");
-    }
-
-    @Test
     void shelterMapItem_key를_생성한다() {
         assertThat(RedisKeyConstants.shelterMapItem(101L))
             .isEqualTo("shelter:map:item:101");

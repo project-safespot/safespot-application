@@ -18,7 +18,6 @@ public class CacheKeyFamilyResolver {
             case "environment:weather-alert:seoul" -> Optional.of("environment_weather_alert");
             default -> {
                 if (cacheKey.startsWith("disaster:detail:")) yield Optional.of("disaster_detail");
-                if (cacheKey.startsWith("shelter:detail:")) yield Optional.of("shelter_detail");
                 if (cacheKey.startsWith("shelter:status:")) yield Optional.of("shelter_status");
                 yield Optional.empty();
             }

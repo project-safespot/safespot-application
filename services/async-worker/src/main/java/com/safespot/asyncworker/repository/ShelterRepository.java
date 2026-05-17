@@ -11,10 +11,6 @@ public interface ShelterRepository {
 
     List<ShelterInfo> findByIds(List<Long> shelterIds);
 
-    List<ShelterDetailSource> findAllForDetailReadModel();
-
-    List<ShelterDetailSource> findByIdsForDetailReadModel(List<Long> shelterIds);
-
     List<ShelterMapSource> findAllForMapReadModel();
 
     List<ShelterMapSource> findByIdsForMapItems(List<Long> shelterIds);

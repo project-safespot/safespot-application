@@ -43,7 +43,6 @@
 
 Shelter:
 
-- `shelter:detail:{shelterId}`
 - `shelter:status:{shelterId}`
 - `shelter:map:item:{shelterId}`
 - `shelter:geo:seoul:{disasterType}:{shelterType}`
@@ -89,8 +88,6 @@ Trigger:
 - nearby/map hot path에서 RDS candidate lookup fallback을 수행하지 않는다.
 - `congestionLevel`은 informational only다.
 - capacity는 admission을 거절하지 않는다.
-
-`CacheRegenerationRequested`는 `SHELTER_DETAIL` target과 `shelter_detail` cacheKeyFamily를 지원한다.
 
 ### 5.2 Disaster message rebuild
 
