@@ -31,4 +31,5 @@ simulator:
     enabled: false
     region: ap-northeast-2
     endpoint-override: ""
-    queue-url: ""
+    cache-refresh-queue-url: ""
+    readmodel-refresh-queue-url: ""

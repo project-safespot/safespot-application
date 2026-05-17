@@ -4,11 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safespot.scenariosimulator.metrics.SimulatorMetrics;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
+import software.amazon.awssdk.services.sqs.model.SendMessageResponse;
 
 @Slf4j
 @Service
@@ -20,62 +20,73 @@ public class SimulatorEventPublisher {
 
     private final ObjectMapper objectMapper;
     private final SimulatorMetrics metrics;
-
-    @Autowired(required = false)
-    private SqsClient sqsClient;
-
-    @Value("${simulator.sqs.queue-url:}")
-    private String queueUrl;
+    private final SimulatorEventRouter eventRouter;
+    private final ObjectProvider<SqsClient> sqsClientProvider;
 
     public void publish(EventEnvelope<?> envelope) {
-        if (sqsClient == null || queueUrl.isBlank()) {
-            log.warn("[SIM-SQS] publisher not configured — event skipped: type={} idempotencyKey={}",
-                    envelope.getEventType(), envelope.getIdempotencyKey());
+        SimulatorEventRouter.RoutedQueue routedQueue = eventRouter.resolve(envelope);
+        SqsClient sqsClient = sqsClientProvider.getIfAvailable();
+
+        if (sqsClient == null) {
+            log.warn("[SIM-SQS] publisher not configured: eventType={} queueRole={} selectedQueueName={} cacheKey={}",
+                    envelope.getEventType(), routedQueue.getQueueRole(), routedQueue.getQueueName(),
+                    routedQueue.getCacheKey());
             return;
+        }
+        if (routedQueue.getQueueUrl().isBlank()) {
+            throw new IllegalStateException("SQS queue URL not configured for role=" + routedQueue.getQueueRole());
         }
 
         String body;
         try {
             body = objectMapper.writeValueAsString(envelope);
         } catch (Exception e) {
-            log.error("[SIM-SQS] serialization failed: type={} eventId={}",
+            log.error("[SIM-SQS] serialization failed: eventType={} eventId={}",
                     envelope.getEventType(), envelope.getEventId(), e);
             metrics.incFailure("serialization_error");
             return;
         }
 
-        sendWithRetry(envelope, body);
+        sendWithRetry(sqsClient, envelope, routedQueue, body);
         metrics.incEventsPublished(envelope.getEventType());
     }
 
-    private void sendWithRetry(EventEnvelope<?> envelope, String body) {
+    private void sendWithRetry(
+            SqsClient sqsClient,
+            EventEnvelope<?> envelope,
+            SimulatorEventRouter.RoutedQueue routedQueue,
+            String body) {
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             if (attempt > 0) {
                 try {
                     Thread.sleep(BACKOFF_MS[attempt - 1]);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
-                    log.warn("[SIM-SQS] retry interrupted: type={}", envelope.getEventType());
+                    log.warn("[SIM-SQS] retry interrupted: eventType={} queueRole={}",
+                            envelope.getEventType(), routedQueue.getQueueRole());
                     metrics.incFailure("retry_interrupted");
                     return;
                 }
             }
             try {
-                sqsClient.sendMessage(SendMessageRequest.builder()
-                        .queueUrl(queueUrl)
+                SendMessageResponse response = sqsClient.sendMessage(SendMessageRequest.builder()
+                        .queueUrl(routedQueue.getQueueUrl())
                         .messageBody(body)
                         .build());
-                log.info("[SIM-SQS] published (attempt={}): type={} eventId={} idempotencyKey={}",
-                        attempt + 1, envelope.getEventType(), envelope.getEventId(),
-                        envelope.getIdempotencyKey());
+                log.info("[SIM-SQS] published: eventType={} queueRole={} selectedQueueName={} cacheKey={} eventId={} idempotencyKey={} messageId={} attempt={}",
+                        envelope.getEventType(), routedQueue.getQueueRole(), routedQueue.getQueueName(),
+                        routedQueue.getCacheKey(), envelope.getEventId(), envelope.getIdempotencyKey(),
+                        response.messageId(), attempt + 1);
                 return;
             } catch (Exception e) {
                 if (attempt < MAX_RETRIES) {
-                    log.warn("[SIM-SQS] attempt {}/{} failed, retrying: type={} eventId={}",
-                            attempt + 1, MAX_RETRIES + 1, envelope.getEventType(), envelope.getEventId(), e);
+                    log.warn("[SIM-SQS] send failed, retrying: eventType={} queueRole={} selectedQueueName={} cacheKey={} eventId={} attempt={}/{}",
+                            envelope.getEventType(), routedQueue.getQueueRole(), routedQueue.getQueueName(),
+                            routedQueue.getCacheKey(), envelope.getEventId(), attempt + 1, MAX_RETRIES + 1, e);
                 } else {
-                    log.error("[SIM-SQS] permanent failure: type={} eventId={} lastError={}",
-                            envelope.getEventType(), envelope.getEventId(), e.getMessage(), e);
+                    log.error("[SIM-SQS] permanent failure: eventType={} queueRole={} selectedQueueName={} cacheKey={} eventId={} lastError={}",
+                            envelope.getEventType(), routedQueue.getQueueRole(), routedQueue.getQueueName(),
+                            routedQueue.getCacheKey(), envelope.getEventId(), e.getMessage(), e);
                     metrics.incFailure("sqs_permanent_failure");
                 }
             }
