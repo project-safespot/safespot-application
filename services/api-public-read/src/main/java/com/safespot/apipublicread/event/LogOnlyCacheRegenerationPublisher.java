@@ -2,8 +2,7 @@ package com.safespot.apipublicread.event;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -11,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+@Slf4j
 @Component
 @ConditionalOnProperty(
         name = "safespot.cache-regeneration.publisher-mode",
@@ -19,8 +19,6 @@ import java.util.Optional;
 )
 @RequiredArgsConstructor
 public class LogOnlyCacheRegenerationPublisher implements CacheRegenerationPublisher {
-
-    private static final Logger log = LoggerFactory.getLogger(LogOnlyCacheRegenerationPublisher.class);
 
     private final CacheKeyFamilyResolver resolver;
     private final MeterRegistry meterRegistry;

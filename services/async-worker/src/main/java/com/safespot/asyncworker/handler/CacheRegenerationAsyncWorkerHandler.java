@@ -13,7 +13,6 @@ import com.safespot.asyncworker.service.environment.EnvironmentCacheService;
 import com.safespot.asyncworker.service.shelter.ShelterDetailReadModelService;
 import com.safespot.asyncworker.service.shelter.ShelterMapReadModelService;
 import com.safespot.asyncworker.service.shelter.ShelterStatusService;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;

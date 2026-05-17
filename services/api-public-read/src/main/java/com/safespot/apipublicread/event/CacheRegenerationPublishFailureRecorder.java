@@ -1,20 +1,17 @@
 package com.safespot.apipublicread.event;
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+@Slf4j
+@RequiredArgsConstructor
 public class CacheRegenerationPublishFailureRecorder {
 
-    private static final Logger log = LoggerFactory.getLogger(CacheRegenerationPublishFailureRecorder.class);
-
     private final String filePath;
-
-    public CacheRegenerationPublishFailureRecorder(String filePath) {
-        this.filePath = filePath;
-    }
 
     public void record(CacheRegenerationEnvelope envelope, String envelopeJson) {
         try {

@@ -50,6 +50,16 @@ public class FallbackSingleFlight {
         this(meterRegistry, timeoutMs, 10_000);
     }
 
+    FallbackSingleFlight(MeterRegistry meterRegistry, long timeoutMs, int memoMaxSize) {
+        this.meterRegistry = meterRegistry;
+        this.timeoutMs = timeoutMs;
+        this.memoMaxSize = memoMaxSize;
+        this.inFlightGauge = meterRegistry.gauge("fallback_singleflight_inflight_gauge",
+                new AtomicInteger(inFlight.size()));
+        this.memoSizeGauge = meterRegistry.gauge("fallback_singleflight_memo_size_gauge",
+                new AtomicInteger(memoized.size()));
+    }
+
     public <T> T execute(String cacheKey, String cache, String repository, Supplier<T> supplier) {
         String flightKey = repository + ":" + cacheKey;
         CompletableFuture<Object> leaderFuture = new CompletableFuture<>();
