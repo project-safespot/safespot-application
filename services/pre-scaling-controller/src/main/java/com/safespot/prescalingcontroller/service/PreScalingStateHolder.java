@@ -4,7 +4,6 @@ import lombok.Getter;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -17,20 +16,29 @@ import java.util.concurrent.atomic.AtomicReference;
 @Getter
 public class PreScalingStateHolder {
 
-    private final AtomicBoolean disasterActive = new AtomicBoolean(false);
-    private final AtomicReference<Instant> lastTriggerTime = new AtomicReference<>(null);
-    private final AtomicReference<Instant> lastRecoverTime = new AtomicReference<>(null);
+    public enum State {
+        NORMAL,
+        DISASTER_PEAK,
+        DISASTER_SUSTAINED
+    }
+
+    private final AtomicReference<State> state = new AtomicReference<>(State.NORMAL);
+    private final AtomicReference<Instant> lastPeakStartTime = new AtomicReference<>(null);
     private final AtomicReference<Integer> currentMinReplicas = new AtomicReference<>(null);
 
-    public void markDisasterActive(int minReplicas) {
-        disasterActive.set(true);
-        lastTriggerTime.set(Instant.now());
+    public void markDisasterPeak(int minReplicas) {
+        state.set(State.DISASTER_PEAK);
+        lastPeakStartTime.set(Instant.now());
         currentMinReplicas.set(minReplicas);
     }
 
-    public void markRecovered(int minReplicas) {
-        disasterActive.set(false);
-        lastRecoverTime.set(Instant.now());
+    public void markDisasterSustained(int minReplicas) {
+        state.set(State.DISASTER_SUSTAINED);
+        currentMinReplicas.set(minReplicas);
+    }
+
+    public void markNormal(int minReplicas) {
+        state.set(State.NORMAL);
         currentMinReplicas.set(minReplicas);
     }
 
@@ -38,22 +46,17 @@ public class PreScalingStateHolder {
         currentMinReplicas.set(minReplicas);
     }
 
-    /**
-     * Called on startup when the HPA is already at disasterMinReplicas
-     * but the trigger time is unknown (controller restarted).
-     * Sets lastTriggerTime to now so a full cooldown is required before recovery.
-     */
-    public void restoreDisasterStateFromHpa(int disasterMinReplicas) {
-        disasterActive.set(true);
-        lastTriggerTime.compareAndSet(null, Instant.now());
-        currentMinReplicas.set(disasterMinReplicas);
+    public void restorePeakStateFromCurrentState(int minReplicas) {
+        state.set(State.DISASTER_PEAK);
+        lastPeakStartTime.compareAndSet(null, Instant.now());
+        currentMinReplicas.set(minReplicas);
     }
 
-    public boolean isCooldownElapsed(long cooldownSeconds) {
-        Instant trigger = lastTriggerTime.get();
-        if (trigger == null) {
+    public boolean isPeakWindowElapsed(long peakWindowSeconds) {
+        Instant peakStart = lastPeakStartTime.get();
+        if (peakStart == null) {
             return true;
         }
-        return Instant.now().isAfter(trigger.plusSeconds(cooldownSeconds));
+        return !Instant.now().isBefore(peakStart.plusSeconds(peakWindowSeconds));
     }
 }

@@ -18,11 +18,11 @@ public class PreScalingProperties {
     /** Kubernetes namespace where the target HPA lives. */
     private String namespace = "application";
 
-    /** Name of the HPA to patch. */
-    private String targetHpaName = "api-public-read-surge";
-
     private Trigger trigger = new Trigger();
     private Surge surge = new Surge();
+    private Base base = new Base();
+    private Routing routing = new Routing();
+    private Restore restore = new Restore();
 
     /** DB polling interval in milliseconds. */
     private long pollingIntervalMs = 30_000;
@@ -46,16 +46,42 @@ public class PreScalingProperties {
     @Getter
     @Setter
     public static class Surge {
-        /** HPA minReplicas when no disaster is active. */
-        private int normalMinReplicas = 0;
+        private String targetHpaName = "api-public-read-surge";
+        private int normalMinReplicas = 1;
+        private int peakMinReplicas = 8;
+        private int sustainedMinReplicas = 3;
+        private long peakWindowSeconds = 1800;
+    }
 
-        /** HPA minReplicas when a disaster is active. */
-        private int disasterMinReplicas = 3;
+    @Getter
+    @Setter
+    public static class Base {
+        private boolean enabled = true;
+        private String targetHpaName = "api-public-read";
+        private int normalMinReplicas = 1;
+        private int normalMaxReplicas = 5;
+        private int disasterMinReplicas = 1;
+        private int disasterMaxReplicas = 1;
+        private boolean restrictAfterRouting = true;
+    }
 
-        /** HPA maxReplicas upper bound (read-only reference; not patched by this controller). */
-        private int maxReplicas = 10;
+    @Getter
+    @Setter
+    public static class Routing {
+        private boolean enabled = true;
+        private String ingressName = "api-public-read";
+        private String actionAnnotationKey = "alb.ingress.kubernetes.io/actions.api-public-read-weighted";
+        private String baseServiceName = "api-public-read";
+        private String surgeServiceName = "api-public-read-surge";
+        private int normalBaseWeight = 100;
+        private int normalSurgeWeight = 0;
+        private int disasterBaseWeight = 0;
+        private int disasterSurgeWeight = 100;
+    }
 
-        /** Seconds to wait after disaster clears before recovering to normalMinReplicas. */
-        private long cooldownSeconds = 1800;
+    @Getter
+    @Setter
+    public static class Restore {
+        private long baseReadinessTimeoutSeconds = 120;
     }
 }

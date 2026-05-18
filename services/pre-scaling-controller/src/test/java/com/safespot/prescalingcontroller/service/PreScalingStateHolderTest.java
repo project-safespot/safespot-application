@@ -3,6 +3,8 @@ package com.safespot.prescalingcontroller.service;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class PreScalingStateHolderTest {
@@ -15,59 +17,61 @@ class PreScalingStateHolderTest {
     }
 
     @Test
-    void initialState_isNotDisasterActive() {
-        assertThat(holder.getDisasterActive().get()).isFalse();
-        assertThat(holder.getLastTriggerTime().get()).isNull();
-        assertThat(holder.getLastRecoverTime().get()).isNull();
+    void initialState_isNormal() {
+        assertThat(holder.getState().get()).isEqualTo(PreScalingStateHolder.State.NORMAL);
+        assertThat(holder.getLastPeakStartTime().get()).isNull();
     }
 
     @Test
-    void markDisasterActive_setsState() {
-        holder.markDisasterActive(3);
+    void markDisasterPeak_setsPeakStateAndTimestamp() {
+        holder.markDisasterPeak(8);
 
-        assertThat(holder.getDisasterActive().get()).isTrue();
-        assertThat(holder.getLastTriggerTime().get()).isNotNull();
+        assertThat(holder.getState().get()).isEqualTo(PreScalingStateHolder.State.DISASTER_PEAK);
+        assertThat(holder.getLastPeakStartTime().get()).isNotNull();
+        assertThat(holder.getCurrentMinReplicas().get()).isEqualTo(8);
+    }
+
+    @Test
+    void markDisasterSustained_setsSustainedState() {
+        holder.markDisasterSustained(3);
+
+        assertThat(holder.getState().get()).isEqualTo(PreScalingStateHolder.State.DISASTER_SUSTAINED);
         assertThat(holder.getCurrentMinReplicas().get()).isEqualTo(3);
     }
 
     @Test
-    void markRecovered_clearsDisasterState() {
-        holder.markDisasterActive(3);
-        holder.markRecovered(0);
+    void markNormal_setsNormalState() {
+        holder.markDisasterPeak(8);
+        holder.markNormal(1);
 
-        assertThat(holder.getDisasterActive().get()).isFalse();
-        assertThat(holder.getLastRecoverTime().get()).isNotNull();
-        assertThat(holder.getCurrentMinReplicas().get()).isEqualTo(0);
+        assertThat(holder.getState().get()).isEqualTo(PreScalingStateHolder.State.NORMAL);
+        assertThat(holder.getCurrentMinReplicas().get()).isEqualTo(1);
     }
 
     @Test
-    void isCooldownElapsed_withZeroSeconds_returnsTrue() {
-        holder.markDisasterActive(3);
-        assertThat(holder.isCooldownElapsed(0)).isTrue();
+    void isPeakWindowElapsed_zeroSeconds_returnsTrue() {
+        holder.markDisasterPeak(8);
+        assertThat(holder.isPeakWindowElapsed(0)).isTrue();
     }
 
     @Test
-    void isCooldownElapsed_withLargeCooldown_returnsFalse() {
-        holder.markDisasterActive(3);
-        assertThat(holder.isCooldownElapsed(1_800)).isFalse();
+    void isPeakWindowElapsed_beforeDeadline_returnsFalse() {
+        holder.markDisasterPeak(8);
+        assertThat(holder.isPeakWindowElapsed(1_800)).isFalse();
     }
 
     @Test
-    void isCooldownElapsed_withNoTriggerTime_returnsTrue() {
-        // No trigger has been set — cooldown considered elapsed
-        assertThat(holder.isCooldownElapsed(1_800)).isTrue();
+    void isPeakWindowElapsed_withoutPeakTimestamp_returnsTrue() {
+        assertThat(holder.isPeakWindowElapsed(1_800)).isTrue();
     }
 
     @Test
-    void restoreDisasterStateFromHpa_setsActiveAndDoesNotOverrideTriggerTime() {
-        holder.restoreDisasterStateFromHpa(3);
+    void restorePeakStateFromCurrentState_preservesExistingTimestamp() {
+        holder.restorePeakStateFromCurrentState(8);
+        Instant first = holder.getLastPeakStartTime().get();
 
-        assertThat(holder.getDisasterActive().get()).isTrue();
-        assertThat(holder.getLastTriggerTime().get()).isNotNull();
+        holder.restorePeakStateFromCurrentState(8);
 
-        // Calling again should NOT reset lastTriggerTime (compareAndSet)
-        var firstTriggerTime = holder.getLastTriggerTime().get();
-        holder.restoreDisasterStateFromHpa(3);
-        assertThat(holder.getLastTriggerTime().get()).isEqualTo(firstTriggerTime);
+        assertThat(holder.getLastPeakStartTime().get()).isEqualTo(first);
     }
 }

@@ -40,7 +40,6 @@ management:
 pre-scaling:
   enabled: true
   namespace: ${K8S_NAMESPACE:application}
-  target-hpa-name: api-public-read-surge
   polling-interval-ms: 30000
 
   trigger:
@@ -52,7 +51,31 @@ pre-scaling:
     lookback-minutes: 10
 
   surge:
-    normal-min-replicas: 1
-    disaster-min-replicas: 3
-    max-replicas: 10
-    cooldown-seconds: 1800
+    target-hpa-name: ${PRE_SCALING_SURGE_TARGET_HPA_NAME:api-public-read-surge}
+    normal-min-replicas: ${PRE_SCALING_SURGE_NORMAL_MIN_REPLICAS:1}
+    peak-min-replicas: ${PRE_SCALING_SURGE_PEAK_MIN_REPLICAS:8}
+    sustained-min-replicas: ${PRE_SCALING_SURGE_SUSTAINED_MIN_REPLICAS:3}
+    peak-window-seconds: ${PRE_SCALING_SURGE_PEAK_WINDOW_SECONDS:1800}
+
+  base:
+    enabled: ${PRE_SCALING_BASE_ENABLED:true}
+    target-hpa-name: ${PRE_SCALING_BASE_TARGET_HPA_NAME:api-public-read}
+    normal-min-replicas: ${PRE_SCALING_BASE_NORMAL_MIN_REPLICAS:1}
+    normal-max-replicas: ${PRE_SCALING_BASE_NORMAL_MAX_REPLICAS:5}
+    disaster-min-replicas: ${PRE_SCALING_BASE_DISASTER_MIN_REPLICAS:1}
+    disaster-max-replicas: ${PRE_SCALING_BASE_DISASTER_MAX_REPLICAS:1}
+    restrict-after-routing: ${PRE_SCALING_BASE_RESTRICT_AFTER_ROUTING:true}
+
+  routing:
+    enabled: ${PRE_SCALING_ROUTING_ENABLED:true}
+    ingress-name: ${PRE_SCALING_ROUTING_INGRESS_NAME:api-public-read}
+    action-annotation-key: ${PRE_SCALING_ROUTING_ACTION_ANNOTATION_KEY:alb.ingress.kubernetes.io/actions.api-public-read-weighted}
+    base-service-name: ${PRE_SCALING_ROUTING_BASE_SERVICE_NAME:api-public-read}
+    surge-service-name: ${PRE_SCALING_ROUTING_SURGE_SERVICE_NAME:api-public-read-surge}
+    normal-base-weight: ${PRE_SCALING_ROUTING_NORMAL_BASE_WEIGHT:100}
+    normal-surge-weight: ${PRE_SCALING_ROUTING_NORMAL_SURGE_WEIGHT:0}
+    disaster-base-weight: ${PRE_SCALING_ROUTING_DISASTER_BASE_WEIGHT:0}
+    disaster-surge-weight: ${PRE_SCALING_ROUTING_DISASTER_SURGE_WEIGHT:100}
+
+  restore:
+    base-readiness-timeout-seconds: ${PRE_SCALING_RESTORE_BASE_READINESS_TIMEOUT_SECONDS:120}
