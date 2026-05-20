@@ -13,9 +13,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-import java.util.Map;
-
 @RestController
 @RequestMapping("/admin/evacuation-entries")
 @RequiredArgsConstructor
@@ -25,13 +22,18 @@ public class AdminEvacuationController {
     private final ApiCoreMetrics metrics;
 
     @GetMapping
-    public ResponseEntity<ApiResponse<Map<String, List<EvacuationEntryItem>>>> listEntries(
-            @RequestParam Long shelterId,
-            @RequestParam(required = false) String status,
+    public ResponseEntity<ApiResponse<EvacuationEntryPageResponse>> listEntries(
+            @RequestParam(required = false) Long shelterId,
+            @RequestParam(required = false, defaultValue = "ENTERED") String status,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Boolean specialOnly,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size,
             @AuthenticationPrincipal UserPrincipal principal) {
-        List<EvacuationEntryItem> items = evacuationService.listEntries(shelterId, status);
+        EvacuationEntryPageResponse response =
+                evacuationService.listEntries(shelterId, status, keyword, specialOnly, page, size);
         metrics.incAdminApiCall("GET", "/admin/evacuation-entries", "200");
-        return ResponseEntity.ok(ApiResponse.ok(Map.of("items", items)));
+        return ResponseEntity.ok(ApiResponse.ok(response));
     }
 
     @PostMapping

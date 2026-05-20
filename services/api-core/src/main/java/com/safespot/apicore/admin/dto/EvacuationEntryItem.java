@@ -11,6 +11,7 @@ public class EvacuationEntryItem {
 
     private final Long entryId;
     private final Long shelterId;
+    private final String shelterName;
     private final Long alertId;
     private final Long userId;
     private final String visitorName;

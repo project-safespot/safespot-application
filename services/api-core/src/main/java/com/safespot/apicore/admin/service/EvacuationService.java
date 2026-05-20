@@ -1,18 +1,44 @@
 package com.safespot.apicore.admin.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.safespot.apicore.admin.dto.*;
+import com.safespot.apicore.admin.dto.CreateEntryRequest;
+import com.safespot.apicore.admin.dto.CreateEntryResponse;
+import com.safespot.apicore.admin.dto.EvacuationEntryItem;
+import com.safespot.apicore.admin.dto.EvacuationEntryPageResponse;
+import com.safespot.apicore.admin.dto.ExitEntryRequest;
+import com.safespot.apicore.admin.dto.ExitEntryResponse;
+import com.safespot.apicore.admin.dto.UpdateEntryRequest;
+import com.safespot.apicore.admin.dto.UpdateEntryResponse;
 import com.safespot.apicore.common.exception.ApiException;
-import com.safespot.apicore.domain.entity.*;
-import com.safespot.apicore.domain.enums.*;
+import com.safespot.apicore.domain.entity.AdminAuditLog;
+import com.safespot.apicore.domain.entity.EntryDetail;
+import com.safespot.apicore.domain.entity.EvacuationEntry;
+import com.safespot.apicore.domain.entity.EvacuationEventHistory;
+import com.safespot.apicore.domain.entity.Shelter;
+import com.safespot.apicore.domain.enums.EntryStatus;
+import com.safespot.apicore.domain.enums.EventHistoryType;
+import com.safespot.apicore.domain.enums.HealthStatus;
 import com.safespot.apicore.event.EventEnvelope;
-import com.safespot.apicore.event.payload.*;
-import com.safespot.apicore.event.springevent.*;
+import com.safespot.apicore.event.payload.EvacuationEntryCreatedPayload;
+import com.safespot.apicore.event.payload.EvacuationEntryExitedPayload;
+import com.safespot.apicore.event.payload.EvacuationEntryUpdatedPayload;
+import com.safespot.apicore.event.springevent.EvacuationEntryCreatedSpringEvent;
+import com.safespot.apicore.event.springevent.EvacuationEntryExitedSpringEvent;
+import com.safespot.apicore.event.springevent.EvacuationEntryUpdatedSpringEvent;
 import com.safespot.apicore.metrics.ApiCoreMetrics;
-import com.safespot.apicore.repository.*;
+import com.safespot.apicore.repository.AdminAuditLogRepository;
+import com.safespot.apicore.repository.DisasterAlertRepository;
+import com.safespot.apicore.repository.EntryDetailRepository;
+import com.safespot.apicore.repository.EvacuationEntryRepository;
+import com.safespot.apicore.repository.EvacuationEventHistoryRepository;
+import com.safespot.apicore.repository.ShelterRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,32 +63,62 @@ public class EvacuationService {
     private final ApiCoreMetrics metrics;
 
     @Transactional(readOnly = true)
-    public List<EvacuationEntryItem> listEntries(Long shelterId, String status) {
-        shelterRepository.findById(shelterId)
-                .orElseThrow(() -> ApiException.notFound("대피소를 찾을 수 없습니다."));
-
-        List<EvacuationEntry> entries;
-        if (status != null) {
-            EntryStatus entryStatus = parseEntryStatus(status);
-            entries = entryRepository.findByShelterIdAndEntryStatus(shelterId, entryStatus);
-        } else {
-            entries = entryRepository.findByShelterId(shelterId);
+    public EvacuationEntryPageResponse listEntries(
+            Long shelterId,
+            String status,
+            String keyword,
+            Boolean specialOnly,
+            int page,
+            int size
+    ) {
+        if (shelterId != null) {
+            shelterRepository.findById(shelterId)
+                    .orElseThrow(() -> ApiException.notFound("Shelter not found."));
         }
 
-        return entries.stream().map(e -> {
-            EntryDetail detail = entryDetailRepository.findByEntryId(e.getEntryId()).orElse(null);
-            return buildItem(e, detail);
-        }).toList();
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        EntryStatus entryStatus = status != null && !status.isBlank()
+                ? parseEntryStatus(status)
+                : EntryStatus.ENTERED;
+        String normalizedKeyword = keyword != null ? keyword.trim() : null;
+
+        Pageable pageable = PageRequest.of(
+                safePage,
+                safeSize,
+                Sort.by(Sort.Direction.DESC, "enteredAt")
+        );
+
+        Page<EvacuationEntryRepository.EvacuationEntryListRow> result = entryRepository.searchAdminEntries(
+                shelterId,
+                entryStatus,
+                normalizedKeyword,
+                specialOnly,
+                pageable
+        );
+
+        List<EvacuationEntryItem> items = result.getContent().stream()
+                .map(this::buildItemFromRow)
+                .toList();
+
+        return EvacuationEntryPageResponse.builder()
+                .items(items)
+                .page(result.getNumber())
+                .size(result.getSize())
+                .totalElements(result.getTotalElements())
+                .totalPages(result.getTotalPages())
+                .hasNext(result.hasNext())
+                .build();
     }
 
     @Transactional
     public CreateEntryResponse createEntry(CreateEntryRequest request, Long adminId, String ipAddress) {
         Shelter shelter = shelterRepository.findById(request.getShelterId())
-                .orElseThrow(() -> ApiException.notFound("대피소를 찾을 수 없습니다."));
+                .orElseThrow(() -> ApiException.notFound("Shelter not found."));
 
         if (request.getAlertId() != null) {
             disasterAlertRepository.findById(request.getAlertId())
-                    .orElseThrow(() -> ApiException.notFound("재난 알림을 찾을 수 없습니다."));
+                    .orElseThrow(() -> ApiException.notFound("Alert not found."));
         }
 
         EvacuationEntry entry = EvacuationEntry.builder()
@@ -137,10 +193,10 @@ public class EvacuationService {
     @Transactional
     public ExitEntryResponse exitEntry(Long entryId, ExitEntryRequest request, Long adminId, String ipAddress) {
         EvacuationEntry entry = entryRepository.findById(entryId)
-                .orElseThrow(() -> ApiException.notFound("입소 기록을 찾을 수 없습니다."));
+                .orElseThrow(() -> ApiException.notFound("Entry not found."));
 
         if (entry.getEntryStatus() == EntryStatus.EXITED) {
-            throw ApiException.conflict("ALREADY_EXITED", "이미 퇴소 처리된 입소자입니다.");
+            throw ApiException.conflict("ALREADY_EXITED", "Entry is already exited.");
         }
 
         String beforeStatus = entry.getEntryStatus().name();
@@ -165,7 +221,7 @@ public class EvacuationService {
                 .payloadBefore(toJson(Map.of("entryStatus", beforeStatus)))
                 .payloadAfter(toJson(buildAuditAfter(
                         Map.of("entryStatus", EntryStatus.EXITED.name(),
-                               "exitedAt", entry.getExitedAt().toString()),
+                                "exitedAt", entry.getExitedAt().toString()),
                         request != null ? request.getReason() : null)))
                 .ipAddress(ipAddress)
                 .build());
@@ -194,7 +250,7 @@ public class EvacuationService {
     @Transactional
     public UpdateEntryResponse updateEntry(Long entryId, UpdateEntryRequest request, Long adminId, String ipAddress) {
         EvacuationEntry entry = entryRepository.findById(entryId)
-                .orElseThrow(() -> ApiException.notFound("입소 기록을 찾을 수 없습니다."));
+                .orElseThrow(() -> ApiException.notFound("Entry not found."));
 
         EntryDetail detail = entryDetailRepository.findByEntryId(entryId).orElse(null);
 
@@ -271,27 +327,26 @@ public class EvacuationService {
                 .build();
     }
 
-    private EvacuationEntryItem buildItem(EvacuationEntry e, EntryDetail detail) {
-        EvacuationEntryItem.Detail detailDto = null;
-        if (detail != null) {
-            detailDto = EvacuationEntryItem.Detail.builder()
-                    .address(e.getAddress())
-                    .familyInfo(detail.getFamilyInfo())
-                    .healthStatus(detail.getHealthStatus().name())
-                    .specialProtectionFlag(detail.getSpecialProtectionFlag())
-                    .build();
-        }
+    private EvacuationEntryItem buildItemFromRow(EvacuationEntryRepository.EvacuationEntryListRow row) {
+        EvacuationEntryItem.Detail detailDto = EvacuationEntryItem.Detail.builder()
+                .address(row.getAddress())
+                .familyInfo(row.getFamilyInfo())
+                .healthStatus(row.getHealthStatus() != null ? row.getHealthStatus().name() : null)
+                .specialProtectionFlag(Boolean.TRUE.equals(row.getSpecialProtectionFlag()))
+                .build();
+
         return EvacuationEntryItem.builder()
-                .entryId(e.getEntryId())
-                .shelterId(e.getShelterId())
-                .alertId(e.getAlertId())
-                .userId(e.getUserId())
-                .visitorName(e.getVisitorName())
-                .visitorPhone(e.getVisitorPhone())
-                .entryStatus(e.getEntryStatus().name())
-                .enteredAt(e.getEnteredAt())
-                .exitedAt(e.getExitedAt())
-                .note(e.getNote())
+                .entryId(row.getEntryId())
+                .shelterId(row.getShelterId())
+                .shelterName(row.getShelterName())
+                .alertId(row.getAlertId())
+                .userId(row.getUserId())
+                .visitorName(row.getVisitorName())
+                .visitorPhone(row.getVisitorPhone())
+                .entryStatus(row.getEntryStatus() != null ? row.getEntryStatus().name() : null)
+                .enteredAt(row.getEnteredAt())
+                .exitedAt(row.getExitedAt())
+                .note(row.getNote())
                 .detail(detailDto)
                 .build();
     }
@@ -300,17 +355,17 @@ public class EvacuationService {
         try {
             return EntryStatus.valueOf(status);
         } catch (IllegalArgumentException e) {
-            throw ApiException.badRequest("VALIDATION_ERROR", "status 값이 올바르지 않습니다.");
+            throw ApiException.badRequest("VALIDATION_ERROR", "Invalid status value.");
         }
     }
 
     private HealthStatus parseHealthStatus(String value) {
-        if (value == null) return HealthStatus.정상;
+        if (value == null) return HealthStatus.values()[0];
         try {
             return HealthStatus.valueOf(value);
         } catch (IllegalArgumentException e) {
             throw ApiException.badRequest("VALIDATION_ERROR",
-                    "healthStatus 값이 올바르지 않습니다. 허용값: 정상, 부상, 응급, 기타");
+                    "Invalid healthStatus value.");
         }
     }
 

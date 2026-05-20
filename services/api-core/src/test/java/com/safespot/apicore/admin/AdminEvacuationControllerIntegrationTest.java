@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safespot.apicore.domain.entity.AdminAuditLog;
 import com.safespot.apicore.domain.entity.AppUser;
 import com.safespot.apicore.domain.entity.Shelter;
+import com.safespot.apicore.domain.enums.DisasterType;
+import com.safespot.apicore.domain.enums.HealthStatus;
 import com.safespot.apicore.domain.enums.Role;
 import com.safespot.apicore.repository.AdminAuditLogRepository;
 import com.safespot.apicore.repository.AppUserRepository;
@@ -21,13 +23,15 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 
-import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -55,7 +59,7 @@ class AdminEvacuationControllerIntegrationTest {
         AppUser admin = AppUser.builder()
                 .username("admin01")
                 .passwordHash(passwordEncoder.encode("P@ssw0rd!"))
-                .name("관리자")
+                .name("admin")
                 .role(Role.ADMIN)
                 .active(true)
                 .createdAt(OffsetDateTime.now())
@@ -64,10 +68,10 @@ class AdminEvacuationControllerIntegrationTest {
         appUserRepository.save(admin);
 
         Shelter shelter = Shelter.builder()
-                .name("테스트대피소")
-                .shelterType("민방위대피소")
-                .disasterType(com.safespot.apicore.domain.enums.DisasterType.EARTHQUAKE)
-                .address("서울특별시 마포구")
+                .name("Primary Shelter")
+                .shelterType("indoor")
+                .disasterType(DisasterType.EARTHQUAKE)
+                .address("Seoul")
                 .latitude(BigDecimal.valueOf(37.5687))
                 .longitude(BigDecimal.valueOf(126.9081))
                 .capacity(10)
@@ -77,8 +81,11 @@ class AdminEvacuationControllerIntegrationTest {
         String loginBody = objectMapper.writeValueAsString(
                 Map.of("loginId", "admin01", "password", "P@ssw0rd!"));
         String resp = mockMvc.perform(post("/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON).content(loginBody))
-                .andReturn().getResponse().getContentAsString();
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(loginBody))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
         adminToken = objectMapper.readTree(resp).get("data").get("accessToken").asText();
     }
 
@@ -86,9 +93,9 @@ class AdminEvacuationControllerIntegrationTest {
     void createEntry_success_returns201() throws Exception {
         Map<String, Object> body = Map.of(
                 "shelterId", shelterId,
-                "name", "홍길동",
+                "name", "tester",
                 "phoneNumber", "01012345678",
-                "healthStatus", "정상",
+                "healthStatus", HealthStatus.values()[0].name(),
                 "specialProtectionFlag", false);
 
         mockMvc.perform(post("/admin/evacuation-entries")
@@ -115,48 +122,40 @@ class AdminEvacuationControllerIntegrationTest {
 
     @Test
     void createEntry_overCapacity_allowsEntry() throws Exception {
-        // 재난 상황에서는 정원 초과 시에도 입소 허용
         Shelter smallShelter = Shelter.builder()
-                .name("소규모대피소").shelterType("민방위대피소")
-                .disasterType(com.safespot.apicore.domain.enums.DisasterType.FLOOD)
-                .address("서울").latitude(BigDecimal.valueOf(37.5))
-                .longitude(BigDecimal.valueOf(126.9)).capacity(1).build();
+                .name("Small Shelter")
+                .shelterType("indoor")
+                .disasterType(DisasterType.FLOOD)
+                .address("Seoul")
+                .latitude(BigDecimal.valueOf(37.5))
+                .longitude(BigDecimal.valueOf(126.9))
+                .capacity(1)
+                .build();
         Long smallShelterId = shelterRepository.save(smallShelter).getShelterId();
 
-        // 첫 번째 입소
-        Map<String, Object> body1 = Map.of("shelterId", smallShelterId, "name", "첫번째");
-        mockMvc.perform(post("/admin/evacuation-entries")
-                .header("Authorization", "Bearer " + adminToken)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(body1)))
-                .andExpect(status().isCreated());
+        createEntryForShelter(smallShelterId, "first", false);
 
-        // 두 번째 입소 → 정원 초과여도 허용
-        Map<String, Object> body2 = Map.of("shelterId", smallShelterId, "name", "두번째");
+        Map<String, Object> body = Map.of(
+                "shelterId", smallShelterId,
+                "name", "second",
+                "healthStatus", HealthStatus.values()[0].name());
+
         mockMvc.perform(post("/admin/evacuation-entries")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(body2)))
+                        .content(objectMapper.writeValueAsString(body)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.entryStatus").value("ENTERED"));
     }
 
     @Test
     void exitEntry_success_returns200() throws Exception {
-        // 입소
-        Map<String, Object> createBody = Map.of("shelterId", shelterId, "name", "홍길동");
-        String createResp = mockMvc.perform(post("/admin/evacuation-entries")
-                        .header("Authorization", "Bearer " + adminToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(createBody)))
-                .andReturn().getResponse().getContentAsString();
-        Long entryId = objectMapper.readTree(createResp).get("data").get("entryId").asLong();
+        Long entryId = createEntryForShelter(shelterId, "visitor", false);
 
-        // 퇴소
         mockMvc.perform(post("/admin/evacuation-entries/" + entryId + "/exit")
                         .header("Authorization", "Bearer " + adminToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(Map.of("reason", "자택 복귀"))))
+                        .content(objectMapper.writeValueAsString(Map.of("reason", "done"))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.entryStatus").value("EXITED"))
                 .andExpect(jsonPath("$.data.exitedAt").isNotEmpty());
@@ -164,13 +163,7 @@ class AdminEvacuationControllerIntegrationTest {
 
     @Test
     void exitEntry_alreadyExited_returns409() throws Exception {
-        Map<String, Object> createBody = Map.of("shelterId", shelterId, "name", "홍길동");
-        String createResp = mockMvc.perform(post("/admin/evacuation-entries")
-                        .header("Authorization", "Bearer " + adminToken)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(createBody)))
-                .andReturn().getResponse().getContentAsString();
-        Long entryId = objectMapper.readTree(createResp).get("data").get("entryId").asLong();
+        Long entryId = createEntryForShelter(shelterId, "visitor", false);
 
         mockMvc.perform(post("/admin/evacuation-entries/" + entryId + "/exit")
                 .header("Authorization", "Bearer " + adminToken)
@@ -187,8 +180,69 @@ class AdminEvacuationControllerIntegrationTest {
 
     @Test
     void adminEndpoint_withoutToken_returns401() throws Exception {
-        mockMvc.perform(get("/admin/evacuation-entries?shelterId=" + shelterId))
+        mockMvc.perform(get("/admin/evacuation-entries"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void listEntries_withoutShelterId_returnsPagedResponse() throws Exception {
+        createEntryForShelter(shelterId, "alpha", false);
+
+        mockMvc.perform(get("/admin/evacuation-entries")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("status", "ENTERED")
+                        .param("page", "0")
+                        .param("size", "50"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data.items[0].shelterId").value(shelterId))
+                .andExpect(jsonPath("$.data.items[0].shelterName").value("Primary Shelter"))
+                .andExpect(jsonPath("$.data.page").value(0))
+                .andExpect(jsonPath("$.data.size").value(50))
+                .andExpect(jsonPath("$.data.totalElements").value(1))
+                .andExpect(jsonPath("$.data.totalPages").value(1))
+                .andExpect(jsonPath("$.data.hasNext").value(false));
+    }
+
+    @Test
+    void listEntries_withFilters_appliesShelterKeywordAndSpecialOnly() throws Exception {
+        Shelter secondShelter = Shelter.builder()
+                .name("Second Shelter")
+                .shelterType("indoor")
+                .disasterType(DisasterType.FLOOD)
+                .address("Busan")
+                .latitude(BigDecimal.valueOf(35.1))
+                .longitude(BigDecimal.valueOf(129.0))
+                .capacity(10)
+                .build();
+        Long secondShelterId = shelterRepository.save(secondShelter).getShelterId();
+
+        createEntryForShelter(shelterId, "target-user", true);
+        createEntryForShelter(secondShelterId, "other-user", false);
+
+        mockMvc.perform(get("/admin/evacuation-entries")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("shelterId", shelterId.toString())
+                        .param("status", "ENTERED")
+                        .param("keyword", "target")
+                        .param("specialOnly", "true")
+                        .param("page", "0")
+                        .param("size", "50"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.items.length()").value(1))
+                .andExpect(jsonPath("$.data.items[0].visitorName").value("target-user"))
+                .andExpect(jsonPath("$.data.items[0].shelterId").value(shelterId))
+                .andExpect(jsonPath("$.data.items[0].detail.specialProtectionFlag").value(true));
+    }
+
+    @Test
+    void listEntries_invalidStatus_returns400() throws Exception {
+        mockMvc.perform(get("/admin/evacuation-entries")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .param("status", "WRONG"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
     }
 
     @Test
@@ -196,7 +250,7 @@ class AdminEvacuationControllerIntegrationTest {
         Map<String, Object> body = Map.of(
                 "capacityTotal", 20,
                 "shelterStatus", "OPERATING",
-                "reason", "현장 재점검");
+                "reason", "inspection");
 
         mockMvc.perform(patch("/admin/shelters/" + shelterId)
                         .header("Authorization", "Bearer " + adminToken)
@@ -222,8 +276,8 @@ class AdminEvacuationControllerIntegrationTest {
     void createEntry_invalidHealthStatus_returns400() throws Exception {
         Map<String, Object> body = Map.of(
                 "shelterId", shelterId,
-                "name", "홍길동",
-                "healthStatus", "당뇨");
+                "name", "tester",
+                "healthStatus", "invalid_value");
 
         mockMvc.perform(post("/admin/evacuation-entries")
                         .header("Authorization", "Bearer " + adminToken)
@@ -238,8 +292,8 @@ class AdminEvacuationControllerIntegrationTest {
     void createEntry_validHealthStatus_returns201() throws Exception {
         Map<String, Object> body = Map.of(
                 "shelterId", shelterId,
-                "name", "홍길동",
-                "healthStatus", "응급");
+                "name", "tester",
+                "healthStatus", HealthStatus.values()[0].name());
 
         mockMvc.perform(post("/admin/evacuation-entries")
                         .header("Authorization", "Bearer " + adminToken)
@@ -249,15 +303,13 @@ class AdminEvacuationControllerIntegrationTest {
                 .andExpect(jsonPath("$.data.entryStatus").value("ENTERED"));
     }
 
-    // Regression: payload_after (jsonb) must bind as JSON type, not varchar.
-    // SQLState 42804 occurred when Hibernate bound String as character varying to a jsonb column.
     @Test
     void createEntry_auditLog_persistsJsonbPayloadWithoutTypeError() throws Exception {
         Map<String, Object> body = Map.of(
                 "shelterId", shelterId,
                 "name", "jsonb test",
                 "phoneNumber", "01099998888",
-                "healthStatus", "정상",
+                "healthStatus", HealthStatus.values()[0].name(),
                 "specialProtectionFlag", false);
 
         mockMvc.perform(post("/admin/evacuation-entries")
@@ -269,10 +321,28 @@ class AdminEvacuationControllerIntegrationTest {
         List<AdminAuditLog> logs = auditLogRepository.findAll();
         assertThat(logs).isNotEmpty();
         AdminAuditLog log = logs.get(0);
-        // payload_after must be non-null JSON string (jsonb binding succeeded)
         assertThat(log.getPayloadAfter()).isNotNull();
         assertThat(log.getPayloadAfter()).contains("entryId");
-        // payload_before is null for create — null jsonb must also be accepted
         assertThat(log.getPayloadBefore()).isNull();
+    }
+
+    private Long createEntryForShelter(Long targetShelterId, String name, boolean specialProtectionFlag) throws Exception {
+        Map<String, Object> body = Map.of(
+                "shelterId", targetShelterId,
+                "name", name,
+                "phoneNumber", "01012345678",
+                "healthStatus", HealthStatus.values()[0].name(),
+                "specialProtectionFlag", specialProtectionFlag);
+
+        String response = mockMvc.perform(post("/admin/evacuation-entries")
+                        .header("Authorization", "Bearer " + adminToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isCreated())
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        return objectMapper.readTree(response).get("data").get("entryId").asLong();
     }
 }
