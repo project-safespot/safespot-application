@@ -2,7 +2,7 @@ package com.safespot.apipublicread.controller;
 
 import com.safespot.apipublicread.cache.RegionToGridResolver;
 import com.safespot.apipublicread.dto.ApiResponse;
-import com.safespot.apipublicread.dto.DisasterAlertItem;
+import com.safespot.apipublicread.dto.DisasterAlertPageResponse;
 import com.safespot.apipublicread.dto.DisasterLatestDto;
 import com.safespot.apipublicread.exception.ApiException;
 import com.safespot.apipublicread.exception.ErrorCode;
@@ -11,9 +11,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
@@ -24,9 +21,12 @@ public class DisasterAlertController {
     private final RegionToGridResolver regionToGridResolver;
 
     @GetMapping("/disaster-alerts")
-    public ResponseEntity<ApiResponse<Map<String, List<DisasterAlertItem>>>> getAlerts(
+    public ResponseEntity<ApiResponse<DisasterAlertPageResponse>> getAlerts(
             @RequestParam(required = false) String region,
-            @RequestParam(required = false) String disasterType
+            @RequestParam(required = false) String disasterType,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size
     ) {
         if (disasterType != null && !isValidDisasterType(disasterType)) {
             throw new ApiException(ErrorCode.VALIDATION_ERROR, "disasterType 값이 올바르지 않습니다.");
@@ -35,8 +35,9 @@ public class DisasterAlertController {
             throw new ApiException(ErrorCode.UNSUPPORTED_REGION, "현재 서울 지역만 지원합니다.");
         }
 
-        List<DisasterAlertItem> items = disasterAlertReadService.findAlerts(region, disasterType);
-        return ResponseEntity.ok(ApiResponse.ok(Map.of("items", items)));
+        DisasterAlertPageResponse response =
+                disasterAlertReadService.findAlertsPage(region, disasterType, keyword, page, size);
+        return ResponseEntity.ok(ApiResponse.ok(response));
     }
 
     @GetMapping("/disasters/{disasterType}/latest")

@@ -1,5 +1,6 @@
 package com.safespot.apicore.admin.controller;
 
+import com.safespot.apicore.admin.dto.AdminShelterPageResponse;
 import com.safespot.apicore.admin.dto.UpdateShelterRequest;
 import com.safespot.apicore.admin.dto.UpdateShelterResponse;
 import com.safespot.apicore.admin.service.ShelterAdminService;
@@ -20,6 +21,19 @@ public class AdminShelterController {
 
     private final ShelterAdminService shelterAdminService;
     private final ApiCoreMetrics metrics;
+
+    @GetMapping
+    public ResponseEntity<ApiResponse<AdminShelterPageResponse>> listShelters(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String status,
+            @AuthenticationPrincipal UserPrincipal principal) {
+        AdminShelterPageResponse response =
+                shelterAdminService.listShelters(page, size, keyword, status);
+        metrics.incAdminApiCall("GET", "/admin/shelters", "200");
+        return ResponseEntity.ok(ApiResponse.ok(response));
+    }
 
     @PatchMapping("/{shelterId}")
     public ResponseEntity<ApiResponse<UpdateShelterResponse>> updateShelter(

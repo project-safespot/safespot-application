@@ -11,6 +11,7 @@ import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.domain.DisasterAlert;
 import com.safespot.apipublicread.domain.DisasterAlertDetail;
 import com.safespot.apipublicread.dto.DisasterAlertItem;
+import com.safespot.apipublicread.dto.DisasterAlertPageResponse;
 import com.safespot.apipublicread.dto.DisasterLatestDto;
 import com.safespot.apipublicread.dto.cache.DisasterDetailCacheDto;
 import com.safespot.apipublicread.dto.cache.DisasterMessageCacheDto;
@@ -20,6 +21,7 @@ import com.safespot.apipublicread.exception.ApiException;
 import com.safespot.apipublicread.exception.ErrorCode;
 import com.safespot.apipublicread.repository.DisasterAlertRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -74,6 +76,31 @@ public class DisasterAlertReadService {
                 "list:seoul",
                 () -> loadAlertsFromRds(cached.fallbackReason())
         ), region, disasterType).stream().map(this::toItem).toList();
+    }
+
+    public DisasterAlertPageResponse findAlertsPage(
+            String region,
+            String disasterType,
+            String keyword,
+            int page,
+            int size
+    ) {
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        String normalizedKeyword = keyword != null && !keyword.isBlank() ? keyword.trim() : null;
+        PageRequest pageable = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "issuedAt"));
+
+        Page<DisasterAlert> result =
+                disasterAlertRepository.searchAlerts(region, disasterType, normalizedKeyword, pageable);
+
+        return DisasterAlertPageResponse.builder()
+                .items(result.getContent().stream().map(this::toItem).toList())
+                .page(result.getNumber())
+                .size(result.getSize())
+                .totalElements(result.getTotalElements())
+                .totalPages(result.getTotalPages())
+                .hasNext(result.hasNext())
+                .build();
     }
 
     public DisasterLatestDto findLatest(String disasterType, String region) {

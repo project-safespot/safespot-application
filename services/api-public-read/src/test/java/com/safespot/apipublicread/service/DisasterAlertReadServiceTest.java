@@ -9,6 +9,7 @@ import com.safespot.apipublicread.cache.RedisReadCache;
 import com.safespot.apipublicread.cache.SuppressWindowService;
 import com.safespot.apipublicread.domain.DisasterAlert;
 import com.safespot.apipublicread.dto.DisasterAlertItem;
+import com.safespot.apipublicread.dto.DisasterAlertPageResponse;
 import com.safespot.apipublicread.dto.DisasterLatestDto;
 import com.safespot.apipublicread.dto.cache.DisasterDetailCacheDto;
 import com.safespot.apipublicread.dto.cache.DisasterMessageCacheDto;
@@ -24,6 +25,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 
@@ -146,6 +148,25 @@ class DisasterAlertReadServiceTest {
         disasterAlertReadService.findAlerts(null, null);
 
         verify(cacheRegenerationPublisher, never()).publish(anyString(), any(), anyString());
+    }
+
+    @Test
+    void findAlertsPage_queriesRepositoryWithPagingAndKeyword() {
+        DisasterAlert alert = stubAlert(77L, "FLOOD");
+        PageRequest expectedPage = PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "issuedAt"));
+        when(disasterAlertRepository.searchAlerts("seoul", "FLOOD", "호우", expectedPage))
+                .thenReturn(new PageImpl<>(List.of(alert), expectedPage, 1));
+
+        DisasterAlertPageResponse result =
+                disasterAlertReadService.findAlertsPage("seoul", "FLOOD", "호우", 0, 20);
+
+        assertThat(result.getItems()).hasSize(1);
+        assertThat(result.getPage()).isEqualTo(0);
+        assertThat(result.getSize()).isEqualTo(20);
+        assertThat(result.getTotalElements()).isEqualTo(1);
+        assertThat(result.getTotalPages()).isEqualTo(1);
+        assertThat(result.isHasNext()).isFalse();
+        verify(disasterAlertRepository).searchAlerts("seoul", "FLOOD", "호우", expectedPage);
     }
 
     @Test

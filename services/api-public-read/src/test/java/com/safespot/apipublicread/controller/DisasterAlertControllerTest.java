@@ -1,6 +1,7 @@
 package com.safespot.apipublicread.controller;
 
 import com.safespot.apipublicread.cache.RegionToGridResolver;
+import com.safespot.apipublicread.dto.DisasterAlertPageResponse;
 import com.safespot.apipublicread.dto.DisasterAlertItem;
 import com.safespot.apipublicread.dto.DisasterLatestDto;
 import com.safespot.apipublicread.exception.ApiException;
@@ -41,12 +42,22 @@ class DisasterAlertControllerTest {
 
     @Test
     void getAlerts_success_emptyList() throws Exception {
-        when(disasterAlertReadService.findAlerts(any(), any())).thenReturn(List.of());
+        when(disasterAlertReadService.findAlertsPage(any(), any(), any(), anyInt(), anyInt()))
+                .thenReturn(DisasterAlertPageResponse.builder()
+                        .items(List.of())
+                        .page(0)
+                        .size(20)
+                        .totalElements(0)
+                        .totalPages(0)
+                        .hasNext(false)
+                        .build());
 
         mockMvc.perform(get("/disaster-alerts"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.items").isArray());
+                .andExpect(jsonPath("$.data.items").isArray())
+                .andExpect(jsonPath("$.data.page").value(0))
+                .andExpect(jsonPath("$.data.size").value(20));
     }
 
     @Test
@@ -55,13 +66,22 @@ class DisasterAlertControllerTest {
                 55L, "FLOOD", "서울특별시", "주의",
                 "한강 수위 상승", "2026-04-14T08:55:00+09:00", null
         );
-        when(disasterAlertReadService.findAlerts("서울특별시", "FLOOD")).thenReturn(List.of(item));
+        when(disasterAlertReadService.findAlertsPage("서울특별시", "FLOOD", null, 0, 20))
+                .thenReturn(DisasterAlertPageResponse.builder()
+                        .items(List.of(item))
+                        .page(0)
+                        .size(20)
+                        .totalElements(1)
+                        .totalPages(1)
+                        .hasNext(false)
+                        .build());
 
         mockMvc.perform(get("/disaster-alerts")
                         .param("region", "서울특별시")
                         .param("disasterType", "FLOOD"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.items[0].alertId").value(55));
+                .andExpect(jsonPath("$.data.items[0].alertId").value(55))
+                .andExpect(jsonPath("$.data.totalElements").value(1));
     }
 
     @Test

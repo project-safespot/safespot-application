@@ -1,6 +1,7 @@
 package com.safespot.apipublicread.repository;
 
 import com.safespot.apipublicread.domain.DisasterAlert;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -19,6 +20,23 @@ public interface DisasterAlertRepository extends JpaRepository<DisasterAlert, Lo
     List<DisasterAlert> findAlerts(
             @Param("region") String region,
             @Param("disasterType") String disasterType,
+            Pageable pageable
+    );
+
+    @Query("""
+            SELECT a FROM DisasterAlert a
+            WHERE (:region IS NULL OR a.region = :region)
+              AND (:disasterType IS NULL OR a.disasterType = :disasterType)
+              AND (
+                  :keyword IS NULL OR :keyword = ''
+                  OR LOWER(a.message) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                  OR LOWER(a.region) LIKE LOWER(CONCAT('%', :keyword, '%'))
+              )
+            """)
+    Page<DisasterAlert> searchAlerts(
+            @Param("region") String region,
+            @Param("disasterType") String disasterType,
+            @Param("keyword") String keyword,
             Pageable pageable
     );
 
