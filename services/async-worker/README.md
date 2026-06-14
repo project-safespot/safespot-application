@@ -1,166 +1,106 @@
 # async-worker
 
-SQS consumer 기반 Redis cache refresh / Read Model worker.
+SQS 이벤트를 소비해 Redis 캐시와 read model을 재구성하는 Lambda worker입니다. 이 서비스는 RDS를 canonical source of truth로 보고, Redis에는 공개 조회용 파생 데이터를 다시 써 넣습니다.
 
----
+## 역할
 
-## 구조
+- `EvacuationEntryCreated`, `EvacuationEntryExited`, `EvacuationEntryUpdated`, `ShelterUpdated` 처리
+- `EnvironmentDataCollected`, `DisasterDataCollected` 처리
+- `CacheRegenerationRequested` 처리
+- warm-up 계열 이벤트 처리
 
-단일 Lambda에서 queue 기반으로 분기 처리한다.
+`api-public-read`는 재생성 요청만 발행하고, 실제 Redis rebuild는 이 서비스가 담당합니다.
 
-| Spring Profile | SQS Queue | 처리 Event |
-|---|---|---|
-| `async-worker` | `safespot-{env}-async-worker-sqs-cache-refresh` | `EvacuationEntryCreated`, `EvacuationEntryExited`, `EvacuationEntryUpdated`, `ShelterUpdated`, `CacheRegenerationRequested` (shelter/env keys) |
-| `async-worker` | `safespot-{env}-async-worker-sqs-readmodel-refresh` | `DisasterDataCollected`, `CacheRegenerationRequested` (disaster keys) |
-| `async-worker` | `safespot-{env}-async-worker-sqs-environment-cache-refresh` | `EnvironmentDataCollected`, `CacheRegenerationRequested` (environment keys) |
+## 실행 구조
 
-`CacheRegenerationRequested`는 cacheKey prefix 기준으로 내부 분기 처리한다. Lambda 함수는 3개 queue를 모두 event source mapping으로 구독한다.
+- Lambda 진입점은 `AsyncWorkerHandler`입니다.
+- 시작 시 Spring 컨텍스트를 `async-worker` 프로필로 초기화합니다.
+- 실제 배치 처리는 `SqsBatchProcessor`가 수행합니다.
+- `SqsBatchProcessor`는 envelope 파싱, idempotency 획득, event dispatch, partial batch failure 반환까지 담당합니다.
 
----
+현재 코드에는 `cache-worker`, `readmodel-worker` 프로필도 남아 있지만, Lambda 진입점에서 활성화하는 기본 경로는 `async-worker` 프로필입니다.
 
-## 환경 변수
+## 이벤트 책임 분리
 
-| 변수 | 설명 | 예시 |
-|------|------|------|
-| `DB_HOST` | PostgreSQL 호스트 | `safespot-dev-data-rds-xxx.cluster.ap-northeast-2.rds.amazonaws.com` |
-| `DB_PORT` | PostgreSQL 포트 | `5432` |
-| `DB_NAME` | DB 이름 | `safespot` |
-| `DB_USER` | DB 사용자 | `safespot` |
-| `DB_PASSWORD` | DB 비밀번호 | — |
-| `REDIS_HOST` | Redis 호스트 | `safespot-dev-data-redis-main.xxx.0001.apn2.cache.amazonaws.com` |
-| `REDIS_PORT` | Redis 포트 (기본값 6379) | `6379` |
+`AsyncWorkerConfig`는 아래 handler들을 하나의 dispatcher에 등록합니다.
 
----
+- shelter/cache 계열
+  `EvacuationEntry*`, `ShelterUpdated`, `CacheRegenerationRequested`(shelter 계열)
+- environment 계열
+  `EnvironmentDataCollected`, `CacheRegenerationRequested`(environment 계열)
+- disaster read model 계열
+  `DisasterDataCollected`, `CacheRegenerationRequested`(disaster 계열)
+- warm-up 계열
+  `ShelterStatusWarmupRequested`, `DisasterReadModelWarmupRequested`
 
-## 로컬 테스트
+즉, 현재 기본 경로에서는 cache worker와 readmodel worker 책임이 `async-worker` 프로필 아래 한 Lambda 진입점에 통합되어 있습니다.
 
-### 전체 테스트 실행
+## cache rebuild / read model 갱신 책임
 
-```bash
-./gradlew :services:async-worker:test
-```
+### Shelter 계열
 
-### 특정 클래스만 실행
+- `ShelterStatusService`
+  RDS의 shelter 정보와 현재 입장 인원을 읽어 `shelter:status:{shelterId}`를 다시 계산합니다.
+- `ShelterMapReadModelService`
+  shelter map item, GEO index, map tile Redis key를 재구성합니다.
+  map tile과 GEO index는 temp key 생성 후 rename swap 방식으로 교체합니다.
 
-```bash
-./gradlew :services:async-worker:test --tests "com.safespot.asyncworker.consumer.*"
-./gradlew :services:async-worker:test --tests "com.safespot.asyncworker.service.environment.*"
-./gradlew :services:async-worker:test --tests "com.safespot.asyncworker.service.disaster.*"
-./gradlew :services:async-worker:test --tests "com.safespot.asyncworker.redis.RedisCacheWriterTest"
-```
+### Environment 계열
 
-### 컨텍스트 로드 테스트 (Spring 빈 충돌 검증)
+- `EnvironmentCacheService`
+  최신 weather / air quality 로그를 읽어 `environment:*` 캐시를 다시 씁니다.
+- `WEATHER_ALERT`는 MVP 스키마에 전용 log table이 없어 `no_data` placeholder를 기록합니다.
 
-```bash
-./gradlew :services:async-worker:test --tests "com.safespot.asyncworker.context.*"
-```
+### Disaster 계열
 
-### 테스트 리포트 확인
+- `DisasterReadModelService`
+  RDS의 canonical 재난 데이터를 읽어 `detail -> recent -> core -> list` 순서로 Redis read model을 재생성합니다.
+- `CacheRegenerationRequested`가 `disaster:detail:{alertId}`에 도달하면 개별 detail rebuild를 수행합니다.
 
-```bash
-open services/async-worker/build/reports/tests/test/index.html
-```
+## api-public-read와의 책임 분리
 
----
+- `api-public-read`
+  Redis-first read, miss/down 감지, 제한적 RDS fallback, regeneration 이벤트 발행
+- `async-worker`
+  SQS 소비, idempotency, RDS 조회, Redis write, read model rebuild
 
-## Lambda handler
+따라서 read path에 SQS를 삽입한 구조가 아니라, 읽기 요청과 비동기 재생성 책임을 분리한 구조입니다.
 
-Lambda 엔트리포인트는 단일 클래스다.
+## RDS / Redis 관계
 
-- `com.safespot.asyncworker.handler.AsyncWorkerHandler`
+- RDS는 source of truth입니다.
+- Redis는 공개 조회용 파생 데이터 저장소입니다.
+- worker는 RDS repository를 읽고 `RedisCacheWriter`로 Redis를 갱신합니다.
+- `api-public-read`의 direct RDS fallback은 degraded path이며, 정상적인 steady-state read path는 Redis를 전제로 합니다.
 
-`RequestHandler<SQSEvent, SQSBatchResponse>`를 구현하고, Spring 컨텍스트를 "async-worker" 프로필로 초기화한 뒤 `SqsBatchProcessor`로 SQS batch를 전달한다.
+## Idempotency와 실패 처리
 
-기존 `CacheWorkerHandler`와 `ReadModelWorkerHandler`는 profile-specific 내부 서비스로만 유지된다.
+- `RedisIdempotencyService`는 Redis `SETNX` 기반으로 `PROCESSING` / `COMPLETED` 상태를 관리합니다.
+- `SqsBatchProcessor`는 처리 실패 메시지에 대해 `BatchItemFailure`를 반환해 SQS 재시도를 유도합니다.
+- envelope 파싱 실패처럼 영구 실패로 분류된 경우에는 DLQ publish 후 ACK 처리합니다.
+- `METRICS_NAMESPACE`가 설정되면 `AsyncWorkerHandler`가 CloudWatch meter registry를 사용하고, 종료 시 flush를 수행합니다.
 
----
+## 관련 metric
 
-## 빌드
+`WorkerMetrics`에서 아래 계열 메트릭이 확인됩니다.
 
-```bash
-./gradlew :services:async-worker:build :services:async-worker:lambdaPackage
-```
+- `worker.processed`
+- `worker.success`
+- `worker.failures`
+- `worker.processing.duration`
+- `worker.idempotency.skipped`
+- `worker.redis.write`
+- `worker.batch.size`
+- `worker.partial.batch.failure`
+- `worker.dlq.publish`
+- `cache.regeneration.requested`
+- `cache.regeneration.completed`
+- `cache.regeneration.failed`
+- `redis.payload.size.bytes`
 
-Lambda ZIP 위치: `services/async-worker/build/distributions/async-worker-lambda-*.zip`
+## Notes for reproduction
 
-GitHub Actions 배포는 이 ZIP을 AWS Lambda에 직접 업로드하는 방식으로 구성할 수 있다.
-ECR은 container image Lambda로 바꿀 때만 필요하다.
-
-ZIP 구조:
-
-- `lib/async-worker-*.jar`
-- `lib/*.jar` runtime dependency
-
----
-
-## 핵심 설계 원칙
-
-- **RDS = source of truth** — Redis는 파생 데이터. `api-public-read`의 direct RDS fallback은 degraded-mode 전용이며 target hot path가 아님
-- **SQS at-least-once** — 중복 수신을 전제로 설계. idempotency key로 no-op 처리
-- **실패 메시지 보존** — Redis 실패 / 파싱 실패 / 검증 실패 시 `BatchItemFailure` 반환 → SQS 재시도 → DLQ
-- **성공 ACK 조건** — 정상 처리 완료 후에만 성공 반환. 절대 silent ignore 금지
-
----
-
-## 현재 상태 (2026-04-22 기준)
-
-### 해결된 이슈
-
-| 이슈 | 해결 방법 |
-|------|----------|
-| Redis 실패 삼킴 | `RedisCacheWriter` 예외 전파 → `RedisCacheException` / `EventProcessingException` → `BatchItemFailure` |
-| idempotency null 응답 무시 | null SETNX 응답 → `RedisCacheException` 즉시 throw |
-| unsupported collectionType silent ignore | `EnvironmentCacheService.rebuild()` default branch → `EventProcessingException` |
-| worker 빈 그래프 혼재 | `@Profile` 분리 + `SpringApplicationBuilder.profiles()` → 프로필별 독립 컨텍스트 |
-| payload 무검증 처리 | `EnvironmentCacheService` / `DisasterReadModelService` `validate()` 추가 |
-| Java 버전 미고정 | 루트 `build.gradle` Java 21 toolchain 적용 |
-| packages 모듈 오선언 | `settings.gradle`에서 packages 제거, 문서 정정 |
-| 문서 TTL 불일치 | env TTL 60분 → 120분 전체 문서 통일 |
-
-### 테스트 커버리지
-
-| 대상 | 클래스 수 | 테스트 수 |
-|------|----------|---------|
-| SQS 처리 (배치 실패 / 재시도) | 1 | 8 |
-| 프로필 격리 (빈 그래프 분리) | 2 | 6 |
-| Envelope 파싱 | 1 | 6 |
-| Handler (payload / 예외 전파) | 6 | 17 |
-| Redis (SET/DEL 실패) | 1 | 4 |
-| Idempotency | 1 | 4 |
-| Service (환경/재난/대피소) | 3 | 15 |
-| CongestionLevel | 1 | 9 |
-| **합계** | **15** | **69** |
-
-### 검증 한계 및 남은 작업
-
-- 컨텍스트 테스트는 `DataSource` / `StringRedisTemplate`을 mock으로 대체한다.
-  실제 JDBC 연결 안정성과 Redis 커넥션 풀 동작은 인프라가 있는 환경에서 별도 확인 필요.
-- Lambda 핸들러 cold-start / SnapStart 동작은 AWS 환경에서만 검증 가능.
-- `gradlew test` 최종 확인은 Java 21 설치된 환경에서 직접 실행 필요.
-
----
-
-## Redis TTL 정책
-
-| 키 패턴 | TTL | 비고 |
-|---------|-----|------|
-| `shelter:status:{shelterId}` | 30초 | 재난 상황 즉각 반영 |
-| `disaster:messages:recent:seoul` | 5분 | recent read model |
-| `disaster:message:core:seoul` | 5분 | core read model |
-| `disaster:messages:list:seoul` | 5분 | Top 50 list read model |
-| `disaster:detail:{alertId}` | 60분 | detail read model |
-| `environment:weather:seoul` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
-| `environment:air-quality:seoul` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
-| `environment:weather-alert:seoul` | 120분 | fallback 안정성 기준 (데이터 신선도 아님) |
-
-## 재난 read model 재생성 규칙
-
-- 재생성 순서는 `detail -> recent -> core -> list`를 따른다.
-- worker는 정규화된 DB 데이터만 사용한다.
-- raw 메시지를 worker에서 다시 분류하지 않는다.
-- `isInScope=false` 메시지는 public Redis read model에 포함하지 않는다.
-- retired key인 `disaster:active`, `disaster:latest:*`, `disaster:alert:list`는 재생성하지 않는다.
-
-> env TTL은 외부 API 수집 주기와 무관하다.
-> 수집 완료 이벤트(EnvironmentDataCollected) 수신 즉시 overwrite로 갱신된다.
-> 120분 TTL은 Redis 장애 또는 수집 지연 시 기존 캐시 데이터를 유지하기 위한 안전망이다.
+- 필수 환경 변수: `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `REDIS_HOST`
+- 선택 환경 변수: `REDIS_PORT`, `METRICS_NAMESPACE`
+- 실제 재현에는 Lambda 함수, SQS queue, event source mapping, Redis/RDS 인프라를 별도로 다시 구성해야 합니다.
+- 프로젝트 종료 후 운영 리소스는 정리되었으므로, README의 구조 설명은 현재 운영 상태가 아니라 구현 근거 문서로 읽어야 합니다.
